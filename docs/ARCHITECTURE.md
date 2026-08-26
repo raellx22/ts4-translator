@@ -141,10 +141,11 @@ uma vez antes de ativar a janela. `App.Services` (um service locator estático �
   `IPackageService`, e lista projetos recentes via `IProjectService`.
 - **About**/**Settings** — ainda os placeholders do template, sem lógica.
 
-**Executado e clicado de verdade** (DEC-010) — Mica, tema, navegação e o layout da Home confirmados
-com screenshots reais. O fluxo de importação em si está bloqueado por um `COMException 0x80004005`
-do `FileOpenPicker`, causa ainda não confirmada (suspeita: sessão de ferramentas elevada). Ver
-`docs/HANDOFF.md` para o diagnóstico e o próximo passo exato.
+**Executado e clicado de verdade, fluxo completo confirmado** (DEC-010) — Mica, tema, navegação, e a
+importação de ponta a ponta (seletor de arquivo → contagem de STBL → criação do projeto → lista de
+recentes) confirmados com screenshots reais. A única pegadinha: testar isso exige rodar o app como um
+pacote MSIX instalado, não via `dotnet run` (que falha ao ativar o seletor de arquivos) — ver
+`docs/BUILD.md` para o procedimento.
 
 ## Convenções de qualidade
 

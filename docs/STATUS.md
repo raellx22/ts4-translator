@@ -9,12 +9,13 @@ com o pipeline inteiro pronto (TokenProtector, TranslationValidator, BatchBuilde
 TranslationOrchestrator); Fase 6 (Providers) com o primeiro provider real pronto
 (`OpenAICompatibleProvider`, nunca testado contra um servidor real de verdade — só contra HTTP falso
 em teste); Fase 7 (Translation Memory) com exact-match pronto; Project System (seção 33) com o núcleo
-pronto (`IProjectService`); **primeira tela de produto real escrita e, pela primeira vez, executada de
-verdade** (Home: importar `.package`, criar projeto, listar recentes). Ver DEC-010 para o relato
-completo: a shell WinUI, Mica, tema, navegação e o layout da Home foram confirmados funcionando com
-screenshots reais; um bug real foi encontrado e corrigido (exceção engolida pelo `AsyncRelayCommand`);
-e o fluxo de importação em si está **bloqueado** por um `COMException 0x80004005` do `FileOpenPicker`
-ainda não diagnosticado com certeza (suspeita: sessão de ferramentas rodando como Administrador).
+pronto (`IProjectService`); **primeira tela de produto real escrita, executada de verdade e com o
+fluxo completo confirmado funcionando ponta a ponta** (Home: importar `.package` → contar STBLs →
+criar projeto → aparecer na lista de recentes). Ver DEC-010: a shell WinUI, Mica, tema, navegação, e
+agora o próprio fluxo de importação, foram confirmados com screenshots reais rodando o app como um
+pacote MSIX instalado (não via `dotnet run` — ver `docs/BUILD.md` para o procedimento). Dois bugs reais
+foram encontrados e corrigidos nesse processo: uma exceção engolida pelo `AsyncRelayCommand`, e o
+próprio bloqueio do `FileOpenPicker` (não era bug de código — era o modo de lançamento via `dotnet run`).
 Ver `docs/ROADMAP.md` para o detalhamento completo por fase.
 
 ## Completed
@@ -46,15 +47,16 @@ Ver `docs/ROADMAP.md` para o detalhamento completo por fase.
 - `HomePage`/`HomePageViewModel` (App) — primeira tela de produto: importar `.package` via
   `IPathPickerService`, criar `TranslationProject`, contar STBLs via `IPackageService`, listar
   projetos recentes. Resolvido por service locator estático (`App.Services`), não injeção de
-  construtor — `Frame.Navigate(Type)` do WinUI não suporta isso nativamente (DEC-009). **Executada de
-  verdade nesta sessão** (não só compilada) — shell, Mica, tema, navegação e layout confirmados com
-  screenshots reais; o clique em "Importar packages" ainda não termina com sucesso (ver Blocked/DEC-010).
+  construtor — `Frame.Navigate(Type)` do WinUI não suporta isso nativamente (DEC-009). **Fluxo
+  completo confirmado funcionando de ponta a ponta** rodando o app como MSIX instalado: seletor de
+  arquivo abre, arquivo `.package` sintético selecionado, STBL contada corretamente, projeto criado e
+  exibido na lista de recentes — com screenshot real (ver DEC-010, `docs/BUILD.md`).
 - `AppDataPaths` (Infrastructure) resolvendo `%LOCALAPPDATA%\TS4Translator\{Data,Logs,Cache,Models}`.
 - Composition root em `App.xaml.cs`: `ServiceCollection` com `AddSims4Services()` +
   `AddTranslationServices()` + `AddPersistenceServices(...)`, migration aplicada no `OnLaunched`.
 - Shell WinUI (NavigationView, Mica, título estendido) a partir do template `winui-navview` — sem
   telas de produto ainda.
-- Toda decisão relevante registrada em `docs/DECISIONS.md` (DEC-001 a DEC-007).
+- Toda decisão relevante registrada em `docs/DECISIONS.md` (DEC-001 a DEC-010).
 
 ## In progress
 
@@ -63,17 +65,14 @@ e testado antes de passar para o próximo item.
 
 ## Blocked
 
-1. **`HomePage` → "Importar packages" → `FileOpenPicker`**: falha consistentemente com
-   `COMException (0x80004005) E_FAIL`, sem mensagem. Ver DEC-010 para o diagnóstico completo. Suspeita
-   forte, não confirmada: a sessão de ferramentas usada para desenvolver roda como Administrador
-   (`TokenElevation = 1` confirmado), e há relatos públicos do WindowsAppSDK do mesmo HRESULT em apps
-   elevados sem a capability `allowElevation` declarada. Uma tentativa de des-elevar o processo via
-   `Shell.Application.ShellExecute` não funcionou (processo filho continuou elevado). **Não bloqueia o
-   build nem os testes automatizados** — bloqueia apenas verificar visualmente que o fluxo de
-   importação funciona ponta a ponta. Próximo passo exato em `docs/HANDOFF.md`.
-2. Formato exato do prompt esperado por `nvidia/riva-translate-4b-instruct-v2` — duas fontes
+Nada bloqueado por motivo interno ao app no momento. O bloqueio de verificação do `FileOpenPicker`
+documentado em versões anteriores deste arquivo foi resolvido — não era bug de código, era o modo de
+lançamento via `dotnet run` (ver DEC-010, `docs/BUILD.md`). Dois itens têm **incerteza de fato
+pendente de verificação externa**:
+
+1. Formato exato do prompt esperado por `nvidia/riva-translate-4b-instruct-v2` — duas fontes
    discordam (playground ao vivo vs. NGC catalog). Precisa de uma API key NVIDIA real para testar.
-3. Nenhuma receita testada de empacotar Argos Translate sem exigir Python do usuário — vai exigir
+2. Nenhuma receita testada de empacotar Argos Translate sem exigir Python do usuário — vai exigir
    prototipagem própria (ver Fase 4 no roadmap) antes de comprometer a arquitetura.
 
 ## Known issues
@@ -94,41 +93,26 @@ e testado antes de passar para o próximo item.
 
 ## Tests currently failing
 
-Nenhum. 81 testes passando (`dotnet test TS4Translator.sln --filter "FullyQualifiedName!~TS4Translator.App"`).
-O projeto `TS4Translator.App` não tem testes automatizados de UI ainda (não há framework de UI test
-configurado) e não foi executado visualmente nesta sessão — sem acesso a um desktop Windows interativo
-neste ambiente de execução, o build foi validado apenas por `dotnet build`, não por rodar a janela.
+Nenhum. 81 testes automatizados passando (`dotnet test TS4Translator.sln --filter "FullyQualifiedName!~TS4Translator.App"`).
+`TS4Translator.App` não tem testes automatizados de UI (não há framework de UI test configurado), mas
+o fluxo principal da `HomePage` foi verificado manualmente com sucesso, rodando o app de verdade —
+ver DEC-010.
 
 ## Commands to build
 
-```powershell
-dotnet restore TS4Translator.sln
-dotnet build TS4Translator.sln --configuration Release -p:Platform=x64
-```
-
-## Commands to test
-
-```powershell
-dotnet test TS4Translator.sln --configuration Release --no-build -p:Platform=x64
-```
-
-(Em Debug, sem `--no-build`, funciona igual — `-p:Platform=x64` é necessário por causa do projeto
-WinUI, que não é `AnyCPU`.)
+Ver `docs/BUILD.md` — inclui build/test normais, como rodar via `dotnet run` para desenvolvimento do
+dia a dia, e o procedimento completo (empacotar MSIX, assinar, instalar) necessário para testar
+qualquer fluxo que use `FileOpenPicker` ou outra API mediada por broker do Windows.
 
 ## How to run the application
 
-```powershell
-dotnet run --project src\TS4Translator.App\TS4Translator.App.csproj -p:Platform=x64
-```
-
-Nunca executado interativamente nesta sessão (sem acesso a um desktop Windows no ambiente de execução
-usado para desenvolver). **A próxima sessão com acesso a um desktop Windows real deveria rodar isso
-primeiro**, antes de qualquer outra coisa, para confirmar que a shell WinUI realmente abre.
+Ver `docs/BUILD.md`. Resumo: `dotnet run --project src\TS4Translator.App\TS4Translator.App.csproj -p:Platform=x64`
+para desenvolvimento normal; empacotar como MSIX e instalar para testar o picker de arquivos.
 
 ## Next milestones
 
 Ver "Próximas tarefas concretas" no final de `docs/ROADMAP.md`. Em ordem:
-1. `ITranslationProvider` + provider mock.
-2. `BatchBuilder` + orquestrador Protect→Provider→Restore→Validate→TranslationMemory.
-3. Entidade `Project` (nova migration) + `IProjectService`.
-4. Primeira tela de produto real (importar `.package`, mostrar contagem de strings).
+1. Drag-and-drop de arquivos na `HomePage` (seção 34).
+2. Entidade `StringEntry` (nova migration) — strings extraídas ligadas a um `Project`.
+3. Testar `OpenAICompatibleProvider` contra um LM Studio local de verdade.
+4. Armazenamento seguro de API key (Windows Credential Manager/DPAPI, seção 19).

@@ -285,7 +285,7 @@ próprio — não adicionar isso preventivamente enquanto só uma página precis
 
 ---
 
-## DEC-010 — App rodado e clicado de verdade pela primeira vez; achado real: `AsyncRelayCommand` engole exceções, e o FileOpenPicker falha com E_FAIL neste ambiente
+## DEC-010 — App rodado e clicado de verdade pela primeira vez; dois achados reais: `AsyncRelayCommand` engolia exceções, e `FileOpenPicker` só funciona quando o app roda de um pacote MSIX instalado, não via `dotnet run`
 
 **Contexto:** Depois de escrever a `HomePage` sem nenhuma verificação visual (nenhuma sessão anterior
 tinha acesso a um desktop Windows), esta sessão descobriu que o ambiente de execução **é** um desktop
@@ -312,34 +312,44 @@ real com `SendInput`/`mouse_event`) e ver que nada acontecia. Corrigido movendo 
 para dentro do `try`. Esse bug existiria para qualquer usuário real, não é um artefato do ambiente de
 teste — **corrigido e commitado**.
 
-**Achado não resolvido, documentado para a próxima sessão:** mesmo depois da correção acima, clicar
-"Importar packages" (tanto via automação de acessibilidade quanto via clique de mouse sintético real,
-`SendInput`) produz consistentemente:
+**Segundo achado, causa raiz confirmada (não mais hipótese):** depois da correção acima, clicar
+"Importar packages" ainda produzia, de forma 100% reproduzível — inclusive quando o próprio usuário
+clicou manualmente, sem nenhuma automação envolvida —:
 
 ```
 System.Runtime.InteropServices.COMException (0x80004005): E_FAIL
 ```
 
-lançada de dentro de `FileOpenPicker.PickMultipleFilesAsync()`, sem mensagem nem inner exception.
-Pesquisa (busca na web) encontrou múltiplos relatos do WindowsAppSDK com exatamente esse HRESULT
-associado a **apps rodando em contexto elevado (Administrador)** sem a capability `allowElevation`/
-`requireAdministrator` corretamente declarada — e a sessão de ferramentas usada neste ambiente
-(PowerShell/Bash) **roda como Administrador** (confirmado via token de elevação: `TokenElevation = 1`).
-Uma tentativa de des-elevar o processo filho via `Shell.Application.ShellExecute` (técnica comum para
-COM de shell) **não funcionou** — o processo lançado continuou com `TokenElevation = 1`, então a
-hipótese de elevação **não foi comprovada nem descartada**, só ficou como a explicação mais provável
-sem confirmação definitiva.
+lançada de dentro de `FileOpenPicker` (tanto `PickMultipleFilesAsync` quanto `PickSingleFileAsync` —
+não é específico de seleção múltipla). A primeira hipótese testada foi elevação de privilégios (a
+sessão de ferramentas usada para desenvolver roda como Administrador), mas o **usuário reproduziu o
+mesmo erro clicando manualmente, sem elevação nenhuma** — isso descarta elevação como causa.
 
-**Decisão:** Não tentar "consertar" o picker sem antes confirmar a causa real com um teste limpo:
-rodar o app publicado/instalado (não via `dotnet run` elevado) em uma sessão de usuário padrão,
-sem privilégios de administrador. Documentar isso como bloqueio de verificação, não como bug
-confirmado do código do app.
+A causa real: **o app estava rodando via `dotnet run`, que registra o pacote de forma "solta"
+(dev-loop registration, apontando direto para a pasta `bin\...\AppX`) em vez de instalá-lo de verdade.**
+Nessa forma de registro, o broker do Windows que hospeda `FileOpenPicker`/`FileSavePicker` falha
+consistentemente com `E_FAIL` ao tentar validar a identidade do pacote chamador. Confirmado gerando um
+MSIX real (`dotnet build -p:GenerateAppxPackageOnBuild=true -p:PublishTrimmed=false -p:PublishReadyToRun=false`,
+assinado com um certificado de desenvolvimento auto-gerado cujo Subject bate com o `Publisher` do
+`Package.appxmanifest`, e instalado com `Add-AppxPackage`) — rodando esse pacote instalado, sem
+nenhuma mudança de código, `FileOpenPicker` abriu normalmente e o fluxo completo de importação
+funcionou (arquivo `.package` sintético selecionado → STBL contada → `TranslationProject` criado →
+aparece na lista de recentes), confirmado com screenshot real.
 
-**Alternativas não tentadas:** declarar `allowElevation` no `Package.appxmanifest` (só faz sentido se
-a hipótese de elevação for confirmada primeiro — adicionar essa capability sem necessidade real seria
-over-engineering); trocar `FileOpenPicker` por um diálogo Win32 clássico via interop (perderia a
-integração nativa com o Explorer que a seção 2 do brief pede).
+**Decisão:** Manter o código como está — `FileOpenPicker` via `WinRT.Interop.InitializeWithWindow` é
+a abordagem correta (seção 2 do brief pede integração nativa com o Explorer, não um diálogo Win32
+clássico). O ajuste é no **processo de verificação/desenvolvimento**, não no código do app: qualquer
+teste manual do fluxo de importação (ou de qualquer outra API mediada por broker do Windows — picker,
+notificação, compartilhamento) precisa rodar a partir de um pacote MSIX instalado
+(`dotnet build ... -p:GenerateAppxPackageOnBuild=true ...` + assinar + `Add-AppxPackage`), não via
+`dotnet run`. `dotnet run` continua perfeitamente válido para o dia a dia de desenvolvimento (UI em
+geral, navegação, tudo que não depende de um broker) — só não serve para validar picker.
 
-**Consequências:** Até essa verificação acontecer, **não considere `HomePage` funcionalmente completa
-mesmo que compile** — o fluxo de importação nunca foi visto terminando com sucesso, só o de erro. Ver
-`docs/STATUS.md`/`docs/HANDOFF.md` para o próximo passo exato.
+**Alternativas descartadas:** declarar `allowElevation` no manifesto (a causa nunca foi elevação);
+trocar `FileOpenPicker` por diálogo Win32 clássico (perderia a integração nativa que o brief pede, e
+não era necessário — o problema era só o modo de lançamento).
+
+**Consequências:** Documentar esse procedimento de empacotamento/instalação em `docs/BUILD.md` (a
+criar) para que futuras sessões não percam tempo reinvestigando a mesma causa. `HomePage` está
+confirmada funcionalmente completa para o caso feliz (import → contagem de STBL → projeto criado) —
+ver `docs/STATUS.md`.

@@ -27,7 +27,7 @@ o conjunto de itens, não o primeiro que funcionar.
 - [x] Estrutura de documentação (este diretório).
 - [ ] Logging estruturado (seção 36) — não iniciado.
 - [x] Primeira tela de produto real (Home: importar `.package`, criar projeto, listar recentes) —
-  nunca executada visualmente, ver nota em `docs/ARCHITECTURE.md`/`docs/HANDOFF.md`.
+  fluxo completo confirmado funcionando de ponta a ponta rodando o app instalado como MSIX (DEC-010).
 - [ ] Tela de Settings com abas reais (General/Translation/Providers/Argos/NVIDIA NIM/Models/Appearance/Advanced,
   seção 41) — hoje é o placeholder do template.
 - [ ] Seletor de tema claro/escuro/sistema explícito na UI (Mica já funciona via `MicaBackdrop` do
@@ -130,20 +130,16 @@ mecânica de escrita de package; falta orquestrar validação + round-trip + rel
 
 ## Próximas tarefas concretas (em ordem sugerida)
 
-1. **Rodar o app de verdade.** Ver a nota no fim de `docs/HANDOFF.md` — nenhuma sessão até agora teve
-   acesso a um desktop Windows interativo. `HomePage` foi escrita e compila, mas nunca foi clicada.
-   Isso deveria ser a primeira ação de qualquer sessão com esse acesso, antes de construir mais em
-   cima dela.
-2. Drag-and-drop de arquivos/pastas na `HomePage` (seção 34 pede explicitamente, hoje só há o botão
+1. Drag-and-drop de arquivos/pastas na `HomePage` (seção 34 pede explicitamente, hoje só há o botão
    "Importar packages" via file picker) — e suporte a pasta inteira, não só múltiplos arquivos.
-3. Entidade `StringEntry` (nova migration) — cada string extraída de um projeto, ligada ao `Project`
+2. Entidade `StringEntry` (nova migration) — cada string extraída de um projeto, ligada ao `Project`
    e ao `KeyHash`/`StblKey` de origem. Pré-requisito para o editor (Fase 9) e para o diff de versões
    (Fase 8) existirem. A `HomePage` de hoje só conta STBLs, não extrai/persiste strings individuais.
-4. Testar `OpenAICompatibleProvider` contra um LM Studio local de verdade — confirma que o pipeline
+3. Testar `OpenAICompatibleProvider` contra um LM Studio local de verdade — confirma que o pipeline
    inteiro (orchestrator → provider → HTTP real → parsing) funciona fora dos testes com HTTP falso.
-5. Armazenamento seguro de API key (Windows Credential Manager/DPAPI, seção 19) — pré-requisito para
+4. Armazenamento seguro de API key (Windows Credential Manager/DPAPI, seção 19) — pré-requisito para
    testar `OpenAICompatibleProvider` contra NVIDIA NIM (que exige uma), e para qualquer provider pago
    futuro.
-6. `AddHttpClient`/`IHttpClientFactory` em `TS4Translator.Infrastructure` — hoje quem instancia
+5. `AddHttpClient`/`IHttpClientFactory` em `TS4Translator.Infrastructure` — hoje quem instancia
    `OpenAICompatibleProvider` tem que criar o `HttpClient` manualmente; não crítico, mas deveria ser
    resolvido antes da UI de Settings existir de verdade (seção 41).

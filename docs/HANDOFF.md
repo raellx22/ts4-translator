@@ -2,78 +2,66 @@
 
 Leia isto antes de qualquer outra coisa se você é uma nova sessão/agente retomando este projeto.
 Depois leia `README.md`, `docs/STATUS.md`, `docs/ROADMAP.md`, `docs/ARCHITECTURE.md`, `docs/DECISIONS.md`,
-nessa ordem. Não reconstrua a arquitetura do zero — ela existe, compila e tem 51 testes passando.
+`docs/BUILD.md`, nessa ordem. Não reconstrua a arquitetura do zero — ela existe, compila e tem 81
+testes automatizados passando, e a primeira tela de produto funciona de ponta a ponta de verdade.
 
 ## Current state
 
 Ver `docs/STATUS.md` para o snapshot exato (atualizado junto com este arquivo). Resumo: fundação da
-solution pronta, camada Sims4 (STBL/locale) pronta com testes reais, TokenProtector e
-TranslationValidator prontos com testes, translation memory (exact-match) pronta com SQLite real.
-Nenhum provider de tradução, nenhuma UI de produto, nenhuma tela além do shell padrão do template
-WinUI existem ainda.
+solution pronta; camada Sims4 (STBL/locale) pronta com testes reais; TokenProtector, TranslationValidator,
+BatchBuilder e TranslationOrchestrator prontos com testes; translation memory (exact-match) pronta com
+SQLite real; `IProjectService` pronto; `OpenAICompatibleProvider` pronto (nunca testado contra um
+servidor real, só contra HTTP falso); e a `HomePage` (importar `.package` → contar STBLs → criar
+projeto → listar recentes) **confirmada funcionando de ponta a ponta rodando o app de verdade**, não
+só compilando.
 
 ## What has already been implemented
 
 Ver a seção "Completed" de `docs/STATUS.md` — não duplicado aqui para evitar as duas listas
-divergirem com o tempo. Em particular: o pipeline de tradução inteiro (`ITranslationProvider`,
-`IBatchBuilder`, `ITranslationOrchestrator`), o primeiro provider real (`OpenAICompatibleProvider`),
-`IProjectService`, e uma primeira tela de produto (`HomePage`) já existem — **não recrie nenhum
-desses**. Todo o código compila e a suíte de 81 testes automatizados passa.
-
-**Isto já foi rodado de verdade, não só compilado** — esta sessão descobriu que o ambiente de execução
-tem acesso a um desktop Windows real e conseguiu lançar o app, navegar entre páginas via UI Automation,
-e tirar screenshots reais (ver DEC-010). A shell, o Mica, o tema, a navegação Home/About e o layout da
-`HomePage` estão confirmados funcionando visualmente. Um bug real (exceção engolida pelo
-`AsyncRelayCommand` por a chamada do picker estar fora do `try/catch`) foi encontrado e corrigido.
+divergirem com o tempo. **Não recrie**: o pipeline de tradução (`ITranslationProvider`,
+`IBatchBuilder`, `ITranslationOrchestrator`), o `OpenAICompatibleProvider`, o `IProjectService`, e a
+`HomePage`.
 
 ## What is currently being worked on
 
-Nada em progresso, mas há um **bloqueio de verificação em aberto**, não uma tarefa de código: ver
-"Exact next task" abaixo antes de escrever qualquer coisa nova em cima de `HomePage`.
+Nada em progresso. Todo trabalho desta sessão foi levado a um estado compilável, testado, e — pela
+primeira vez neste projeto — verificado rodando o app de verdade, antes de parar.
 
 ## Exact next task
 
-Diagnosticar `COMException (0x80004005) E_FAIL` do `FileOpenPicker.PickMultipleFilesAsync()` (DEC-010).
-Ao clicar "Importar packages" na `HomePage`, essa exceção acontece toda vez — confirmado com clique
-sintético real (`SendInput`/`mouse_event`, não só automação de acessibilidade). A hipótese mais forte
-(não confirmada) é que a sessão de ferramentas usada para desenvolver roda como Administrador, e há
-relatos públicos do WindowsAppSDK do mesmo HRESULT nessa situação. Uma tentativa de des-elevar via
-`Shell.Application.ShellExecute` não funcionou (o processo filho continuou elevado — `TokenElevation`
-ainda `1` depois).
+Drag-and-drop de arquivos/pastas na `HomePage` (brief seção 34 pede isso explicitamente; hoje só
+existe o botão "Importar packages" via file picker). Usar os eventos `DragOver`/`Drop` do WinUI no
+`Grid` raiz de `Pages/HomePage.xaml`, filtrando por extensão `.package`, reaproveitando a mesma lógica
+de `HomePageViewModel.ImportPackagesAsync` (talvez valha extrair o corpo do método para aceitar
+`IReadOnlyList<string>` diretamente, com dois pontos de entrada — botão e drop — chamando essa lógica
+compartilhada).
 
-**Se você tem uma forma de rodar o app publicado/instalado normalmente** (não via `dotnet run` de uma
-sessão de ferramentas elevada) — por exemplo, o usuário testando manualmente no próprio desktop, fora
-de qualquer sessão de automação — peça para clicar "Importar packages" e escolher um `.package`
-qualquer. Se funcionar nessa condição, a causa era mesmo elevação, e a decisão correta é **não mudar
-nada no código do app** (rodar sem privilégios de administrador já é o comportamento esperado e correto
-de qualquer app desktop) — só remover a nota de bloqueio de `docs/STATUS.md` e `docs/DECISIONS.md` DEC-010.
+**Importante**: para testar isso manualmente (drag-and-drop, como qualquer outra interação de UI que
+não passe por um broker do Windows), `dotnet run` funciona normalmente — não é necessário empacotar
+como MSIX para isso. O empacotamento só é necessário para testar o `FileOpenPicker` (ver `docs/BUILD.md`).
 
-Se ainda falhar sem elevação, aí sim investigar mais fundo: checar `Package.appxmanifest` (capabilities
-declaradas), confirmar que `picker.FileTypeFilter.Add(".package")` está sendo chamado antes de
-`PickMultipleFilesAsync()` (já está, mas há relatos de bugs do WindowsAppSDK sensíveis à ordem), e
-testar `PickSingleFileAsync()` em vez de `PickMultipleFilesAsync()` para isolar se o problema é
-específico de seleção múltipla (um dos achados da pesquisa desta sessão foi justamente um issue aberto
-do WindowsAppSDK especificamente sobre `PickMultipleFilesAsync` quebrando em WinUI 3 — vale ler
-https://github.com/microsoft/WindowsAppSDK/issues/467 antes de gastar mais tempo tentando reproduzir
-do zero).
-
-Depois de resolver isso, a próxima tarefa é drag-and-drop de arquivos na `HomePage` (seção 34 pede
-isso explicitamente; hoje só existe o botão de file picker) — usar os eventos `DragOver`/`Drop` do
-WinUI no `Grid` raiz da página, filtrando por extensão `.package`. Depois disso, seguir a lista
-"Próximas tarefas concretas" no fim de `docs/ROADMAP.md`.
+Depois disso, seguir a lista "Próximas tarefas concretas" no fim de `docs/ROADMAP.md` — a prioridade
+seguinte é a entidade `StringEntry`.
 
 ## Important files
 
 - `docs/DECISIONS.md` — leia antes de mudar qualquer versão de pacote ou formato de arquivo; a
-  maioria das escolhas não óbvias já foi justificada ali (DEC-001 a DEC-007).
+  maioria das escolhas não óbvias já foi justificada ali (DEC-001 a DEC-010).
+- `docs/BUILD.md` — como compilar, testar, rodar, e (importante) como empacotar/instalar um MSIX
+  local para testar qualquer fluxo que use `FileOpenPicker` ou outra API mediada por broker do
+  Windows. `dotnet run` sozinho **não** funciona para esses casos (DEC-010) — não gaste tempo
+  reinvestigando isso, o procedimento já está documentado e testado.
 - `src/TS4Translator.Core/Tokens/`, `src/TS4Translator.Translation/TokenProtector.cs` — a peça mais
   crítica de segurança do produto (seção 9 do brief). Não altere o design de reconciliação por
   identidade de placeholder sem entender DEC-004 primeiro.
 - `src/TS4Translator.Sims4/SmartSimStringTableService.cs` — não reimplemente o bit de locale à mão;
   ver DEC-006 para o porquê.
-- `src/TS4Translator.Persistence/Migrations/` — nunca edite `InitialCreate` manualmente depois que
-  ela existir em qualquer branch compartilhado; adicione uma nova migration com `dotnet ef migrations
+- `src/TS4Translator.Persistence/Migrations/` — nunca edite uma migration manualmente depois que ela
+  existir em qualquer branch compartilhado; adicione uma nova migration com `dotnet ef migrations
   add <Nome>` a partir de `src/TS4Translator.Persistence/`.
+- `src/TS4Translator.App/ViewModels/HomePageViewModel.cs` — note que a chamada ao picker está
+  **dentro** do `try/catch`, de propósito (DEC-010) — `AsyncRelayCommand` não relança exceções do
+  delegate por padrão, então qualquer código novo em um `AsyncRelayCommand` precisa do mesmo cuidado.
 - `../SimsPackageBatcher/` (fora deste repo, mesmo diretório pai) — projeto irmão já finalizado que
   prova o stack inteiro funciona neste ambiente; útil como referência de padrões (DI simples via
   `ServiceCollection`, uso de `LlamaLogic.Packages`, testes de integração com packages sintéticos)
@@ -92,44 +80,50 @@ Todas em `docs/DECISIONS.md`, mas as mais fáceis de "corrigir" por engano:
 - **Não** fazer o `TokenProtector.Restore` confiar em ordem/contagem de tokens em vez de identidade de
   placeholder — é o ponto central do design (DEC-004) e existe teste específico para isso
   (`Restore_ReorderedTokens_IsValidButFlagged`, `Restore_DuplicatedToken_...`).
+- **Não** assumir que `dotnet run` é suficiente para testar qualquer fluxo com `FileOpenPicker`/
+  `FileSavePicker`/outra API de broker — não é (DEC-010). Use o procedimento de `docs/BUILD.md`.
+- **Não** reintroduzir a ideia de que o problema do picker era elevação de privilégios — foi
+  descartada por teste real (o usuário reproduziu o mesmo erro sem elevação nenhuma). A causa
+  confirmada é o modo de registro de pacote do `dotnet run` (ver DEC-010).
 
 ## Known bugs
 
-Nenhum bug conhecido no código existente — ver "Known issues" em `docs/STATUS.md` para riscos
-documentados (não são bugs confirmados, são pontos não testados contra dados reais).
+Nenhum bug conhecido no código existente. Dois bugs reais encontrados nesta sessão já foram
+corrigidos e commitados (exceção engolida pelo `AsyncRelayCommand`; o "bug" do picker era um problema
+de processo de teste, não de código — ver DEC-010). Ver "Known issues" em `docs/STATUS.md` para riscos
+documentados que não são bugs confirmados.
 
 ## Tests currently failing
 
-Nenhum.
+Nenhum. 81 testes automatizados passando.
 
 ## Commands to build / test / run
 
-Ver `docs/STATUS.md`, seções correspondentes — não duplicado aqui.
+Ver `docs/BUILD.md` — não duplicado aqui.
 
 ## Next milestones
 
-Ver `docs/ROADMAP.md`. Prioridade imediata: `ITranslationProvider` → `BatchBuilder`/orquestrador →
-`Project`/`IProjectService` → primeira tela de produto real na UI.
+Ver `docs/ROADMAP.md`. Prioridade imediata: drag-and-drop na `HomePage` → entidade `StringEntry` →
+testar `OpenAICompatibleProvider` contra um LM Studio real → armazenamento seguro de API key.
 
-## Uma coisa importante sobre o ambiente de desenvolvimento
+## Sobre o ambiente de desenvolvimento
 
-Ao contrário do que sessões anteriores a esta assumiam, o ambiente de execução usado para desenvolver
-**é** um desktop Windows 11 real do usuário — `dotnet run` lança a janela do app de verdade, visível
-no desktop real. Foi possível verificar isso interagindo com a janela via Windows UI Automation
-(`System.Windows.Automation` em PowerShell) e capturando screenshots reais via
-`System.Drawing.Graphics.CopyFromScreen`. **Não assuma mais que "não há como ver a UI rodando"** — há.
-O que ainda não existe é uma forma automática/roteirizada de fazer isso (nenhum tool dedicado, tudo foi
-feito com PowerShell ad-hoc), então cada verificação visual futura vai precisar do mesmo tipo de script
-manual — ver os comandos usados nesta sessão no histórico de commits/PR se precisar do padrão exato.
+O ambiente de execução usado para desenvolver **é** um desktop Windows 11 real do usuário —
+`dotnet run` lança a janela do app de verdade, visível no desktop real, e o usuário pode (e já
+conseguiu) interagir com ela diretamente. Foi possível verificar a UI de duas formas: pedindo para o
+usuário testar manualmente, e via automação (Windows UI Automation / `System.Windows.Automation` em
+PowerShell, mais `System.Drawing.Graphics.CopyFromScreen` para screenshots reais). **Não assuma que
+"não há como ver a UI rodando"** — há, das duas formas.
 
-**Cuidado ao rodar o app repetidamente durante desenvolvimento**: cada `dotnet run` lança uma nova
-instância via AUMID; instâncias antigas não são fechadas automaticamente. Sempre `Stop-Process` a
-instância anterior (por `Id`, obtido de `Get-Process | Where-Object ProcessName -like '*TS4Translator*'`)
-antes de rebuildar, ou os testes manuais vão ficar confusos sobre qual janela é qual.
+**Cuidado ao rodar o app repetidamente durante desenvolvimento**: cada `dotnet run` (ou ativação via
+AUMID de um pacote instalado) lança uma nova instância; instâncias antigas não fecham sozinhas. Sempre
+`Stop-Process` a instância anterior antes de rebuildar (`Get-Process | Where-Object ProcessName -like
+'*TS4Translator*'`), ou vai dar erro de arquivo em uso ao gerar um novo MSIX, ou vai ficar confuso qual
+janela é qual.
 
-**A sessão de ferramentas usada para desenvolver roda como Administrador** (confirmado via token de
-elevação). Isso pode causar falhas específicas de APIs WinRT mediadas por broker (como
-`FileOpenPicker` — ver DEC-010) que não aconteceriam para um usuário final rodando o app normalmente.
-Ao investigar um bug que envolve picker, diálogo do sistema, notificação, ou qualquer outra API que
-passe por um broker do Windows, considere elevação como suspeita antes de assumir que é um bug real
-do app.
+**Sobre testar com um pacote MSIX instalado (`docs/BUILD.md`)**: isso registra o app de verdade no
+Windows (`Add-AppxPackage`). Sempre desinstale (`Remove-AppxPackage`) depois de terminar de testar,
+antes de voltar para `dotnet run` — os dois modos de registro conflitam (`dotnet run` recusa rodar se
+já existir um pacote instalado "de verdade" com a mesma identidade). Não deixe o certificado de
+desenvolvimento (`ts4dev.pfx`) nem a pasta `AppPackages/` no controle de versão — ambos já estão no
+`.gitignore`.
