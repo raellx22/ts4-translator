@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using TS4Translator.Core.Memory;
 using TS4Translator.Core.Projects;
+using TS4Translator.Core.Providers;
 
 namespace TS4Translator.Persistence;
 
@@ -18,6 +19,8 @@ public static class ServiceCollectionExtensions
         services.AddDbContextFactory<TranslatorDbContext>(options => options.UseSqlite($"Data Source={databasePath}"));
         services.AddSingleton<ITranslationMemory, SqliteTranslationMemory>();
         services.AddSingleton<IProjectService, EfProjectService>();
+        services.AddSingleton<IProjectStringService, EfProjectStringService>();
+        services.AddSingleton<IProviderConfigurationService, EfProviderConfigurationService>();
 
         return services;
     }

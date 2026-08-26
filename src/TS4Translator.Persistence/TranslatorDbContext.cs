@@ -9,6 +9,10 @@ public sealed class TranslatorDbContext(DbContextOptions<TranslatorDbContext> op
 
     internal DbSet<ProjectRecord> Projects => Set<ProjectRecord>();
 
+    internal DbSet<ProjectStringRecord> ProjectStrings => Set<ProjectStringRecord>();
+
+    internal DbSet<ProviderConfigurationRecord> ProviderConfigurations => Set<ProviderConfigurationRecord>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<TranslationMemoryRecord>()
@@ -20,5 +24,14 @@ public sealed class TranslatorDbContext(DbContextOptions<TranslatorDbContext> op
             .WithOne(f => f.Project)
             .HasForeignKey(f => f.ProjectId)
             .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<ProjectStringRecord>(entity =>
+        {
+            entity.HasIndex(r => new { r.ProjectId, r.StblGroup, r.StblFullInstance, r.KeyHash }).IsUnique();
+            entity.HasOne(r => r.Project)
+                .WithMany()
+                .HasForeignKey(r => r.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
     }
 }

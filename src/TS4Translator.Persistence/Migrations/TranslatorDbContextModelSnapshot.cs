@@ -66,6 +66,75 @@ namespace TS4Translator.Persistence.Migrations
                     b.ToTable("ProjectSourceFileRecord");
                 });
 
+            modelBuilder.Entity("TS4Translator.Persistence.Entities.ProjectStringRecord", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("IssueSummary")
+                        .HasColumnType("TEXT");
+
+                    b.Property<uint>("KeyHash")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("OriginalText")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ProjectId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<ulong>("StblFullInstance")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<uint>("StblGroup")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("TranslatedText")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ProjectId", "StblGroup", "StblFullInstance", "KeyHash")
+                        .IsUnique();
+
+                    b.ToTable("ProjectStrings");
+                });
+
+            modelBuilder.Entity("TS4Translator.Persistence.Entities.ProviderConfigurationRecord", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Endpoint")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("HasApiKey")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Model")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<double>("Temperature")
+                        .HasColumnType("REAL");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("ProviderConfigurations");
+                });
+
             modelBuilder.Entity("TS4Translator.Persistence.Entities.TranslationMemoryRecord", b =>
                 {
                     b.Property<int>("Id")
@@ -114,6 +183,17 @@ namespace TS4Translator.Persistence.Migrations
                 {
                     b.HasOne("TS4Translator.Persistence.Entities.ProjectRecord", "Project")
                         .WithMany("SourceFiles")
+                        .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Project");
+                });
+
+            modelBuilder.Entity("TS4Translator.Persistence.Entities.ProjectStringRecord", b =>
+                {
+                    b.HasOne("TS4Translator.Persistence.Entities.ProjectRecord", "Project")
+                        .WithMany()
                         .HasForeignKey("ProjectId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
