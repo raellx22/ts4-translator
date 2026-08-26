@@ -54,15 +54,21 @@ public sealed partial class HomePageViewModel : ObservableObject
 
     private async Task ImportPackagesAsync()
     {
-        var files = await _pathPicker.PickPackageFilesAsync();
-        if (files.Count == 0)
-        {
-            return;
-        }
-
-        IsBusy = true;
+        // Everything in this method - including the picker call itself - must stay inside the
+        // try/catch. AsyncRelayCommand does not rethrow exceptions from its delegate onto the UI
+        // thread by default: an exception here would otherwise be silently swallowed (the command
+        // would just appear to do nothing when clicked). Confirmed by actually running the app -
+        // the picker call originally sat outside this try/catch and failures were invisible.
         try
         {
+            var files = await _pathPicker.PickPackageFilesAsync();
+            if (files.Count == 0)
+            {
+                return;
+            }
+
+            IsBusy = true;
+
             var totalStringTables = 0;
             foreach (var file in files)
             {
@@ -81,7 +87,7 @@ public sealed partial class HomePageViewModel : ObservableObject
             // Broad on purpose: LlamaLogic.Packages' exception surface for a corrupted/invalid
             // .package has not been characterized yet (brief section 27/46 - "package inválido").
             // Narrow this once that's known; for now, never let a bad file crash the import command.
-            StatusText = $"Falha ao importar: {exception.Message}";
+            StatusText = $"Falha ao importar ({exception.GetType().Name}): {exception.Message}";
         }
         finally
         {

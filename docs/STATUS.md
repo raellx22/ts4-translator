@@ -9,9 +9,12 @@ com o pipeline inteiro pronto (TokenProtector, TranslationValidator, BatchBuilde
 TranslationOrchestrator); Fase 6 (Providers) com o primeiro provider real pronto
 (`OpenAICompatibleProvider`, nunca testado contra um servidor real de verdade — só contra HTTP falso
 em teste); Fase 7 (Translation Memory) com exact-match pronto; Project System (seção 33) com o núcleo
-pronto (`IProjectService`); **primeira tela de produto real escrita** (Home: importar `.package`,
-criar projeto, listar recentes) — compila e o compilador XAML aceita os bindings, mas **nunca foi
-executada visualmente**, porque nenhuma sessão até agora teve acesso a um desktop Windows interativo.
+pronto (`IProjectService`); **primeira tela de produto real escrita e, pela primeira vez, executada de
+verdade** (Home: importar `.package`, criar projeto, listar recentes). Ver DEC-010 para o relato
+completo: a shell WinUI, Mica, tema, navegação e o layout da Home foram confirmados funcionando com
+screenshots reais; um bug real foi encontrado e corrigido (exceção engolida pelo `AsyncRelayCommand`);
+e o fluxo de importação em si está **bloqueado** por um `COMException 0x80004005` do `FileOpenPicker`
+ainda não diagnosticado com certeza (suspeita: sessão de ferramentas rodando como Administrador).
 Ver `docs/ROADMAP.md` para o detalhamento completo por fase.
 
 ## Completed
@@ -43,8 +46,9 @@ Ver `docs/ROADMAP.md` para o detalhamento completo por fase.
 - `HomePage`/`HomePageViewModel` (App) — primeira tela de produto: importar `.package` via
   `IPathPickerService`, criar `TranslationProject`, contar STBLs via `IPackageService`, listar
   projetos recentes. Resolvido por service locator estático (`App.Services`), não injeção de
-  construtor — `Frame.Navigate(Type)` do WinUI não suporta isso nativamente (DEC-009). Só validado
-  por `dotnet build`/compilador XAML — nunca clicado.
+  construtor — `Frame.Navigate(Type)` do WinUI não suporta isso nativamente (DEC-009). **Executada de
+  verdade nesta sessão** (não só compilada) — shell, Mica, tema, navegação e layout confirmados com
+  screenshots reais; o clique em "Importar packages" ainda não termina com sucesso (ver Blocked/DEC-010).
 - `AppDataPaths` (Infrastructure) resolvendo `%LOCALAPPDATA%\TS4Translator\{Data,Logs,Cache,Models}`.
 - Composition root em `App.xaml.cs`: `ServiceCollection` com `AddSims4Services()` +
   `AddTranslationServices()` + `AddPersistenceServices(...)`, migration aplicada no `OnLaunched`.
@@ -59,12 +63,17 @@ e testado antes de passar para o próximo item.
 
 ## Blocked
 
-Nada bloqueado por motivo externo real ainda. Dois itens têm **incerteza de fato pendente de
-verificação empírica** antes de implementar (não são bloqueios, são riscos documentados):
-
-1. Formato exato do prompt esperado por `nvidia/riva-translate-4b-instruct-v2` — duas fontes
+1. **`HomePage` → "Importar packages" → `FileOpenPicker`**: falha consistentemente com
+   `COMException (0x80004005) E_FAIL`, sem mensagem. Ver DEC-010 para o diagnóstico completo. Suspeita
+   forte, não confirmada: a sessão de ferramentas usada para desenvolver roda como Administrador
+   (`TokenElevation = 1` confirmado), e há relatos públicos do WindowsAppSDK do mesmo HRESULT em apps
+   elevados sem a capability `allowElevation` declarada. Uma tentativa de des-elevar o processo via
+   `Shell.Application.ShellExecute` não funcionou (processo filho continuou elevado). **Não bloqueia o
+   build nem os testes automatizados** — bloqueia apenas verificar visualmente que o fluxo de
+   importação funciona ponta a ponta. Próximo passo exato em `docs/HANDOFF.md`.
+2. Formato exato do prompt esperado por `nvidia/riva-translate-4b-instruct-v2` — duas fontes
    discordam (playground ao vivo vs. NGC catalog). Precisa de uma API key NVIDIA real para testar.
-2. Nenhuma receita testada de empacotar Argos Translate sem exigir Python do usuário — vai exigir
+3. Nenhuma receita testada de empacotar Argos Translate sem exigir Python do usuário — vai exigir
    prototipagem própria (ver Fase 4 no roadmap) antes de comprometer a arquitetura.
 
 ## Known issues

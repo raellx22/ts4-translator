@@ -141,10 +141,10 @@ uma vez antes de ativar a janela. `App.Services` (um service locator estático �
   `IPackageService`, e lista projetos recentes via `IProjectService`.
 - **About**/**Settings** — ainda os placeholders do template, sem lógica.
 
-**Nunca executado interativamente** — sem acesso a um desktop Windows nesta sessão de
-desenvolvimento, a validação parou em "`dotnet build` compila e o compilador XAML aceita os `x:Bind`".
-Nenhum clique real, nenhuma verificação visual de Mica/tema, nenhum teste do file picker de verdade.
-Ver `docs/HANDOFF.md` para o que uma sessão com desktop Windows deveria confirmar primeiro.
+**Executado e clicado de verdade** (DEC-010) — Mica, tema, navegação e o layout da Home confirmados
+com screenshots reais. O fluxo de importação em si está bloqueado por um `COMException 0x80004005`
+do `FileOpenPicker`, causa ainda não confirmada (suspeita: sessão de ferramentas elevada). Ver
+`docs/HANDOFF.md` para o diagnóstico e o próximo passo exato.
 
 ## Convenções de qualidade
 

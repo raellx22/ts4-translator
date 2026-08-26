@@ -18,32 +18,49 @@ Ver a seção "Completed" de `docs/STATUS.md` — não duplicado aqui para evita
 divergirem com o tempo. Em particular: o pipeline de tradução inteiro (`ITranslationProvider`,
 `IBatchBuilder`, `ITranslationOrchestrator`), o primeiro provider real (`OpenAICompatibleProvider`),
 `IProjectService`, e uma primeira tela de produto (`HomePage`) já existem — **não recrie nenhum
-desses**. Todo o código compila e a suíte de 81 testes automatizados passa. **Nada disso foi
-verificado rodando o app de verdade** — ver a seção final deste arquivo antes de continuar.
+desses**. Todo o código compila e a suíte de 81 testes automatizados passa.
+
+**Isto já foi rodado de verdade, não só compilado** — esta sessão descobriu que o ambiente de execução
+tem acesso a um desktop Windows real e conseguiu lançar o app, navegar entre páginas via UI Automation,
+e tirar screenshots reais (ver DEC-010). A shell, o Mica, o tema, a navegação Home/About e o layout da
+`HomePage` estão confirmados funcionando visualmente. Um bug real (exceção engolida pelo
+`AsyncRelayCommand` por a chamada do picker estar fora do `try/catch`) foi encontrado e corrigido.
 
 ## What is currently being worked on
 
-Nada em progresso — a sessão anterior levou cada peça a um estado compilável e testado antes de parar.
+Nada em progresso, mas há um **bloqueio de verificação em aberto**, não uma tarefa de código: ver
+"Exact next task" abaixo antes de escrever qualquer coisa nova em cima de `HomePage`.
 
 ## Exact next task
 
-**Se você tem um desktop Windows real disponível agora, isso vem antes de qualquer código novo:**
-rode `dotnet run --project src\TS4Translator.App\TS4Translator.App.csproj -p:Platform=x64` e confirme
-visualmente que a janela abre, o Mica aparece, a navegação Home/About/Settings funciona, e que o botão
-"Importar packages" na Home realmente abre um `FileOpenPicker` e, ao escolher um `.package`, cria um
-projeto e mostra a contagem de STBLs sem travar. Anote qualquer coisa que quebrar em
-`docs/STATUS.md` → "Known issues" antes de tentar consertar — pode ser um problema de uma linha (ex.:
-um `x:Bind` com o `Mode` errado) ou pode revelar que o design do service locator (DEC-009) precisa
-mudar. Depois disso, siga para a lista abaixo.
+Diagnosticar `COMException (0x80004005) E_FAIL` do `FileOpenPicker.PickMultipleFilesAsync()` (DEC-010).
+Ao clicar "Importar packages" na `HomePage`, essa exceção acontece toda vez — confirmado com clique
+sintético real (`SendInput`/`mouse_event`, não só automação de acessibilidade). A hipótese mais forte
+(não confirmada) é que a sessão de ferramentas usada para desenvolver roda como Administrador, e há
+relatos públicos do WindowsAppSDK do mesmo HRESULT nessa situação. Uma tentativa de des-elevar via
+`Shell.Application.ShellExecute` não funcionou (o processo filho continuou elevado — `TokenElevation`
+ainda `1` depois).
 
-**Se você não tem acesso a um desktop Windows**, ou já fez a verificação acima, a próxima tarefa é:
-Drag-and-drop de arquivos na `HomePage` (seção 34 pede isso explicitamente; hoje só existe o botão de
-file picker) — usar os eventos `DragOver`/`Drop` do WinUI no `Grid` raiz da página, filtrando por
-extensão `.package`, e chamar a mesma lógica de `HomePageViewModel.ImportPackagesAsync` mas recebendo
-os caminhos do `DataPackageView` em vez do picker (talvez valha refatorar `ImportPackagesAsync` para
-aceitar `IReadOnlyList<string>` diretamente e ter dois pontos de entrada — botão e drop — chamando-o).
+**Se você tem uma forma de rodar o app publicado/instalado normalmente** (não via `dotnet run` de uma
+sessão de ferramentas elevada) — por exemplo, o usuário testando manualmente no próprio desktop, fora
+de qualquer sessão de automação — peça para clicar "Importar packages" e escolher um `.package`
+qualquer. Se funcionar nessa condição, a causa era mesmo elevação, e a decisão correta é **não mudar
+nada no código do app** (rodar sem privilégios de administrador já é o comportamento esperado e correto
+de qualquer app desktop) — só remover a nota de bloqueio de `docs/STATUS.md` e `docs/DECISIONS.md` DEC-010.
 
-Depois disso, seguir a lista "Próximas tarefas concretas" no fim de `docs/ROADMAP.md`.
+Se ainda falhar sem elevação, aí sim investigar mais fundo: checar `Package.appxmanifest` (capabilities
+declaradas), confirmar que `picker.FileTypeFilter.Add(".package")` está sendo chamado antes de
+`PickMultipleFilesAsync()` (já está, mas há relatos de bugs do WindowsAppSDK sensíveis à ordem), e
+testar `PickSingleFileAsync()` em vez de `PickMultipleFilesAsync()` para isolar se o problema é
+específico de seleção múltipla (um dos achados da pesquisa desta sessão foi justamente um issue aberto
+do WindowsAppSDK especificamente sobre `PickMultipleFilesAsync` quebrando em WinUI 3 — vale ler
+https://github.com/microsoft/WindowsAppSDK/issues/467 antes de gastar mais tempo tentando reproduzir
+do zero).
+
+Depois de resolver isso, a próxima tarefa é drag-and-drop de arquivos na `HomePage` (seção 34 pede
+isso explicitamente; hoje só existe o botão de file picker) — usar os eventos `DragOver`/`Drop` do
+WinUI no `Grid` raiz da página, filtrando por extensão `.package`. Depois disso, seguir a lista
+"Próximas tarefas concretas" no fim de `docs/ROADMAP.md`.
 
 ## Important files
 
@@ -94,12 +111,25 @@ Ver `docs/STATUS.md`, seções correspondentes — não duplicado aqui.
 Ver `docs/ROADMAP.md`. Prioridade imediata: `ITranslationProvider` → `BatchBuilder`/orquestrador →
 `Project`/`IProjectService` → primeira tela de produto real na UI.
 
-## Uma coisa importante sobre o ambiente de desenvolvimento anterior
+## Uma coisa importante sobre o ambiente de desenvolvimento
 
-Esta sessão (e a sessão anterior a ela) rodaram sem acesso a um desktop Windows interativo (sem forma
-de tirar screenshot da janela WinUI ou clicar nela). Tudo foi validado por `dotnet build`/`dotnet test`
-na linha de comando — inclusive a `HomePage` inteira, com seu botão de importação e list view de
-projetos recentes. **Isso significa que nenhuma tela WinUI deste app foi vista rodando de fato, nem
-uma vez.** O compilador XAML do WinUI pega muitos erros de binding em tempo de build, mas não todos —
-existe uma chance real de algo parecer certo aqui e falhar (ou simplesmente não fazer nada) ao clicar.
-Trate a seção "Exact next task" acima como a prioridade número um se você tiver esse acesso.
+Ao contrário do que sessões anteriores a esta assumiam, o ambiente de execução usado para desenvolver
+**é** um desktop Windows 11 real do usuário — `dotnet run` lança a janela do app de verdade, visível
+no desktop real. Foi possível verificar isso interagindo com a janela via Windows UI Automation
+(`System.Windows.Automation` em PowerShell) e capturando screenshots reais via
+`System.Drawing.Graphics.CopyFromScreen`. **Não assuma mais que "não há como ver a UI rodando"** — há.
+O que ainda não existe é uma forma automática/roteirizada de fazer isso (nenhum tool dedicado, tudo foi
+feito com PowerShell ad-hoc), então cada verificação visual futura vai precisar do mesmo tipo de script
+manual — ver os comandos usados nesta sessão no histórico de commits/PR se precisar do padrão exato.
+
+**Cuidado ao rodar o app repetidamente durante desenvolvimento**: cada `dotnet run` lança uma nova
+instância via AUMID; instâncias antigas não são fechadas automaticamente. Sempre `Stop-Process` a
+instância anterior (por `Id`, obtido de `Get-Process | Where-Object ProcessName -like '*TS4Translator*'`)
+antes de rebuildar, ou os testes manuais vão ficar confusos sobre qual janela é qual.
+
+**A sessão de ferramentas usada para desenvolver roda como Administrador** (confirmado via token de
+elevação). Isso pode causar falhas específicas de APIs WinRT mediadas por broker (como
+`FileOpenPicker` — ver DEC-010) que não aconteceriam para um usuário final rodando o app normalmente.
+Ao investigar um bug que envolve picker, diálogo do sistema, notificação, ou qualquer outra API que
+passe por um broker do Windows, considere elevação como suspeita antes de assumir que é um bug real
+do app.

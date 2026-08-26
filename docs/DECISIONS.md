@@ -282,3 +282,64 @@ camada de navegação própria antes de haver mais de duas páginas reais que pr
 ficar repetitivo ou para passar estado entre páginas via navegação se tornar necessário, revisar para
 `Frame.Navigate(Type, object)` com um parâmetro de navegação tipado por página, ou um `INavigationService`
 próprio — não adicionar isso preventivamente enquanto só uma página precisa de DI.
+
+---
+
+## DEC-010 — App rodado e clicado de verdade pela primeira vez; achado real: `AsyncRelayCommand` engole exceções, e o FileOpenPicker falha com E_FAIL neste ambiente
+
+**Contexto:** Depois de escrever a `HomePage` sem nenhuma verificação visual (nenhuma sessão anterior
+tinha acesso a um desktop Windows), esta sessão descobriu que o ambiente de execução **é** um desktop
+Windows 11 real do usuário — `dotnet run --project ... -p:Platform=x64` de fato lança a janela do app
+de verdade, e é possível interagir com ela via Windows UI Automation (`System.Windows.Automation`) e
+capturar screenshots via `System.Drawing`/`CopyFromScreen`. Isso permitiu, pela primeira vez,
+verificação real da UI em vez de só `dotnet build`.
+
+**O que foi confirmado funcionando, com screenshot real:**
+- A janela abre, com Mica visível, tema escuro do sistema aplicado corretamente.
+- `NavigationView` com Home/About/Settings, título "TS4 Translator" correto.
+- Navegação entre Home → About funciona (botão voltar aparece, conteúdo troca, seleção do menu
+  atualiza) — testado via `SelectionItemPattern.Select()` do UI Automation.
+- `HomePage` renderiza corretamente: título, botão "Importar packages", texto de status, lista de
+  projetos recentes vazia (banco novo).
+
+**Bug real encontrado e corrigido:** `HomePageViewModel.ImportPackagesAsync` chamava
+`_pathPicker.PickPackageFilesAsync()` **fora** do bloco `try/catch`. `AsyncRelayCommand` do
+CommunityToolkit.Mvvm, no construtor usado (`new AsyncRelayCommand(Func<Task>)`), não relança
+exceções do delegate na UI thread por padrão — uma falha ali ficava com a `Task` interna em estado
+`Faulted` silenciosamente, o comando "clicava" sem fazer nada visível, sem crash, sem mensagem.
+Confirmado ao clicar o botão de verdade (via `InvokePattern` e depois via clique de mouse sintético
+real com `SendInput`/`mouse_event`) e ver que nada acontecia. Corrigido movendo a chamada do picker
+para dentro do `try`. Esse bug existiria para qualquer usuário real, não é um artefato do ambiente de
+teste — **corrigido e commitado**.
+
+**Achado não resolvido, documentado para a próxima sessão:** mesmo depois da correção acima, clicar
+"Importar packages" (tanto via automação de acessibilidade quanto via clique de mouse sintético real,
+`SendInput`) produz consistentemente:
+
+```
+System.Runtime.InteropServices.COMException (0x80004005): E_FAIL
+```
+
+lançada de dentro de `FileOpenPicker.PickMultipleFilesAsync()`, sem mensagem nem inner exception.
+Pesquisa (busca na web) encontrou múltiplos relatos do WindowsAppSDK com exatamente esse HRESULT
+associado a **apps rodando em contexto elevado (Administrador)** sem a capability `allowElevation`/
+`requireAdministrator` corretamente declarada — e a sessão de ferramentas usada neste ambiente
+(PowerShell/Bash) **roda como Administrador** (confirmado via token de elevação: `TokenElevation = 1`).
+Uma tentativa de des-elevar o processo filho via `Shell.Application.ShellExecute` (técnica comum para
+COM de shell) **não funcionou** — o processo lançado continuou com `TokenElevation = 1`, então a
+hipótese de elevação **não foi comprovada nem descartada**, só ficou como a explicação mais provável
+sem confirmação definitiva.
+
+**Decisão:** Não tentar "consertar" o picker sem antes confirmar a causa real com um teste limpo:
+rodar o app publicado/instalado (não via `dotnet run` elevado) em uma sessão de usuário padrão,
+sem privilégios de administrador. Documentar isso como bloqueio de verificação, não como bug
+confirmado do código do app.
+
+**Alternativas não tentadas:** declarar `allowElevation` no `Package.appxmanifest` (só faz sentido se
+a hipótese de elevação for confirmada primeiro — adicionar essa capability sem necessidade real seria
+over-engineering); trocar `FileOpenPicker` por um diálogo Win32 clássico via interop (perderia a
+integração nativa com o Explorer que a seção 2 do brief pede).
+
+**Consequências:** Até essa verificação acontecer, **não considere `HomePage` funcionalmente completa
+mesmo que compile** — o fluxo de importação nunca foi visto terminando com sucesso, só o de erro. Ver
+`docs/STATUS.md`/`docs/HANDOFF.md` para o próximo passo exato.
