@@ -75,6 +75,37 @@ public class OpenAICompatibleProviderTests
     }
 
     [Fact]
+    public async Task TranslateBatchAsync_ResponseHasNullTranslationForOneItem_DropsItRatherThanThrowing()
+    {
+        // A structurally valid response where the model answered "translation": null for one id -
+        // this is what an earlier version of the provider let through as a literal null, which then
+        // crashed TokenProtector.Restore/TranslationValidator.Validate downstream (both throw
+        // ArgumentNullException by design on a null translatedText).
+        var assistantJson = """[{"id":"1","translation":"Olá."},{"id":"2","translation":null}]""";
+        var (sut, _) = CreateSut(HttpStatusCode.OK, ChatCompletionEnvelope(assistantJson));
+        var items = new[] { new TranslationRequestItem("1", "Hello."), new TranslationRequestItem("2", "Bye.") };
+
+        var results = await sut.TranslateBatchAsync(items, English, PortugueseBrazil);
+
+        var result = Assert.Single(results);
+        Assert.Equal("1", result.Id);
+        Assert.Equal("Olá.", result.TranslatedProtectedText);
+    }
+
+    [Fact]
+    public async Task TranslateBatchAsync_ResponseHasNullIdForOneItem_DropsItRatherThanThrowing()
+    {
+        var assistantJson = """[{"id":"1","translation":"Olá."},{"id":null,"translation":"Tchau."}]""";
+        var (sut, _) = CreateSut(HttpStatusCode.OK, ChatCompletionEnvelope(assistantJson));
+        var items = new[] { new TranslationRequestItem("1", "Hello."), new TranslationRequestItem("2", "Bye.") };
+
+        var results = await sut.TranslateBatchAsync(items, English, PortugueseBrazil);
+
+        var result = Assert.Single(results);
+        Assert.Equal("1", result.Id);
+    }
+
+    [Fact]
     public async Task TranslateBatchAsync_CompletelyUnparseableResponse_ReturnsEmptyRatherThanThrowing()
     {
         var (sut, _) = CreateSut(HttpStatusCode.OK, ChatCompletionEnvelope("I'm sorry, I cannot do that."));

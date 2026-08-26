@@ -10,10 +10,13 @@ Editor → traduzir as pendentes (via um provider compatível com OpenAI configu
 exportar um package traduzido com validação de round-trip real**. Ver DEC-011 para o relato completo
 da verificação.
 
-O único elo desse caminho ainda não exercitado com dados reais é a chamada HTTP de tradução em si —
-foi testada com HTTP falso (91 testes) e o fallback "sem provider configurado" foi confirmado no app
-de verdade, mas nenhuma sessão até agora teve acesso a um LM Studio local rodando ou a uma API key da
-NVIDIA para testar a tradução acontecendo de fato. Essa é a próxima verificação prioritária.
+A chamada HTTP de tradução em si já foi exercitada pelo usuário contra um provider real (fora desta
+sessão) — e encontrou um bug real de verdade: `ArgumentNullException` quando o provider respondia
+`"translation": null` para um item, derrubando a tradução do batch inteiro. Corrigido (DEC-017): a
+resposta agora é filtrada na origem e o orquestrador tem uma defesa própria contra qualquer
+`ITranslationProvider` que devolva uma tradução nula. Continua sem confirmação de que o restante do
+fluxo (traduções não-nulas de verdade, formatação, qualidade) funciona corretamente ponta a ponta com
+esse provider — o usuário está testando ativamente.
 
 Fora do caminho principal: Fase 0/1/2 essencialmente concluídas; Fase 3 (Translation Core) com o
 pipeline inteiro pronto; Fase 6 com o primeiro provider real (`OpenAICompatibleProvider`); Fase 7
@@ -85,7 +88,7 @@ pronta e verificada. Ver `docs/ROADMAP.md` para o detalhamento completo por fase
   `AddTranslationServices`, `AddPersistenceServices`, `AddInfrastructureServices`,
   `AddProviderServices`), migration aplicada no `OnLaunched`.
 - Shell WinUI (NavigationView, Mica, título estendido) a partir do template `winui-navview`.
-- Toda decisão relevante registrada em `docs/DECISIONS.md` (DEC-001 a DEC-016).
+- Toda decisão relevante registrada em `docs/DECISIONS.md` (DEC-001 a DEC-017).
 
 ## In progress
 
@@ -97,13 +100,13 @@ e verificado rodando o app de verdade antes de parar.
 Nada bloqueado por motivo interno ao app. Três itens têm **incerteza de fato pendente de verificação
 externa** (não são bloqueios de código, são coisas que só um teste com infraestrutura real resolve):
 
-1. **A tradução via `OpenAICompatibleProvider` nunca rodou contra um servidor real** — nem LM Studio
-   local nem NVIDIA NIM. É a lacuna mais importante a fechar antes de considerar o caminho principal
-   totalmente verificado. Ver `docs/HANDOFF.md`.
+1. Confirmação de que a tradução funciona corretamente (não só sem crash) contra um provider real, com
+   texto não-nulo — o usuário está testando ativamente; qualquer novo problema encontrado entra numa
+   correção pontual como a DEC-017.
 2. Formato exato do prompt esperado por `nvidia/riva-translate-4b-instruct-v2` — duas fontes
    discordam (playground ao vivo vs. NGC catalog). Precisa de uma API key NVIDIA real para testar.
-3. Nenhuma receita testada de empacotar Argos Translate sem exigir Python do usuário — vai exigir
-   prototipagem própria (ver Fase 4 no roadmap) antes de comprometer a arquitetura.
+3. Nenhuma receita testada de empacotar Argos Translate sem exigir Python do usuário — ver
+   `docs/ARGOS.md` para o design e os passos que faltam.
 
 ## Known issues
 
@@ -121,7 +124,7 @@ externa** (não são bloqueios de código, são coisas que só um teste com infr
 
 ## Tests currently failing
 
-Nenhum. 144 testes automatizados passando (`dotnet test TS4Translator.sln --filter "FullyQualifiedName!~TS4Translator.App"`).
+Nenhum. 147 testes automatizados passando (`dotnet test TS4Translator.sln --filter "FullyQualifiedName!~TS4Translator.App"`).
 `TS4Translator.Core.Tests` finalmente tem testes reais (`StringSimilarityTests`) — estava vazio (só
 scaffolding do template) desde o início do projeto.
 `TS4Translator.App` não tem testes automatizados de UI (não há framework de UI test configurado), mas

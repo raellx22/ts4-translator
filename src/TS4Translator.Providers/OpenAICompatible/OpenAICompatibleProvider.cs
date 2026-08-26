@@ -69,8 +69,15 @@ public sealed class OpenAICompatibleProvider(HttpClient httpClient, OpenAICompat
         var completion = await response.Content.ReadFromJsonAsync<ChatCompletionResponse>(cancellationToken).ConfigureAwait(false);
         var content = completion?.Choices.FirstOrDefault()?.Message.Content ?? string.Empty;
 
+        // A structurally valid JSON object with "id": null or "translation": null (or the field
+        // simply absent) deserializes without error but is not a usable result - drop it here rather
+        // than passing a null translation downstream, same philosophy as SalvageCompleteObjects
+        // dropping objects that don't parse at all (brief section 46: never trust the provider's
+        // response to be complete or well-formed). The id will then legitimately fall into
+        // TranslationOrchestrator's "provider returned no result for item" handling.
         return ParseWithRecovery(content)
-            .Select(r => new TranslationResultItem(r.Id, r.Translation))
+            .Where(r => r.Id is not null && r.Translation is not null)
+            .Select(r => new TranslationResultItem(r.Id!, r.Translation!))
             .ToList();
     }
 
@@ -194,7 +201,14 @@ public sealed class OpenAICompatibleProvider(HttpClient httpClient, OpenAICompat
         [property: JsonPropertyName("id")] string Id,
         [property: JsonPropertyName("text")] string Text);
 
+    /// <summary>
+    /// Both fields are nullable even though a well-behaved provider always sends them: System.Text.Json
+    /// does not enforce non-nullable reference-type properties at deserialization time, so a response
+    /// with "id": null or "translation": null (or the field simply missing) silently produces null here
+    /// rather than throwing - declaring these as non-nullable would just hide that reality, not prevent
+    /// it (this was a real crash, not a hypothetical - see the filter in TranslateBatchAsync above).
+    /// </summary>
     private sealed record PromptResponseItem(
-        [property: JsonPropertyName("id")] string Id,
-        [property: JsonPropertyName("translation")] string Translation);
+        [property: JsonPropertyName("id")] string? Id,
+        [property: JsonPropertyName("translation")] string? Translation);
 }

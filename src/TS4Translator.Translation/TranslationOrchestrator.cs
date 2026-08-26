@@ -119,6 +119,19 @@ public sealed class TranslationOrchestrator(
                 continue;
             }
 
+            // A provider can return a well-formed result for this id with a null/absent translation
+            // field (e.g. a JSON response with "translation": null) - structurally valid, but nothing
+            // downstream can work with it. TokenProtector.Restore/TranslationValidator.Validate both
+            // reject null loudly by design (never silently treat missing data as empty), so this must
+            // be caught here as a per-item failure - never let it reach them and crash the whole batch.
+            if (candidates[0].TranslatedProtectedText is null)
+            {
+                outcomesById[item.Id] = new TranslationOutcome(item.Id, item.Text, TranslatedText: null, Success: false,
+                    Issues: [new ValidationIssue(ValidationIssueCode.ProviderResultMissing, ValidationSeverity.Critical,
+                        $"The translation provider returned a null translation for item '{item.Id}'.")]);
+                continue;
+            }
+
             var protectedString = protectedByitemId[item.Id];
             var restoreResult = tokenProtector.Restore(candidates[0].TranslatedProtectedText, protectedString);
             var issues = translationValidator.Validate(item.Text, restoreResult.RestoredText, restoreResult);

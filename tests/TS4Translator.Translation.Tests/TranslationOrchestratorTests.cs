@@ -84,6 +84,20 @@ public class TranslationOrchestratorTests
     }
 
     [Fact]
+    public async Task TranslateAsync_ProviderReturnsNullTranslationForAnItem_ReturnsFailureInsteadOfThrowing()
+    {
+        var provider = new FakeTranslationProvider(misbehavior: FakeProviderMisbehavior.NullTranslationForFirstResult);
+        var items = new[] { new TranslationSourceItem("1", "Only item.") };
+
+        var outcomes = await _sut.TranslateAsync(items, provider, English, PortugueseBrazil);
+
+        Assert.False(outcomes[0].Success);
+        Assert.Null(outcomes[0].TranslatedText);
+        Assert.Contains(outcomes[0].Issues, i => i.Code == ValidationIssueCode.ProviderResultMissing);
+        Assert.Equal(0, _memory.SaveCallCount);
+    }
+
+    [Fact]
     public async Task TranslateAsync_ProviderCorruptsAToken_ReturnsFailureButKeepsBestEffortText()
     {
         var provider = new FakeTranslationProvider(misbehavior: FakeProviderMisbehavior.StripTokensFromFirstResult);

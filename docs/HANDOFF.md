@@ -20,15 +20,16 @@ Sims4 Core, Translation Core (TokenProtector/TranslationValidator/BatchBuilder/T
 Translation Memory exact-match, Project System, extração/persistência de strings
 (`IProjectStringService`), configuração de provider com API key segura via DPAPI
 (`IProviderConfigurationService`/`ISecretStore`), as quatro telas de produto (`HomePage`, `EditorPage`,
-`SettingsPage`, `GlossaryPage`), e — nesta rodada mais recente (DEC-012 a DEC-016) — edição manual
+`SettingsPage`, `GlossaryPage`), e — nesta rodada mais recente (DEC-012 a DEC-017) — edição manual
 persistente com histórico, drag-and-drop de `.package` na Home com diff de reimportação, Glossário
 (serviço + UI de escopo global), preset NVIDIA NIM em Configurações, Translation Profiles (instruções
 de estilo livres por projeto), e fuzzy matching em Translation Memory (Levenshtein, reaproveita ≥97%
-similar sem chamar o provider, sempre marcado para revisão) — tudo pronto e testado (144 testes
-automatizados + `GlossaryPage`/preset NVIDIA NIM verificados rodando o app de verdade). **A única peça
-do caminho principal ainda não exercitada com dados reais é a chamada HTTP de tradução em si** (nunca
-rodou contra um LM Studio ou NVIDIA NIM de verdade, só contra HTTP falso em teste e contra o fallback
-"sem provider configurado" no app real).
+similar sem chamar o provider, sempre marcado para revisão) — tudo pronto e testado (147 testes
+automatizados + `GlossaryPage`/preset NVIDIA NIM verificados rodando o app de verdade). **O usuário já
+testou a tradução contra um provider real** (fora desta sessão de desenvolvimento) e encontrou um bug
+real — `ArgumentNullException` quando o provider respondia `"translation": null` para um item,
+derrubando o batch inteiro. Corrigido (DEC-017), com testes de regressão. O usuário continua testando
+ativamente; qualquer novo problema relatado deve virar uma correção pontual do mesmo jeito.
 
 **Importante:** ao adicionar `customInstructions` (DEC-015), foi descoberto que o glossário (DEC-012)
 nunca chegou a ser de fato usado pelo app real — `EditorPageViewModel.TranslateAsync` nunca buscava os
@@ -91,7 +92,7 @@ Depois disso, seguir a lista "Próximas tarefas concretas" no fim de `docs/ROADM
 ## Important files
 
 - `docs/DECISIONS.md` — leia antes de mudar qualquer versão de pacote ou formato de arquivo; a
-  maioria das escolhas não óbvias já foi justificada ali (DEC-001 a DEC-016).
+  maioria das escolhas não óbvias já foi justificada ali (DEC-001 a DEC-017).
 - `docs/BUILD.md` — como compilar, testar, rodar, e (importante) como empacotar/instalar um MSIX
   local para testar qualquer fluxo que use `FileOpenPicker` ou outra API mediada por broker do
   Windows. `dotnet run` sozinho **não** funciona para esses casos (DEC-010) — não gaste tempo
@@ -147,12 +148,14 @@ Todas em `docs/DECISIONS.md`, mas as mais fáceis de "corrigir" por engano:
 
 Nenhum bug conhecido no código existente. Bugs reais encontrados em sessões anteriores já foram
 corrigidos e commitados (exceção engolida pelo `AsyncRelayCommand`; o "bug" do picker era um problema
-de processo de teste, não de código — ver DEC-010). Ver "Known issues" em `docs/STATUS.md` para riscos
-documentados que não são bugs confirmados.
+de processo de teste, não de código — ver DEC-010; `ArgumentNullException` quando o provider retornava
+`"translation": null` — ver DEC-017, primeiro bug real reportado pelo próprio usuário testando fora
+desta sessão). Ver "Known issues" em `docs/STATUS.md` para riscos documentados que não são bugs
+confirmados.
 
 ## Tests currently failing
 
-Nenhum. 144 testes automatizados passando.
+Nenhum. 147 testes automatizados passando.
 
 ## Commands to build / test / run
 

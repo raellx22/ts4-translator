@@ -10,6 +10,7 @@ public enum FakeProviderMisbehavior
     DropFirstResult,
     DuplicateFirstResult,
     StripTokensFromFirstResult,
+    NullTranslationForFirstResult,
 }
 
 /// <summary>Configurable <see cref="ITranslationProvider"/> test double for orchestrator tests.</summary>
@@ -55,6 +56,16 @@ public sealed class FakeTranslationProvider(
         else if (misbehavior == FakeProviderMisbehavior.StripTokensFromFirstResult && results.Count > 0)
         {
             results[0] = results[0] with { TranslatedProtectedText = "text with token removed" };
+        }
+        else if (misbehavior == FakeProviderMisbehavior.NullTranslationForFirstResult && results.Count > 0)
+        {
+            // Simulates a real bug found in production: a provider whose JSON response has
+            // "translation": null for one id. TranslationResultItem.TranslatedProtectedText is declared
+            // non-nullable, but nothing stops a misbehaving provider from constructing one with null
+            // anyway (the compiler only warns; it does not throw) - the orchestrator must defend
+            // against this itself rather than trust every ITranslationProvider implementation to be
+            // well-behaved.
+            results[0] = results[0] with { TranslatedProtectedText = null! };
         }
 
         return Task.FromResult<IReadOnlyList<TranslationResultItem>>(results);

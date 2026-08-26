@@ -653,3 +653,55 @@ chamar o provider, mas sempre marcada para revisão — nunca conta como "traduz
 UI de "sugestões de fuzzy match" navegável (mostrar os 3-5 candidatos mais próximos para o tradutor
 escolher, usando o limiar mais permissivo de 0.85 já exposto pela API) continua não implementada — é o
 próximo passo natural se isso se mostrar valioso na prática.
+
+---
+
+## DEC-017 — Bug real reportado pelo usuário: `ArgumentNullException: translatedText` travava a tradução inteira quando o provider respondia `"translation": null` para um item
+
+**Contexto:** Primeiro teste prático do usuário contra um provider HTTP real (rodando o app instalado
+como MSIX) produziu `Falha ao traduzir (ArgumentNullException): Value cannot be null. (Parameter
+'translatedText')` — a primeira falha real encontrada testando fora desta sessão. Rastreamento: o
+provider respondeu com um item estruturalmente válido mas `"translation": null` (ou o campo ausente).
+`OpenAICompatibleProvider.PromptResponseItem` estava declarado com `string Translation` (não-nulo), mas
+`System.Text.Json` **não** valida nulabilidade de tipo referência não-nulo na desserialização — a
+anotação é só para o compilador, não para o runtime. O `null` passava intacto até
+`new TranslationResultItem(r.Id, r.Translation)`, cujo tipo (`Core/Translation/TranslationResultItem.cs`)
+também é `string` não-nulo só por convenção, sem checagem de fato. `TranslationOrchestrator` então
+passava `candidates[0].TranslatedProtectedText` direto para `TokenProtector.Restore`, que faz
+`ArgumentNullException.ThrowIfNull(translatedText)` por design (rejeitar null é o comportamento correto
+*daquele* método) — só que nada antes dele impedia um `null` de chegar ali, e a exceção não era
+capturada em lugar nenhum dentro do loop de batch, derrubando a tradução do batch inteiro (não só do
+item problemático) até o `catch` genérico em `EditorPageViewModel.TranslateAsync`.
+
+**Decisão — corrigido em duas camadas, cada uma no nível certo:**
+1. **Na origem** (`OpenAICompatibleProvider`): `PromptResponseItem.Id`/`.Translation` passaram a ser
+   `string?` (documentando a realidade, não escondendo-a atrás de uma anotação otimista), e
+   `TranslateBatchAsync` filtra (`.Where(r => r.Id is not null && r.Translation is not null)`) antes de
+   construir `TranslationResultItem` — mesma filosofia já aplicada a JSON truncado/malformado
+   (`SalvageCompleteObjects`, seção 46): um item que não é utilizável é descartado, nunca repassado como
+   um `null` disfarçado de `string`.
+2. **Defesa em profundidade no orquestrador** (`TranslationOrchestrator.TranslateBatchAsync`): um novo
+   guard checa `candidates[0].TranslatedProtectedText is null` **antes** de chamar
+   `tokenProtector.Restore`, tratando como o mesmo caso de `ProviderResultMissing` já existente (o
+   provider não devolveu nada utilizável para aquele id) — item vira uma falha isolada, resto do batch
+   continua normalmente. Esta camada existe porque `ITranslationProvider` é uma interface com
+   implementações futuras (Argos, DeepL, ...) que a orquestração não pode auditar uma a uma; nenhuma
+   implementação individual, por mais corrigida que esteja, deveria ser a única linha de defesa contra
+   um contrato violado.
+
+**Por que os testes existentes não pegaram isso antes:** toda a suíte de `OpenAICompatibleProviderTests`
+usava JSON de teste que sempre tinha `"translation"` como uma string de verdade — nenhum teste
+verificava `"translation": null` explicitamente, só ausência de objeto inteiro (JSON truncado) ou
+resposta completamente não-parseável. É uma lacuna de cobertura diferente de "JSON malformado": aqui o
+JSON é perfeitamente válido, só que semanticamente incompleto.
+
+**Testes adicionados:** 2 em `OpenAICompatibleProviderTests` (`"translation": null` descartado,
+`"id": null` descartado), 1 em `TranslationOrchestratorTests` (`FakeProviderMisbehavior.NullTranslationForFirstResult`,
+simulando um provider mal-comportado que constrói um `TranslationResultItem` com `null` mesmo com o tipo
+declarado não-nulo — prova que a defesa do orquestrador funciona independente de qual provider é usado).
+Total: 144 → 147 testes.
+
+**Consequências:** Qualquer novo `ITranslationProvider` que desserializa a resposta de uma API externa
+deve tratar campos "obrigatórios" como potencialmente nulos no tipo de desserialização (`string?`, não
+`string`), e filtrar antes de construir `TranslationResultItem` — declarar um campo como não-nulo não o
+torna não-nulo de fato quando a fonte é uma resposta de rede fora do controle do app.
