@@ -13,7 +13,7 @@ o conjunto de itens, não o primeiro que funcionar.
 - [x] Argos Translate pesquisado: sem `.exe` oficial, mas sem dependência de `torch` na versão atual
   (`ctranslate2`+`spacy`+`sacremoses`, wheels Windows nativos disponíveis); prior art .NET encontrado
   (`ArgosTranslate.PyNet`, via pythonnet). Ver relatório de pesquisa arquivado nesta sessão — resumo
-  em `docs/ARGOS.md` (a criar na Fase 4).
+  em `docs/ARGOS.md`.
 - [x] NVIDIA NIM pesquisado: endpoint compatível com OpenAI (`/v1/chat/completions`), modelo
   `nvidia/riva-translate-4b-instruct-v2` confirmado atual, template de prompt observado ao vivo no
   playground (system prompt em linguagem natural, não tag curta — discrepância encontrada com a doc
@@ -69,12 +69,16 @@ o conjunto de itens, não o primeiro que funcionar.
   `TranslationJob` existir como entidade persistida (seção 35), o que também não existe ainda.
 - [ ] `ITranslationJobService`/estados de job (seção 35) — não iniciado.
 
-## FASE 4 — Argos — **não iniciada**
+## FASE 4 — Argos — **não iniciada, deliberadamente (ver `docs/ARGOS.md`)**
 
-Ver achados de pesquisa: sem dependência de `torch`, mas nenhuma receita testada de empacotamento
-"Python embutido + argostranslate" foi encontrada como prior art — vai exigir prototipagem própria.
-Avaliar `ArgosTranslate.PyNet` (pythonnet) como alternativa a um sidecar via stdin/stdout antes de
-comprometer a arquitetura com uma das duas abordagens.
+Empacotar um runtime Python + `argostranslate`/`ctranslate2` dentro de um MSIX é um projeto de
+integração de sistemas à parte, que exigiria prototipagem e teste em máquina limpa antes de qualquer
+código de produção — não é algo que deveria ser fingido como "concluído" sem essa verificação (seção 60
+do brief). `docs/ARGOS.md` documenta as duas abordagens candidatas (sidecar por processo vs. `pythonnet`
+embutido), os riscos de cada uma, e os passos concretos que uma sessão futura com acesso a testar
+empacotamento MSIX de verdade deveria seguir antes de escrever `ArgosTranslateProvider`. A arquitetura
+já está pronta para receber esse provider sem nenhuma mudança (`ITranslationProvider`,
+`ProviderCapabilities.SupportsLocalExecution`, `AppDataPaths.ModelsDirectory` já existem para isso).
 
 ## FASE 5 — NVIDIA NIM — **base pronta via `OpenAICompatibleProvider`, falta validar e expor na UI**
 

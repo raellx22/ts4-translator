@@ -2,7 +2,7 @@
 
 Leia isto antes de qualquer outra coisa se você é uma nova sessão/agente retomando este projeto.
 Depois leia `README.md`, `docs/STATUS.md`, `docs/ROADMAP.md`, `docs/ARCHITECTURE.md`, `docs/DECISIONS.md`,
-`docs/BUILD.md`, nessa ordem. Não reconstrua a arquitetura do zero — ela existe, compila, tem 121
+`docs/BUILD.md`, nessa ordem (e `docs/ARGOS.md` se for mexer com o provider offline). Não reconstrua a arquitetura do zero — ela existe, compila, tem 121
 testes automatizados passando, e **o caminho prático completo (importar → extrair → editor →
 exportar com validação) foi verificado de ponta a ponta rodando o app instalado de verdade.**
 

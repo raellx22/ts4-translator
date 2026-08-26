@@ -102,3 +102,5 @@ docs/
 - [`docs/ROADMAP.md`](docs/ROADMAP.md) — fases de implementação e o que falta.
 - [`docs/STATUS.md`](docs/STATUS.md) — estado atual, bloqueios, próximos passos.
 - [`docs/HANDOFF.md`](docs/HANDOFF.md) — como retomar este projeto em uma nova sessão/agente.
+- [`docs/ARGOS.md`](docs/ARGOS.md) — por que Argos Translate (offline) não foi implementado nesta fase,
+  e o que uma sessão futura precisa verificar antes de tentar.
