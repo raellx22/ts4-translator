@@ -84,8 +84,9 @@ real nesta sessão (sem chave disponível). Antes de expor isso como "preset Riv
    (nosso system prompt genérico de tradução vs. a possibilidade de um formato tag curta
    `en-pt_BR` — as duas fontes pesquisadas na Fase 0 discordam sobre isso).
 2. Confirmar se `temperature=0` é aceito e produz saída estável (não documentado pela NVIDIA).
-3. Adicionar um preset/`ProviderConfiguration` (seção 37, ainda não implementado) em vez de exigir
-   que o usuário digite endpoint/model manualmente para o caso Riva Translate.
+3. [x] Preset de endpoint/model para o caso Riva Translate — `SettingsPageViewModel.ApplyNvidiaNimPresetCommand`
+   (DEC-014). Preenche os campos, não salva sozinho, e não afirma que o formato de prompt foi validado
+   — os itens 1 e 2 acima continuam pendentes de uma API key real.
 
 ## FASE 6 — Providers adicionais — **`OpenAICompatibleProvider` concluído; os demais não iniciados**
 

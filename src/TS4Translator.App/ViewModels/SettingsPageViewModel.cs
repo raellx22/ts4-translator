@@ -35,6 +35,23 @@ public sealed partial class SettingsPageViewModel(
     [ObservableProperty]
     public partial string StatusText { get; set; } = string.Empty;
 
+    /// <summary>
+    /// Fills endpoint/model for NVIDIA NIM's OpenAI-compatible chat-completions endpoint (brief
+    /// section 5/17). Does not fill the API key (the user's own secret) or save automatically - the
+    /// user still reviews and clicks "Salvar". The exact prompt format the Riva Translate model
+    /// expects has not been validated against a real API key in this codebase (two sources disagreed
+    /// during research - see docs/ROADMAP.md Fase 5); this preset only saves typing the well-known
+    /// endpoint/model values, it does not claim the translation quality has been verified.
+    /// </summary>
+    [RelayCommand]
+    private void ApplyNvidiaNimPreset()
+    {
+        Name = "NVIDIA NIM (Riva Translate)";
+        Endpoint = "https://integrate.api.nvidia.com/v1";
+        Model = "nvidia/riva-translate-4b-instruct-v2";
+        StatusText = "Preset aplicado. Preencha sua API key da NVIDIA e clique em Salvar.";
+    }
+
     [RelayCommand]
     private async Task LoadAsync()
     {

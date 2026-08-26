@@ -67,12 +67,15 @@ pronta e verificada. Ver `docs/ROADMAP.md` para o detalhamento completo por fase
   Automation (adicionar → persiste após reload → remover → persiste a remoção após reload); um bug
   real de binding no botão "Remover" foi encontrado e corrigido nesse processo. Termos por projeto
   ainda não têm UI (só a global). Ver DEC-013.
+- Preset "NVIDIA NIM" em Configurações — preenche endpoint/model conhecidos com um clique, sem afirmar
+  que a tradução com esse modelo já foi validada (ainda não foi, ver Fase 5 do ROADMAP). Verificado
+  rodando o app de verdade. Ver DEC-014.
 - `AppDataPaths` (Infrastructure) resolvendo `%LOCALAPPDATA%\TS4Translator\{Data,Logs,Cache,Models}`.
 - Composition root em `App.xaml.cs` com todos os serviços registrados (`AddSims4Services`,
   `AddTranslationServices`, `AddPersistenceServices`, `AddInfrastructureServices`,
   `AddProviderServices`), migration aplicada no `OnLaunched`.
 - Shell WinUI (NavigationView, Mica, título estendido) a partir do template `winui-navview`.
-- Toda decisão relevante registrada em `docs/DECISIONS.md` (DEC-001 a DEC-013).
+- Toda decisão relevante registrada em `docs/DECISIONS.md` (DEC-001 a DEC-014).
 
 ## In progress
 

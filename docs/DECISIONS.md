@@ -530,3 +530,31 @@ engolindo exceção, DEC-010) que um bug só apareceu ao clicar de verdade, não
 chamar um comando do ViewModel da página (não do item) deve usar `Tag="{x:Bind}"` + `Click` no
 code-behind, não `Binding ElementName=...Command`. Verificado rodando o app de verdade (não só
 compilado) — ver método em `docs/HANDOFF.md` sobre como fazer isso com UI Automation via PowerShell.
+
+---
+
+## DEC-014 — Preset "NVIDIA NIM" em Configurações: só preenche endpoint/model, não afirma qualidade validada
+
+**Contexto:** A Fase 5 do roadmap identificou que `OpenAICompatibleProvider` já deveria funcionar contra
+o endpoint da NVIDIA (compatível com OpenAI), mas o formato de prompt exato esperado por
+`nvidia/riva-translate-4b-instruct-v2` nunca foi validado com uma API key real nesta sessão (duas
+fontes de pesquisa discordam — ver Fase 0/5 do ROADMAP). Digitar manualmente
+`https://integrate.api.nvidia.com/v1` e o nome exato do modelo é tedioso e propenso a erro de digitação.
+
+**Decisão:** Adicionar um botão "Usar preset NVIDIA NIM" em `SettingsPageViewModel.ApplyNvidiaNimPresetCommand`
+que só preenche `Name`/`Endpoint`/`Model` nos campos do formulário — não salva automaticamente (o usuário
+ainda revisa e clica "Salvar"), não preenche a API key (é um segredo do usuário), e não afirma em
+nenhum texto que a tradução foi validada como funcional. Isso evita repetir digitação sem fingir que o
+formato de prompt do Riva Translate já foi confirmado — se o usuário testar e o resultado não fizer
+sentido, é exatamente o tipo de achado que a rodada de correção pós-teste deveria capturar.
+
+**Verificado rodando o app de verdade** via UI Automation: clicar no botão preenche os três campos com
+os valores esperados, confirmado lendo `ValuePattern.Current.Value` de cada `TextBox` depois do clique.
+
+**Alternativas:** Um `ComboBox` de "provider conhecido" com múltiplos presets (LM Studio, NVIDIA NIM,
+outros) — mais estrutura do que o necessário enquanto só há um preset real para oferecer; revisitar
+quando um segundo preset (ex. um servidor OpenAI-compatible comum) fizer sentido.
+
+**Consequências:** Quando o formato de prompt do Riva Translate for validado com uma API key real
+(ver Fase 5 do ROADMAP), atualizar o texto do preset/documentação para refletir isso — hoje o preset é
+só conveniência de digitação, não uma integração validada ponta a ponta.

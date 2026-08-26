@@ -36,6 +36,7 @@
                 Opacity="0.7"
                 Text="Deixe em branco para manter a API key já salva sem alterá-la."
                 TextWrapping="Wrap" />
+            <Button Command="{x:Bind ViewModel.ApplyNvidiaNimPresetCommand}" Content="Usar preset NVIDIA NIM" />
         </StackPanel>
 
         <StackPanel
