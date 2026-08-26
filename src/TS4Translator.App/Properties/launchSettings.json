@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "TS4Translator.App (Package)": {
+      "commandName": "MsixPackage"
+    },
+    "TS4Translator.App (Unpackaged)": {
+      "commandName": "Project"
+    }
+  }
+}

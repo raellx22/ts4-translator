@@ -1,0 +1,10 @@
+<Project>
+  <Import Project="$([MSBuild]::GetPathOfFileAbove('Directory.Build.props', '$(MSBuildThisFileDirectory)..'))" />
+
+  <PropertyGroup>
+    <!-- CA1707 (no underscores in identifiers) is suppressed for test projects only: the
+         Method_Scenario_ExpectedBehavior naming convention is standard xUnit practice and more
+         readable than the PascalCase alternative CA1707 would otherwise force. -->
+    <NoWarn>$(NoWarn);CA1707</NoWarn>
+  </PropertyGroup>
+</Project>

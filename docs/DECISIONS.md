@@ -1,0 +1,180 @@
+# Decisions
+
+Architectural decisions for TS4 Translator, in the format requested by the project brief. Only
+decisions with real consequences are recorded here — trivial choices are not.
+
+---
+
+## DEC-001 — Reuse the stack proven by SimsPackageBatcher
+
+**Contexto:** O projeto exige WinUI 3 + Windows App SDK, .NET moderno, e uma biblioteca madura para
+DBPF/STBL do The Sims 4. Uma sessão anterior neste mesmo ambiente Windows já construiu e testou até
+o fim `SimsPackageBatcher` (`../SimsPackageBatcher/`), um app WinUI 3 que lê/escreve `.package` via
+LlamaLogic.Packages, com build e testes passando em 2026-08-26.
+
+**Decisão:** Adotar exatamente o mesmo conjunto de versões, já que está comprovadamente funcional
+neste ambiente, em vez de redescobrir compatibilidade do zero:
+
+| Componente | Versão |
+|---|---|
+| .NET SDK | 10.0.400 (`global.json`, `rollForward: latestPatch`) |
+| TFM da App | `net10.0-windows10.0.26100.0` |
+| `TargetPlatformMinVersion` | `10.0.17763.0` (Windows 10 1809) |
+| Windows App SDK | 2.4.0 |
+| LlamaLogic.Packages | 3.8.2 |
+| CommunityToolkit.Mvvm | 8.4.2 |
+| Microsoft.Extensions.DependencyInjection | 10.0.11 |
+| xUnit | 2.9.3 / Microsoft.NET.Test.Sdk 17.14.1 |
+
+**Alternativas:** Usar a versão mínima do Windows App SDK sugerida pelo template `dotnet new`
+(1.8.x) e a versão mais recente do LlamaLogic.Packages disponível no momento.
+
+**Motivo:** Zero incerteza de compatibilidade — o par exato dessas versões já compilou, empacotou
+em MSIX e passou por testes de integração reais neste mesmo ambiente. Divergir sem motivo introduziria
+uma variável de risco sem benefício correspondente.
+
+**Consequências:** Ao atualizar qualquer uma dessas versões no futuro, validar contra a suíte de
+testes deste projeto e, se possível, também contra a do `SimsPackageBatcher`.
+
+---
+
+## DEC-002 — Formato de solução `.sln` clássico, não `.slnx`
+
+**Contexto:** O SDK 10.0.400 tem `dotnet new sln` gerando `.slnx` (XML) por padrão. Ao compilar
+`TS4Translator.slnx` com `-p:Platform=x64`, o MSBuild falhou com `MSB4126` (configuração de solução
+inválida) — o `.slnx` gerado não carrega o mapeamento de configuração/plataforma que a mistura de
+class libraries `AnyCPU` com o projeto WinUI (`x86;x64;ARM64`) exige.
+
+**Decisão:** Gerar a solução com `dotnet new sln --format sln` (formato clássico), igual ao que
+`SimsPackageBatcher.sln` já usa com sucesso.
+
+**Alternativas:** Investigar e escrever manualmente as seções `GlobalSection(SolutionConfigurationPlatforms)`
+equivalentes dentro do `.slnx`.
+
+**Motivo:** O formato clássico resolveu o build imediatamente sem configuração manual adicional, e
+mantém consistência com o projeto irmão.
+
+**Consequências:** Nenhuma perda de funcionalidade percebida; o `.slnx` pode ser reavaliado se uma
+versão futura do SDK corrigir esse gap.
+
+---
+
+## DEC-003 — CA1707 suprimido apenas em projetos de teste
+
+**Contexto:** `Directory.Build.props` define `TreatWarningsAsErrors=true` com `AnalysisLevel=latest-recommended`,
+o que inclui CA1707 (proíbe underscores em identificadores). A convenção `MetodoTestado_Cenario_ResultadoEsperado`
+para nomes de teste xUnit — mais legível que PascalCase concatenado — viola essa regra.
+
+**Decisão:** Criar `tests/Directory.Build.props` que importa o `Directory.Build.props` raiz e adiciona
+`CA1707` a `NoWarn`, escopado apenas à árvore `tests/`.
+
+**Alternativas:** (a) Nomear testes sem underscore (ex.: `RestoreMissingTokenIsInvalid`), como o
+`SimsPackageBatcher` fez; (b) suprimir CA1707 globalmente.
+
+**Motivo:** A convenção com underscore comunica cenário e resultado esperado de forma muito mais
+clara em uma suíte que crescerá para centenas de casos (tokens, STBL, providers, validação). Suprimir
+apenas em `tests/` mantém o código de produção sob a regra normal.
+
+**Consequências:** Nenhuma — código de produção continua proibido de usar underscores em identificadores.
+
+---
+
+## DEC-004 — TokenProtector: extração por regex, reconciliação por identidade de placeholder
+
+**Contexto:** Seção 9 do brief exige que nenhum provider de tradução seja responsável por preservar
+tokens como `{0.SimFirstName}`, `{M0.He}`, `{F0.She}`, tags de markup e quebras de linha.
+
+**Decisão:**
+- Um único regex de extração cobre três categorias na mesma passada, preservando ordem de aparição:
+  chaves `\{[^{}\r\n]*\}` (não aninhadas), tags `<\/?[a-zA-Z][^<>\r\n]*\/?>`, e quebras de linha
+  literais (`\r\n`, `\n`, `\r`).
+- Cada ocorrência recebe um placeholder opaco e sequencial (`__TS4_TOKEN_0001__`, `__TS4_TOKEN_0002__`, ...),
+  mesmo quando o texto original do token se repete — isso evita ambiguidade ao reconciliar depois.
+- `Restore` nunca confia em ordem ou contagem: localiza cada placeholder esperado pelo texto exato,
+  substitui de volta ao valor original, e reporta como problema qualquer ausência, duplicação, token
+  inesperado (não reconhecido), ou placeholder alterado o suficiente para não bater com nenhum esperado.
+- Reordenação de tokens (todos presentes, uma vez cada, em ordem diferente) é sinalizada mas **não**
+  marca o resultado como inválido — ordem de palavras varia legitimamente entre idiomas.
+
+**Alternativas:** Reconciliar por posição/índice sequencial (frágil se o provider reordenar);
+usar hash em vez de índice sequencial no placeholder (não traz benefício e dificulta debug visual).
+
+**Motivo:** Corresponde exatamente ao fluxo descrito na seção 9, e o design por identidade (não por
+posição) é o que permite detectar corretamente duplicação, ausência e reordenação como categorias
+distintas, conforme a seção 9 exige.
+
+**Consequências:** Tags `<...>` genéricas podem, em teoria, capturar texto que não é markup real do
+Sims 4 (por exemplo, um "menor que" literal seguido de um "maior que"). Isso ainda não foi confirmado
+como um problema real — nenhuma amostra real de STBL foi inspecionada nesta sessão. Repriorizar se
+aparecer em testes com mods reais.
+
+---
+
+## DEC-005 — App WinUI iniciado a partir do template `winui-navview`
+
+**Contexto:** O SDK tem o template `dotnet new winui-navview` instalado, que já gera uma shell
+completa com `NavigationView`, título estendido (`ExtendsContentIntoTitleBar`), páginas Home/About/Settings
+e empacotamento MSIX de projeto único — exatamente a estrutura pedida nas seções 2 e 41.
+
+**Decisão:** Gerar `TS4Translator.App` com `dotnet new winui-navview -tfm net10.0 -tpmv 10.0.17763.0 -w 2.4.0`,
+depois renomear o namespace gerado (`TS4Translator_App`, com underscore por sanitização automática do
+nome do projeto) para `TS4Translator.App`.
+
+**Alternativas:** Criar a shell manualmente a partir do zero, ou partir do template mais simples
+`winui-mvvm` (sem `NavigationView` pronto).
+
+**Motivo:** Menos código de infraestrutura para escrever e validar manualmente; o template já resolve
+Mica/tema via `ExtendsContentIntoTitleBar`, e a página Settings já existe como ponto de partida para
+a seção 41.
+
+**Consequências:** Nenhuma perda de controle arquitetural — o template gera apenas XAML/code-behind
+de shell, sem lógica de negócio; DI, MVVM com CommunityToolkit.Mvvm, e os serviços da aplicação foram
+adicionados por cima, não vieram do template.
+
+---
+
+## DEC-006 — Locale de STBL via `LlamaLogic.Packages.SmartSimUtilities`, não reimplementado à mão
+
+**Contexto:** A seção 8 do brief exige confirmar como o locale é codificado na Instance ID de um
+recurso STBL do Sims 4, sem confiar em fontes secundárias. Uma pesquisa inicial (agente em background)
+encontrou um enum interno `LocaleFullInstancePrefix` no código-fonte do LlamaLogic (o byte alto da
+Instance ID mapeia locale → byte, ex.: `en_US=0x00`, `pt_BR=0x11`), mas esse tipo não está documentado
+no XML de API pública do pacote instalado — inspecionando `LlamaLogic.Packages.xml` (3.8.2) diretamente,
+`LocaleFullInstancePrefix` não aparece nenhuma vez, o que indica que é `internal`.
+
+O que **é** público e foi confirmado por inspeção direta do XML doc do pacote instalado (não apenas
+pela pesquisa) é `LlamaLogic.Packages.SmartSimUtilities`, com três métodos estáticos:
+
+- `GetStringTableResourceKey(CultureInfo locale, uint group, ulong fullInstance) -> ResourceKey`
+- `GetResourceKeyForLocale(ResourceKey key, CultureInfo locale) -> ResourceKey`
+- `GetStringTableLocale(ResourceKey key) -> CultureInfo`
+
+**Decisão:** `TS4Translator.Sims4.SmartSimStringTableService` chama esses três métodos diretamente,
+em vez de reimplementar o deslocamento de bits do byte de locale. `IStringTableService` (em `Core`)
+expõe `CultureInfo` do BCL como o tipo de locale — não um enum próprio nem o enum interno do LlamaLogic
+— porque `CultureInfo` já é o vocabulário natural de locale em .NET e evita duplicar a tabela de
+mapeamento do LlamaLogic em outro lugar do código.
+
+**Verificado empiricamente** (11 testes em `SmartSimStringTableServiceTests`/`Sims4PackageServiceTests`,
+10 aprovados de primeira, 1 corrigido após falha real):
+- `CultureInfo.GetCultureInfo("en-US")`, `"pt-BR"` e `"fr-FR"` funcionam como esperado com
+  `GetStringTableResourceKey`/`GetStringTableLocale` — confirma que a biblioteca aceita os nomes de
+  cultura padrão do BCL (com hífen), não os identificadores com underscore do enum interno.
+- **A doc XML do próprio LlamaLogic 3.8.2 está incorreta**: declara `<exception cref="ArgumentOutOfRangeException">`
+  para locale não suportado, mas o binário na verdade lança `System.NotSupportedException`
+  ("Unknown or unsupported locale: ar-SA") — confirmado rodando o teste, não assumido. `IStringTableService`
+  documenta `NotSupportedException`, refletindo o comportamento real, não a doc do pacote.
+- `WithLocale` aplicado ao mesmo locale já presente é idempotente (mesma chave de volta).
+- Uma chave PT-BR criada, escrita em um package sintético via `Sims4PackageService`, reaberta e
+  relida via `FindStringTablesAsync`, continua identificável como PT-BR por `GetLocale`.
+
+**Alternativas:** Copiar a tabela `LocaleFullInstancePrefix` (en_US=0x00 ... pt_BR=0x11, sem Thai)
+para dentro do projeto e fazer o deslocamento de bits manualmente.
+
+**Motivo:** Zero risco de divergência de uma futura versão da biblioteca (se o LlamaLogic mudar a
+codificação de locale internamente, `SmartSimUtilities` continua correto sem exigir mudança aqui).
+Menos código próprio para testar e manter.
+
+**Consequências:** `TS4Translator.Sims4` depende de `SmartSimUtilities` continuar existindo com essa
+assinatura em versões futuras do LlamaLogic.Packages — revalidar com testes ao atualizar a versão do
+pacote (ver DEC-001).
