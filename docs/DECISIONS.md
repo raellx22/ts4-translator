@@ -178,3 +178,42 @@ Menos código próprio para testar e manter.
 **Consequências:** `TS4Translator.Sims4` depende de `SmartSimUtilities` continuar existindo com essa
 assinatura em versões futuras do LlamaLogic.Packages — revalidar com testes ao atualizar a versão do
 pacote (ver DEC-001).
+
+---
+
+## DEC-007 — Persistência: EF Core + SQLite via `IDbContextFactory`, migrations reais
+
+**Contexto:** A seção 37 exige SQLite com schema versionado por migrations. `Microsoft.EntityFrameworkCore.Sqlite`
+10.0.0 (a versão inicial visada) falhou a restauração: o NuGet audit tratou como erro duas
+vulnerabilidades conhecidas de alta severidade nas dependências transitivas (`SQLitePCLRaw.lib.e_sqlite3`
+2.1.11 e `System.Security.Cryptography.Xml` 9.0.0).
+
+**Decisão:**
+- Usar `Microsoft.EntityFrameworkCore.Sqlite`/`.Design` **10.0.11** (último patch da série 10.x no
+  momento), que resolve para uma versão corrigida de `SQLitePCLRaw.lib.e_sqlite3` sem nenhum aviso de
+  segurança — mesma versão de patch já usada para `Microsoft.Extensions.DependencyInjection` (DEC-001),
+  então não introduz uma nova linha de versão para acompanhar.
+- Resolver `TranslatorDbContext` via `IDbContextFactory<TranslatorDbContext>` (`AddDbContextFactory`),
+  não via `AddDbContext` com escopo por requisição — um app desktop WinUI não tem limites de escopo
+  como o ASP.NET; a factory cria um `DbContext` novo por operação, evitando problemas de concorrência
+  em um `DbContext` de vida singleton.
+- Migrations reais via `dotnet ef migrations add` (ferramenta `dotnet-ef` instalada globalmente nesta
+  sessão), com `TranslatorDbContextFactory : IDesignTimeDbContextFactory<TranslatorDbContext>` só para
+  esse fluxo de design-time — em runtime o `DbContext` só é resolvido pela injeção de dependência.
+- CA1861 (`Directory.Build.props` → `TreatWarningsAsErrors`) dispara no código gerado pela própria
+  ferramenta de migrations do EF Core (literais de array em `Up`/`Down`). Suprimido em todo o projeto
+  `TS4Translator.Persistence` via `NoWarn`, porque o arquivo é regenerado a cada `migrations add` — não
+  faz sentido corrigi-lo manualmente para ser sobrescrito na próxima migration.
+- `SqliteConnection.ClearAllPools()` é necessário no cleanup dos testes de integração antes de apagar
+  o diretório temporário — o pool de conexões nativo do `Microsoft.Data.Sqlite` mantém o arquivo aberto
+  mesmo depois do `DbContext`/`ServiceProvider` serem descartados.
+
+**Alternativas:** `Microsoft.Data.Sqlite` puro sem EF Core (menos abstração, mas sem migrations
+automáticas — teria que escrever DDL/versionamento à mão); Dapper.
+
+**Motivo:** EF Core dá migrations versionadas de graça (requisito explícito da seção 37), e o padrão
+`IDbContextFactory` é a recomendação oficial da própria Microsoft para apps desktop/não-ASP.NET.
+
+**Consequências:** Toda entidade de persistência futura (Project, StringEntry, GlossaryTerm,
+TranslationJob, etc. — seção 37) deve ser adicionada como uma nova migration incremental, nunca editando
+`20260826172805_InitialCreate` depois que ela existir em qualquer branch compartilhado.

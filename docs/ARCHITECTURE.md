@@ -61,12 +61,18 @@ tradução (seção 22).
 
 ### TS4Translator.Sims4
 
-Ainda vazio. Vai encapsular `LlamaLogic.Packages` (referenciado apenas aqui) atrás de
-`IPackageService`/`IStringTableService` definidos em `Core`. Nenhum tipo de LlamaLogic deve vazar
-para fora deste projeto — ver o princípio central acima e a seção 6 do brief.
+Encapsula `LlamaLogic.Packages` (referenciado apenas aqui) atrás de `IPackageService`/`IStringTableService`
+definidos em `Core`. Nenhum tipo de LlamaLogic cruza a fronteira deste projeto — ver o princípio
+central acima e a seção 6 do brief.
 
-Bloqueado em pesquisa de fatos (locale encoding no Instance ID de STBL, tipo `StringTableResource`
-exato exposto pela biblioteca) antes de escrever código real — ver `docs/STATUS.md`.
+- `Sims4PackageService : IPackageService` — abre/lê/escreve STBL via `DataBasePackedFile`, sempre
+  para um caminho de saída distinto do original (nunca sobrescreve o mod).
+- `SmartSimStringTableService : IStringTableService` — locale de STBL via
+  `LlamaLogic.Packages.SmartSimUtilities` (não reimplementado à mão — ver DEC-006).
+- `ServiceCollectionExtensions.AddSims4Services()` registra ambos como singletons.
+
+11 testes de integração com packages sintéticos (round-trip escrita→leitura, locale PT-BR/EN/FR,
+saída já existente não é sobrescrita).
 
 ### TS4Translator.Providers
 
@@ -76,22 +82,32 @@ um provider não afetar os outros nem o core do app (seção 18 do brief).
 
 ### TS4Translator.Persistence
 
-Ainda vazio. SQLite com schema versionado (migrations) para as entidades da seção 37 do brief
-(Project, StringEntry, Translation, TranslationMemory, GlossaryTerm, TranslationJob, etc.). API keys
-**nunca** ficam aqui em texto puro — isso é responsabilidade de `Infrastructure` via Windows
-Credential Manager/DPAPI (seção 19).
+SQLite via EF Core, schema versionado por migrations reais (DEC-007). Implementado até agora:
+`TranslationMemory` (busca exata por hash SHA-256 do texto normalizado + par de locales — a
+"killer feature" da seção 63). `TranslatorDbContext` é resolvido via `IDbContextFactory<TranslatorDbContext>`,
+nunca injetado diretamente, porque um app desktop não tem escopo de requisição como o ASP.NET.
+`ServiceCollectionExtensions.AddPersistenceServices(databasePath)` registra a factory e
+`ITranslationMemory`. As demais entidades da seção 37 (Project, StringEntry, GlossaryTerm,
+TranslationJob, etc.) entram como migrations incrementais, uma por feature, quando essa feature for
+implementada — não antecipadamente. API keys **nunca** ficam aqui em texto puro — isso é
+responsabilidade de `Infrastructure` via Windows Credential Manager/DPAPI (seção 19, ainda não
+implementado).
 
 ### TS4Translator.Infrastructure
 
-Ainda vazio. Logging estruturado, armazenamento seguro de credenciais, `HttpClientFactory` para
-providers online.
+`AppDataPaths` resolve e cria `%LOCALAPPDATA%\TS4Translator\{Data,Logs,Cache,Models}` (seção 48) —
+usado pelo `App` para apontar o SQLite e, futuramente, logs/modelos Argos. Logging estruturado e
+armazenamento seguro de credenciais (seção 19) ainda não implementados.
 
 ### TS4Translator.App
 
-Gerado a partir do template `dotnet new winui-navview` (DEC-005), depois com o namespace corrigido
-de `TS4Translator_App` para `TS4Translator.App`. Hoje é só a shell do template (NavigationView +
-Home/About/Settings) sem lógica de negócio conectada — DI, MVVM real e navegação para as telas do
-produto (import, editor, dashboard) ainda não foram implementados.
+Gerado a partir do template `dotnet new winui-navview` (DEC-005), com o namespace corrigido de
+`TS4Translator_App` para `TS4Translator.App`. O composition root (`App.xaml.cs`) monta um
+`ServiceCollection` simples (mesmo padrão do `SimsPackageBatcher`, não um `Generic Host` completo —
+ver DEC-007) chamando `AddSims4Services()`, `AddTranslationServices()`, `AddPersistenceServices(...)`,
+e roda `Database.Migrate()` uma vez antes de ativar a janela. As telas do produto (import, editor,
+dashboard) e a navegação real ainda não existem — hoje é a shell do template (NavigationView +
+Home/About/Settings) sem ViewModels conectados a nenhum serviço.
 
 ## Convenções de qualidade
 

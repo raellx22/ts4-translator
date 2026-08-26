@@ -1,9 +1,10 @@
-﻿using Microsoft.UI.Xaml;
-using Microsoft.UI.Xaml.Controls;
-using Microsoft.UI.Xaml.Data;
-using Microsoft.UI.Xaml.Input;
-using Microsoft.UI.Xaml.Media;
-using Microsoft.UI.Xaml.Navigation;
+﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.UI.Xaml;
+using TS4Translator.Infrastructure;
+using TS4Translator.Persistence;
+using TS4Translator.Sims4;
+using TS4Translator.Translation;
 
 // To learn more about WinUI, the WinUI project structure,
 // and more about our project templates, see: http://aka.ms/winui-project-info.
@@ -15,8 +16,15 @@ namespace TS4Translator.App;
 /// </summary>
 public partial class App : Application
 {
+    private readonly ServiceProvider _services;
     private Window? _window;
-    
+
+    /// <summary>
+    /// The main application window. Use <c>App.Window</c> from any class that needs the window
+    /// reference (for dialogs, pickers, interop, etc.).
+    /// </summary>
+    public static Window Window { get; private set; } = null!;
+
     /// <summary>
     /// Initializes the singleton application object.  This is the first line of authored code
     /// executed, and as such is the logical equivalent of main() or WinMain().
@@ -24,6 +32,12 @@ public partial class App : Application
     public App()
     {
         InitializeComponent();
+
+        _services = new ServiceCollection()
+            .AddSims4Services()
+            .AddTranslationServices()
+            .AddPersistenceServices(AppDataPaths.DatabaseFilePath)
+            .BuildServiceProvider();
     }
 
     /// <summary>
@@ -32,7 +46,13 @@ public partial class App : Application
     /// <param name="args">Details about the launch request and process.</param>
     protected override void OnLaunched(Microsoft.UI.Xaml.LaunchActivatedEventArgs args)
     {
+        using (var dbContext = _services.GetRequiredService<IDbContextFactory<TranslatorDbContext>>().CreateDbContext())
+        {
+            dbContext.Database.Migrate();
+        }
+
         _window = new MainWindow();
+        Window = _window;
         _window.Activate();
     }
 }

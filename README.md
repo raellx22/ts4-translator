@@ -11,21 +11,28 @@ exportar um package de tradução separado — sem jamais alterar o mod original
 ponta a ponta. Ver [`docs/STATUS.md`](docs/STATUS.md) para o estado exato e [`docs/HANDOFF.md`](docs/HANDOFF.md)
 para retomar o trabalho em uma nova sessão.
 
-Implementado e testado até agora:
+Implementado e testado até agora (51 testes, todos passando):
 
 - Solução .NET 10 / WinUI 3 completa (`TS4Translator.sln`), com App, seis bibliotecas de camada e
   quatro projetos de teste, compilando limpo em x64.
 - Shell WinUI com `NavigationView`, título estendido e página de Configurações (a partir do template
-  `winui-navview`, ver [`docs/DECISIONS.md`](docs/DECISIONS.md) DEC-005) — ainda sem lógica de negócio
-  conectada.
+  `winui-navview`, ver [`docs/DECISIONS.md`](docs/DECISIONS.md) DEC-005), com DI (`ServiceCollection`)
+  montada no composition root — ainda sem telas de produto conectadas.
 - `TokenProtector`: protege tokens `{0.SimFirstName}`/`{M0.He}`/`{F0.She}`, tags de markup e quebras
   de linha antes de qualquer tradução, e reconcilia o resultado por identidade de placeholder (não por
   ordem). 23 testes.
 - `TranslationValidator`: consolida os problemas de token com verificações independentes (tradução
   vazia, idêntica ao original, discrepância de tamanho, markup desbalanceado). 12 testes.
+- `Sims4PackageService`/`SmartSimStringTableService`: leitura/escrita real de STBL via
+  `LlamaLogic.Packages`, locale (incluindo PT-BR) via `SmartSimUtilities`, nunca sobrescrevendo o
+  package original. 11 testes com packages sintéticos.
+- `SqliteTranslationMemory`: EF Core + SQLite com migration real, busca exata por texto+par de
+  locales — a base da funcionalidade de reaproveitar traduções ao atualizar um mod (seção 63). 5 testes
+  de integração.
 
-Ainda não implementado: leitura/escrita real de `.package`/STBL, qualquer provider de tradução,
-Translation Memory, glossário, projetos, editor, exportação. Ver [`docs/ROADMAP.md`](docs/ROADMAP.md).
+Ainda não implementado: qualquer provider de tradução, glossário, projetos, editor de strings,
+fuzzy matching, exportação ponta a ponta, empacotamento MSIX de distribuição. Ver
+[`docs/ROADMAP.md`](docs/ROADMAP.md).
 
 ## Por que este stack
 
