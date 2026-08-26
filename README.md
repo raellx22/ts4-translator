@@ -11,7 +11,7 @@ exportar um package de tradução separado — sem jamais alterar o mod original
 ponta a ponta. Ver [`docs/STATUS.md`](docs/STATUS.md) para o estado exato e [`docs/HANDOFF.md`](docs/HANDOFF.md)
 para retomar o trabalho em uma nova sessão.
 
-Implementado e testado até agora (51 testes, todos passando):
+Implementado e testado até agora (74 testes, todos passando):
 
 - Solução .NET 10 / WinUI 3 completa (`TS4Translator.sln`), com App, seis bibliotecas de camada e
   quatro projetos de teste, compilando limpo em x64.
@@ -29,10 +29,14 @@ Implementado e testado até agora (51 testes, todos passando):
 - `SqliteTranslationMemory`: EF Core + SQLite com migration real, busca exata por texto+par de
   locales — a base da funcionalidade de reaproveitar traduções ao atualizar um mod (seção 63). 5 testes
   de integração.
+- `ITranslationOrchestrator`/`BatchBuilder`: pipeline memory→protect→provider→reconciliação por
+  ID→restore→validate, nunca confiando na ordem/contagem dos resultados do provider. 14 testes.
+- `OpenAICompatibleProvider`: primeiro provider real (LM Studio, NVIDIA NIM e qualquer endpoint
+  compatível com OpenAI), com recuperação controlada de JSON truncado/malformado. 9 testes contra um
+  HTTP falso, nenhuma chamada de rede real.
 
-Ainda não implementado: qualquer provider de tradução, glossário, projetos, editor de strings,
-fuzzy matching, exportação ponta a ponta, empacotamento MSIX de distribuição. Ver
-[`docs/ROADMAP.md`](docs/ROADMAP.md).
+Ainda não implementado: Argos Translate, glossário, projetos, editor de strings, fuzzy matching,
+exportação ponta a ponta, empacotamento MSIX de distribuição. Ver [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
 ## Por que este stack
 
@@ -76,6 +80,7 @@ tests/
   TS4Translator.Core.Tests/
   TS4Translator.Sims4.Tests/
   TS4Translator.Translation.Tests/
+  TS4Translator.Providers.Tests/
   TS4Translator.IntegrationTests/
 docs/
 ```

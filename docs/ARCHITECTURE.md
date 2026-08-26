@@ -25,10 +25,12 @@ TS4Translator.Sims4   TS4Translator.Translation   TS4Translator.Providers
 TS4Translator.Persistence (SQLite)     TS4Translator.Infrastructure (logging, credenciais, HTTP)
 ```
 
-`Providers` referencia `Translation` (não o contrário) porque providers concretos usam o
-`ITokenProtector`/contratos de tradução definidos ali para proteger o texto antes de chamar a API
-externa — a orquestração de proteger→traduzir→restaurar é responsabilidade de quem chama o provider,
-tipicamente um serviço em `Translation`, não do provider em si.
+`Providers` referencia só `Core`, não `Translation` — um provider concreto nunca vê texto com tokens
+intactos nem é responsável por protegê-los. Ele recebe `TranslationRequestItem.ProtectedText` (já
+protegido) e devolve `TranslationResultItem.TranslatedProtectedText` (ainda protegido); todo o
+proteger→chamar→restaurar→validar fica em `TranslationOrchestrator` (`Translation`), que é quem
+efetivamente usa um `ITranslationProvider`, não o contrário. Isso mantém cada provider o mais burro
+possível, por design — nenhum provider é confiável para preservar tokens corretamente (seção 9).
 
 ## Projetos
 
@@ -84,9 +86,20 @@ saída já existente não é sobrescrita).
 
 ### TS4Translator.Providers
 
-Ainda vazio. Vai conter um `ITranslationProvider` por mecanismo de tradução (Argos, NVIDIA NIM,
-OpenAI-compatible, DeepL, etc.), cada um isolado o suficiente para uma falha ou mudança de API de
-um provider não afetar os outros nem o core do app (seção 18 do brief).
+- `OpenAICompatible.OpenAICompatibleProvider : ITranslationProvider` — um `POST /chat/completions`
+  por batch, contra qualquer endpoint compatível com OpenAI (LM Studio local, NVIDIA NIM, e outros —
+  seção 17). O batch inteiro vai como um array JSON `[{id, text}]` na mensagem do usuário; o system
+  prompt instrui o modelo a responder só com `[{id, translation}]`, preservando qualquer
+  `__TS4_TOKEN_NNNN__` literalmente. **Nunca confia que a resposta é JSON válido ou completo**
+  (seção 46): se o array vier truncado ou malformado, cada objeto `{...}` completo é recuperado
+  individualmente via um scanner de profundidade de chaves — objetos incompletos são descartados, não
+  travam o batch inteiro. 9 testes com um `HttpMessageHandler` falso (nenhum servidor real é
+  necessário nem contatado — seção 44).
+- Ainda faltam: Argos Translate (Fase 4, bloqueado em prototipagem de empacotamento — ver ROADMAP),
+  NVIDIA NIM com preset Riva Translate (Fase 5 — reutiliza `OpenAICompatibleProvider` por baixo, já que
+  o endpoint é compatível com OpenAI; falta só a validação do formato de prompt real com uma API key),
+  DeepL, Google, OpenAI, Gemini, Claude (Fase 6). Cada um isolado o suficiente para uma falha ou
+  mudança de API de um não afetar os outros nem o core do app (seção 18).
 
 ### TS4Translator.Persistence
 

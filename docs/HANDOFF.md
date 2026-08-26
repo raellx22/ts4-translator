@@ -16,8 +16,9 @@ WinUI existem ainda.
 
 Ver a seção "Completed" de `docs/STATUS.md` — não duplicado aqui para evitar as duas listas
 divergirem com o tempo. Em particular: o pipeline de tradução inteiro (`ITranslationProvider`,
-`IBatchBuilder`, `ITranslationOrchestrator`) já existe e está testado com providers/memory falsos —
-**não recrie essas interfaces**, elas já estão em `src/TS4Translator.Core/Translation/`.
+`IBatchBuilder`, `ITranslationOrchestrator`) e o primeiro provider real (`OpenAICompatibleProvider`,
+`src/TS4Translator.Providers/OpenAICompatible/`) já existem e estão testados — **não recrie essas
+interfaces nem esse provider**.
 
 ## What is currently being worked on
 
@@ -25,23 +26,21 @@ Nada em progresso — a sessão anterior levou cada peça a um estado compiláve
 
 ## Exact next task
 
-Implementar o primeiro `ITranslationProvider` real: `OpenAICompatibleProvider` em
-`TS4Translator.Providers`, contra um endpoint OpenAI-compatible configurável (pensado para LM Studio
-local primeiro — `http://localhost:1234/v1` — porque não exige API key nem depende das decisões de
-empacotamento do Argos ainda não resolvidas; ver Fase 4/5 do roadmap).
+Duas coisas de igual prioridade, escolha pela que fizer mais sentido dado o ambiente que você tem:
 
-Formato esperado (chat completions, um item por vez ou em lote conforme a seção 11 — decidir batch
-size real depois de testar contra um LM Studio local de verdade):
-- `POST {endpoint}/chat/completions` com corpo `{ model, messages: [...], temperature }`.
-- Usar `IHttpClientFactory` — ainda não configurado em `TS4Translator.Infrastructure`; adicionar
-  `services.AddHttpClient()` na extensão de DI de Infrastructure antes de implementar o provider.
-- Detecção de modelos via `GET {endpoint}/models` (seção 17) pode ficar para depois — não é bloqueio
-  para o provider funcionar.
-- Testes unitários do provider devem mockar `HttpMessageHandler` (via `Microsoft.Extensions.Http` +
-  um handler de teste), nunca bater em uma API real na suíte padrão (seção 44).
+**Se você tem um desktop Windows com LM Studio (ou qualquer servidor compatível com OpenAI) rodando:**
+teste `OpenAICompatibleProvider` contra ele de verdade — isso nunca foi feito, só contra HTTP falso em
+teste. Aponte `OpenAICompatibleProviderOptions.Endpoint` para o servidor local, rode uma tradução
+pequena via `TranslationOrchestrator`, e confirme que o formato de resposta do servidor real bate com
+o que o parser espera. Registre o resultado (funcionou / o que precisou ajustar) em `docs/DECISIONS.md`.
 
-Depois disso, seguir a lista "Próximas tarefas concretas" no fim de `docs/ROADMAP.md` — a prioridade
-seguinte é a entidade `Project` em Persistence, não outro provider.
+**Caso contrário:** implemente a entidade `Project` em `TS4Translator.Persistence` (nova migration,
+`dotnet ef migrations add AddProject` a partir de `src/TS4Translator.Persistence/`) + `IProjectService`
+em `Core` (seção 33 do brief: nome, arquivos importados, idioma, target locale, provider, histórico).
+Sem isso não há como a UI listar "projetos recentes" nem ligar strings/traduções a um mod específico —
+é o pré-requisito bloqueando a primeira tela de produto real.
+
+Depois disso, seguir a lista "Próximas tarefas concretas" no fim de `docs/ROADMAP.md`.
 
 ## Important files
 

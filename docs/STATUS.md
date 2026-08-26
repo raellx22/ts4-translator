@@ -5,9 +5,10 @@
 ## Current phase
 
 Fase 1 (Fundação) quase concluída; Fase 2 (Sims4 Core) com o núcleo pronto; Fase 3 (Translation Core)
-com o pipeline inteiro pronto exceto providers reais (TokenProtector, TranslationValidator,
-BatchBuilder, TranslationOrchestrator); Fase 7 (Translation Memory) com exact-match pronto. Nenhum
-`ITranslationProvider` real existe ainda — o próximo passo natural. Ver `docs/ROADMAP.md` para o
+com o pipeline inteiro pronto (TokenProtector, TranslationValidator, BatchBuilder,
+TranslationOrchestrator); Fase 6 (Providers) com o primeiro provider real pronto
+(`OpenAICompatibleProvider`, nunca testado contra um servidor real de verdade — só contra HTTP falso
+em teste); Fase 7 (Translation Memory) com exact-match pronto. Ver `docs/ROADMAP.md` para o
 detalhamento completo por fase.
 
 ## Completed
@@ -26,8 +27,12 @@ detalhamento completo por fase.
   `InitialCreate` — 5 testes de integração.
 - `ITranslationProvider`/`ProviderCapabilities`/`ITranslationOrchestrator` (Core) +
   `BatchBuilder`/`TranslationOrchestrator` (Translation) — pipeline completo protege→provider→
-  reconcilia por ID→restaura→valida→memory. 14 testes (6 BatchBuilder + 8 orquestrador), todos com
-  providers/memory falsos (nenhum provider real existe ainda).
+  reconcilia por ID→restaura→valida→memory. 14 testes (6 BatchBuilder + 8 orquestrador), com
+  providers/memory falsos.
+- `OpenAICompatibleProvider` (Providers) — primeiro `ITranslationProvider` real: um
+  `POST /chat/completions` por batch contra qualquer endpoint compatível com OpenAI (LM Studio local,
+  potencialmente NVIDIA NIM), com recuperação controlada de JSON truncado/malformado da resposta do
+  modelo. 9 testes contra um `HttpMessageHandler` falso — **nunca testado contra um servidor real**.
 - `AppDataPaths` (Infrastructure) resolvendo `%LOCALAPPDATA%\TS4Translator\{Data,Logs,Cache,Models}`.
 - Composition root em `App.xaml.cs`: `ServiceCollection` com `AddSims4Services()` +
   `AddTranslationServices()` + `AddPersistenceServices(...)`, migration aplicada no `OnLaunched`.
@@ -52,6 +57,11 @@ verificação empírica** antes de implementar (não são bloqueios, são riscos
 
 ## Known issues
 
+- `OpenAICompatibleProvider` has never been exercised against a real server (LM Studio, NIM, or
+  otherwise) — only against a fake `HttpMessageHandler` in tests. The request/response shape follows
+  the standard OpenAI chat-completions contract, but real-world quirks (server timeouts, chunked
+  encoding, non-standard headers) are unverified.
+
 - CA1707 (underscore em identificadores) suprimido em `tests/` (DEC-003) — intencional, não é dívida
   técnica.
 - CA1861 suprimido em todo o projeto `TS4Translator.Persistence` (DEC-007) por causa do código gerado
@@ -63,7 +73,7 @@ verificação empírica** antes de implementar (não são bloqueios, são riscos
 
 ## Tests currently failing
 
-Nenhum. 65 testes passando (`dotnet test TS4Translator.sln --filter "FullyQualifiedName!~TS4Translator.App"`).
+Nenhum. 74 testes passando (`dotnet test TS4Translator.sln --filter "FullyQualifiedName!~TS4Translator.App"`).
 O projeto `TS4Translator.App` não tem testes automatizados de UI ainda (não há framework de UI test
 configurado) e não foi executado visualmente nesta sessão — sem acesso a um desktop Windows interativo
 neste ambiente de execução, o build foi validado apenas por `dotnet build`, não por rodar a janela.

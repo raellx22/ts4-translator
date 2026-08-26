@@ -67,13 +67,28 @@ Ver achados de pesquisa: sem dependência de `torch`, mas nenhuma receita testad
 Avaliar `ArgosTranslate.PyNet` (pythonnet) como alternativa a um sidecar via stdin/stdout antes de
 comprometer a arquitetura com uma das duas abordagens.
 
-## FASE 5 — NVIDIA NIM — **não iniciada**
+## FASE 5 — NVIDIA NIM — **base pronta via `OpenAICompatibleProvider`, falta validar e expor na UI**
 
-Endpoint confirmado como compatível com OpenAI. Antes de implementar: validar empiricamente com uma
-API key real qual template de prompt o v2 realmente espera (natural-language vs. tag curta — as duas
-fontes pesquisadas discordam) e se `temperature=0` é aceitável (não documentado pela NVIDIA).
+O endpoint da NVIDIA é compatível com OpenAI, então `OpenAICompatibleProvider` (Fase 6, já
+implementado) já deveria funcionar apontando para `https://integrate.api.nvidia.com/v1` com
+`Model = "nvidia/riva-translate-4b-instruct-v2"` e uma API key — isso nunca foi testado contra a API
+real nesta sessão (sem chave disponível). Antes de expor isso como "preset Riva Translate" na UI:
+1. Validar empiricamente com uma API key real qual template de prompt o v2 realmente espera
+   (nosso system prompt genérico de tradução vs. a possibilidade de um formato tag curta
+   `en-pt_BR` — as duas fontes pesquisadas na Fase 0 discordam sobre isso).
+2. Confirmar se `temperature=0` é aceito e produz saída estável (não documentado pela NVIDIA).
+3. Adicionar um preset/`ProviderConfiguration` (seção 37, ainda não implementado) em vez de exigir
+   que o usuário digite endpoint/model manualmente para o caso Riva Translate.
 
-## FASE 6 — Providers adicionais — **não iniciada**
+## FASE 6 — Providers adicionais — **`OpenAICompatibleProvider` concluído; os demais não iniciados**
+
+- [x] `OpenAICompatibleProvider` (seção 17) — `TS4Translator.Providers/OpenAICompatible/`. Um
+  `POST /chat/completions` por batch, recuperação controlada de JSON truncado/malformado (seção 46),
+  9 testes com HTTP falso. Serve tanto LM Studio local quanto (em teoria, não validado) NVIDIA NIM,
+  já que ambos falam o mesmo protocolo.
+- [ ] Detecção automática de modelos via `GET /v1/models` (seção 17) — não iniciado, não bloqueia o
+  provider funcionar com um model id digitado manualmente.
+- [ ] DeepL, Google, OpenAI (API dedicada, não via endpoint compatível), Gemini, Claude — não iniciados.
 
 ## FASE 7 — Translation Memory — **exact match concluído, fuzzy não iniciado**
 
@@ -101,13 +116,16 @@ mecânica de escrita de package; falta orquestrar validação + round-trip + rel
 
 ## Próximas tarefas concretas (em ordem sugerida)
 
-1. Um primeiro `ITranslationProvider` de verdade. Recomendado começar pelo `OpenAICompatibleProvider`
-   (seção 17) apontando para um endpoint local (LM Studio) — não exige API key nem depende de decisões
-   de empacotamento do Argos, e valida o `ITranslationOrchestrator` com HTTP real pela primeira vez.
-   Usar `IHttpClientFactory` (ainda não configurado em `Infrastructure`).
+1. Testar `OpenAICompatibleProvider` contra um LM Studio local de verdade (algo que esta sessão não
+   pôde fazer sem acesso a um desktop Windows/LM Studio rodando) — confirma que o pipeline inteiro
+   (orchestrator → provider → HTTP real → parsing) funciona fora dos testes com HTTP falso.
 2. Entidade `Project` em Persistence (nova migration) + `IProjectService` em Core — sem isso, não há
    como a UI listar "projetos recentes" (seção 33) nem ligar strings/traduções a um mod específico.
 3. Primeira tela de produto real na UI: importar um `.package`, mostrar contagem de strings
    encontradas (liga Sims4 + a futura análise de mod à `NavigationView` existente).
 4. Armazenamento seguro de API key (Windows Credential Manager/DPAPI, seção 19) — pré-requisito para
-   qualquer provider pago (NVIDIA NIM, DeepL, etc.), fazer antes de implementar esses providers, não depois.
+   testar `OpenAICompatibleProvider` contra NVIDIA NIM (que exige uma), e para qualquer provider pago
+   futuro.
+5. `AddHttpClient`/`IHttpClientFactory` em `TS4Translator.Infrastructure` — hoje quem instancia
+   `OpenAICompatibleProvider` tem que criar o `HttpClient` manualmente; não crítico, mas deveria ser
+   resolvido antes da UI de Settings existir de verdade (seção 41).
