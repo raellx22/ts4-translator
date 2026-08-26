@@ -43,15 +43,21 @@ o conjunto de itens, não o primeiro que funcionar.
   importação (seção 34) — não iniciado.
 - [ ] Detecção/tratamento de package inválido ou corrompido (seção 27/46) na camada Sims4 — não iniciado.
 
-## FASE 3 — Translation Core — **em andamento**
+## FASE 3 — Translation Core — **em andamento, núcleo pronto**
 
 - [x] `ITokenProtector`/`TokenProtector` — 23 testes, cobre todos os casos da seção 45.
 - [x] `ITranslationValidator`/`TranslationValidator` — cobre vazio, idêntico, discrepância de tamanho,
   markup desbalanceado, e funde os problemas de token.
-- [ ] `ITranslationProvider` (seção 12) — contrato ainda não definido em `Core`.
-- [ ] `BatchBuilder` (seção 11) — não iniciado.
-- [ ] Contrato de reconciliação por ID (seção 10) — não iniciado; depende de `ITranslationProvider`.
-- [ ] Translation Profiles (seção 22) — não iniciado.
+- [x] `ITranslationProvider`/`ProviderCapabilities` (seção 12) — contrato em `Core/Translation/`.
+- [x] `IBatchBuilder`/`BatchBuilder` (seção 11) — greedy fill por contagem e por total de caracteres;
+  um item sozinho maior que o limite vira seu próprio batch em vez de ser cortado. 6 testes.
+- [x] `ITranslationOrchestrator`/`TranslationOrchestrator` — pipeline completo: translation memory →
+  protect → provider → reconciliação por ID → restore → validate → grava na memory. Reconciliação por
+  ID testada explicitamente contra resultado ausente e resultado duplicado do provider (seção 10). 8 testes.
+- [ ] Retry/backoff/rate-limit/pause/resume/checkpoint (seção 11, resto) — não iniciado; depende de
+  `TranslationJob` existir como entidade persistida (seção 35), o que também não existe ainda.
+- [ ] Translation Profiles (seção 22) — não iniciado; o orquestrador hoje não aceita nenhum prompt/estilo
+  customizado, e `TranslationMemoryEntry.ProfileName` fica `null` em toda tradução nova.
 - [ ] `ITranslationJobService`/estados de job (seção 35) — não iniciado.
 
 ## FASE 4 — Argos — **não iniciada**
@@ -95,11 +101,13 @@ mecânica de escrita de package; falta orquestrar validação + round-trip + rel
 
 ## Próximas tarefas concretas (em ordem sugerida)
 
-1. `ITranslationProvider` + `ProviderCapabilities` em Core (seção 12), e um `MockTranslationProvider`
-   em Providers para poder testar orquestração sem depender de rede.
-2. `BatchBuilder` + orquestrador que faz Protect → Provider → Restore → Validate → grava em
-   `ITranslationMemory`, reconciliando por ID (seção 10).
-3. Entidade `Project` em Persistence (nova migration) + `IProjectService` em Core — sem isso, não há
-   como a UI listar "projetos recentes" (seção 33).
-4. Primeira tela de produto real na UI: importar um `.package`, mostrar contagem de strings
+1. Um primeiro `ITranslationProvider` de verdade. Recomendado começar pelo `OpenAICompatibleProvider`
+   (seção 17) apontando para um endpoint local (LM Studio) — não exige API key nem depende de decisões
+   de empacotamento do Argos, e valida o `ITranslationOrchestrator` com HTTP real pela primeira vez.
+   Usar `IHttpClientFactory` (ainda não configurado em `Infrastructure`).
+2. Entidade `Project` em Persistence (nova migration) + `IProjectService` em Core — sem isso, não há
+   como a UI listar "projetos recentes" (seção 33) nem ligar strings/traduções a um mod específico.
+3. Primeira tela de produto real na UI: importar um `.package`, mostrar contagem de strings
    encontradas (liga Sims4 + a futura análise de mod à `NavigationView` existente).
+4. Armazenamento seguro de API key (Windows Credential Manager/DPAPI, seção 19) — pré-requisito para
+   qualquer provider pago (NVIDIA NIM, DeepL, etc.), fazer antes de implementar esses providers, não depois.

@@ -5,8 +5,10 @@
 ## Current phase
 
 Fase 1 (Fundação) quase concluída; Fase 2 (Sims4 Core) com o núcleo pronto; Fase 3 (Translation Core)
-com as duas peças mais críticas (TokenProtector, TranslationValidator) prontas; Fase 7 (Translation
-Memory) com exact-match pronto. Ver `docs/ROADMAP.md` para o detalhamento completo por fase.
+com o pipeline inteiro pronto exceto providers reais (TokenProtector, TranslationValidator,
+BatchBuilder, TranslationOrchestrator); Fase 7 (Translation Memory) com exact-match pronto. Nenhum
+`ITranslationProvider` real existe ainda — o próximo passo natural. Ver `docs/ROADMAP.md` para o
+detalhamento completo por fase.
 
 ## Completed
 
@@ -22,6 +24,10 @@ Memory) com exact-match pronto. Ver `docs/ROADMAP.md` para o detalhamento comple
   suposição (ver DEC-006 — a doc XML do LlamaLogic estava errada sobre o tipo de exceção lançado).
 - `SqliteTranslationMemory` (Persistence) + `ITranslationMemory` (Core), EF Core com migration real
   `InitialCreate` — 5 testes de integração.
+- `ITranslationProvider`/`ProviderCapabilities`/`ITranslationOrchestrator` (Core) +
+  `BatchBuilder`/`TranslationOrchestrator` (Translation) — pipeline completo protege→provider→
+  reconcilia por ID→restaura→valida→memory. 14 testes (6 BatchBuilder + 8 orquestrador), todos com
+  providers/memory falsos (nenhum provider real existe ainda).
 - `AppDataPaths` (Infrastructure) resolvendo `%LOCALAPPDATA%\TS4Translator\{Data,Logs,Cache,Models}`.
 - Composition root em `App.xaml.cs`: `ServiceCollection` com `AddSims4Services()` +
   `AddTranslationServices()` + `AddPersistenceServices(...)`, migration aplicada no `OnLaunched`.
@@ -57,7 +63,7 @@ verificação empírica** antes de implementar (não são bloqueios, são riscos
 
 ## Tests currently failing
 
-Nenhum. 51 testes passando (`dotnet test TS4Translator.sln --filter "FullyQualifiedName!~TS4Translator.App"`).
+Nenhum. 65 testes passando (`dotnet test TS4Translator.sln --filter "FullyQualifiedName!~TS4Translator.App"`).
 O projeto `TS4Translator.App` não tem testes automatizados de UI ainda (não há framework de UI test
 configurado) e não foi executado visualmente nesta sessão — sem acesso a um desktop Windows interativo
 neste ambiente de execução, o build foi validado apenas por `dotnet build`, não por rodar a janela.

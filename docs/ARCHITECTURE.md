@@ -54,10 +54,18 @@ Implementações que não dependem de nenhum SDK de terceiros nem de I/O:
   de linha; reconciliação por identidade de placeholder. Ver DEC-004.
 - `TranslationValidator : ITranslationValidator` — funde os problemas do `TokenRestoreResult` com
   checagens próprias (vazio, idêntico ao original, discrepância de tamanho, markup desbalanceado).
+- `BatchBuilder : IBatchBuilder` — agrupa itens por contagem e por total de caracteres; um item maior
+  que o limite sozinho vira seu próprio batch em vez de ser cortado.
+- `TranslationOrchestrator : ITranslationOrchestrator` — o pipeline completo da seção 10/11: consulta
+  `ITranslationMemory` primeiro (pula o provider quando já existe tradução exata); para o restante,
+  agrupa em batches, protege tokens, chama o provider, **reconcilia cada resultado pelo `Id` do item**
+  (nunca por posição/contagem — se o provider omitir ou duplicar um `Id`, o item vira uma falha
+  explícita com `ValidationIssueCode.ProviderResultMissing`/`ProviderResultDuplicated`, nunca um
+  deslocamento silencioso de traduções), restaura tokens, valida, e só grava na translation memory os
+  itens sem problema crítico.
 
-Planejado aqui: `BatchBuilder` (Fase 3), `TranslationOrchestrator` (protege → chama provider →
-restaura → valida, por ID, nunca por posição — contrato descrito na seção 10 do brief), perfis de
-tradução (seção 22).
+Perfis de tradução (seção 22) ainda não existem — `TranslationOrchestrator` não aceita nenhum
+prompt/estilo customizado hoje, e todo `TranslationMemoryEntry` novo grava `ProfileName: null`.
 
 ### TS4Translator.Sims4
 

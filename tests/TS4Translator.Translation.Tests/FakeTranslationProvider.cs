@@ -1,0 +1,53 @@
+using System.Globalization;
+using TS4Translator.Core.Translation;
+
+namespace TS4Translator.Translation.Tests;
+
+public enum FakeProviderMisbehavior
+{
+    None,
+    DropFirstResult,
+    DuplicateFirstResult,
+    StripTokensFromFirstResult,
+}
+
+/// <summary>Configurable <see cref="ITranslationProvider"/> test double for orchestrator tests.</summary>
+public sealed class FakeTranslationProvider(
+    Func<string, string>? translate = null,
+    FakeProviderMisbehavior misbehavior = FakeProviderMisbehavior.None) : ITranslationProvider
+{
+    private readonly Func<string, string> _translate = translate ?? (text => $"[fake] {text}");
+
+    public string Name => "fake";
+
+    public ProviderCapabilities Capabilities { get; } = new(
+        SupportsBatch: true, SupportsStreaming: false, SupportsCustomPrompt: false,
+        SupportsGlossary: false, SupportsLocalExecution: true, RequiresApiKey: false, MaxContextSize: null);
+
+    public List<int> ObservedBatchSizes { get; } = [];
+
+    public Task<IReadOnlyList<TranslationResultItem>> TranslateBatchAsync(
+        IReadOnlyList<TranslationRequestItem> items, CultureInfo sourceLocale, CultureInfo targetLocale, CancellationToken cancellationToken = default)
+    {
+        ObservedBatchSizes.Add(items.Count);
+
+        var results = items
+            .Select(item => new TranslationResultItem(item.Id, _translate(item.ProtectedText)))
+            .ToList();
+
+        if (misbehavior == FakeProviderMisbehavior.DropFirstResult && results.Count > 0)
+        {
+            results.RemoveAt(0);
+        }
+        else if (misbehavior == FakeProviderMisbehavior.DuplicateFirstResult && results.Count > 0)
+        {
+            results.Add(results[0]);
+        }
+        else if (misbehavior == FakeProviderMisbehavior.StripTokensFromFirstResult && results.Count > 0)
+        {
+            results[0] = results[0] with { TranslatedProtectedText = "text with token removed" };
+        }
+
+        return Task.FromResult<IReadOnlyList<TranslationResultItem>>(results);
+    }
+}

@@ -10,4 +10,10 @@ public enum ValidationIssueCode
     IdenticalToSource,
     LengthDiscrepancy,
     UnbalancedMarkup,
+
+    /// <summary>The translation provider's response did not include a result for this item's id.</summary>
+    ProviderResultMissing,
+
+    /// <summary>The translation provider's response included more than one result for this item's id.</summary>
+    ProviderResultDuplicated,
 }

@@ -15,7 +15,9 @@ WinUI existem ainda.
 ## What has already been implemented
 
 Ver a seção "Completed" de `docs/STATUS.md` — não duplicado aqui para evitar as duas listas
-divergirem com o tempo.
+divergirem com o tempo. Em particular: o pipeline de tradução inteiro (`ITranslationProvider`,
+`IBatchBuilder`, `ITranslationOrchestrator`) já existe e está testado com providers/memory falsos —
+**não recrie essas interfaces**, elas já estão em `src/TS4Translator.Core/Translation/`.
 
 ## What is currently being worked on
 
@@ -23,38 +25,23 @@ Nada em progresso — a sessão anterior levou cada peça a um estado compiláve
 
 ## Exact next task
 
-Implementar `ITranslationProvider` em `TS4Translator.Core` (novo diretório `Core/Translation/`), com:
+Implementar o primeiro `ITranslationProvider` real: `OpenAICompatibleProvider` em
+`TS4Translator.Providers`, contra um endpoint OpenAI-compatible configurável (pensado para LM Studio
+local primeiro — `http://localhost:1234/v1` — porque não exige API key nem depende das decisões de
+empacotamento do Argos ainda não resolvidas; ver Fase 4/5 do roadmap).
 
-```csharp
-public sealed record ProviderCapabilities(
-    bool SupportsBatch, bool SupportsStreaming, bool SupportsCustomPrompt,
-    bool SupportsGlossary, bool SupportsLocalExecution, bool RequiresApiKey, int? MaxContextSize);
+Formato esperado (chat completions, um item por vez ou em lote conforme a seção 11 — decidir batch
+size real depois de testar contra um LM Studio local de verdade):
+- `POST {endpoint}/chat/completions` com corpo `{ model, messages: [...], temperature }`.
+- Usar `IHttpClientFactory` — ainda não configurado em `TS4Translator.Infrastructure`; adicionar
+  `services.AddHttpClient()` na extensão de DI de Infrastructure antes de implementar o provider.
+- Detecção de modelos via `GET {endpoint}/models` (seção 17) pode ficar para depois — não é bloqueio
+  para o provider funcionar.
+- Testes unitários do provider devem mockar `HttpMessageHandler` (via `Microsoft.Extensions.Http` +
+  um handler de teste), nunca bater em uma API real na suíte padrão (seção 44).
 
-public sealed record TranslationRequestItem(string Id, string ProtectedText);
-public sealed record TranslationResultItem(string Id, string TranslatedProtectedText);
-
-public interface ITranslationProvider
-{
-    string Name { get; }
-    ProviderCapabilities Capabilities { get; }
-    Task<IReadOnlyList<TranslationResultItem>> TranslateBatchAsync(
-        IReadOnlyList<TranslationRequestItem> items,
-        CultureInfo sourceLocale, CultureInfo targetLocale,
-        CancellationToken cancellationToken = default);
-}
-```
-
-`TranslationRequestItem.Id`/`TranslationResultItem.Id` existem especificamente para a reconciliação
-por ID exigida pela seção 10 do brief — nunca confiar na ordem/contagem dos resultados batendo com a
-dos itens enviados. O `Id` deve ser algo que o chamador já controla (ex.: o `KeyHash` do STBL como
-string, ou um GUID por item de batch), não gerado pelo provider.
-
-Em seguida, criar `TS4Translator.Providers.Mock.MockTranslationProvider` (implementação trivial que
-prefixa o texto com `"[mock] "`, sem rede) para poder testar o orquestrador de tradução sem depender
-de nenhuma API externa — isso desbloqueia testes reais do `BatchBuilder`/orquestrador antes de
-qualquer provider real (Argos/NVIDIA NIM) existir.
-
-Depois disso, seguir a lista "Próximas tarefas concretas" no fim de `docs/ROADMAP.md`.
+Depois disso, seguir a lista "Próximas tarefas concretas" no fim de `docs/ROADMAP.md` — a prioridade
+seguinte é a entidade `Project` em Persistence, não outro provider.
 
 ## Important files
 

@@ -1,5 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using TS4Translator.Core.Tokens;
+using TS4Translator.Core.Translation;
 using TS4Translator.Core.Validation;
 
 namespace TS4Translator.Translation;
@@ -12,6 +13,8 @@ public static class ServiceCollectionExtensions
 
         services.AddSingleton<ITokenProtector, TokenProtector>();
         services.AddSingleton<ITranslationValidator, TranslationValidator>();
+        services.AddSingleton<IBatchBuilder, BatchBuilder>();
+        services.AddSingleton<ITranslationOrchestrator, TranslationOrchestrator>();
 
         return services;
     }
