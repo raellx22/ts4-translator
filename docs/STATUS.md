@@ -8,8 +8,11 @@ Fase 1 (Fundação) quase concluída; Fase 2 (Sims4 Core) com o núcleo pronto; 
 com o pipeline inteiro pronto (TokenProtector, TranslationValidator, BatchBuilder,
 TranslationOrchestrator); Fase 6 (Providers) com o primeiro provider real pronto
 (`OpenAICompatibleProvider`, nunca testado contra um servidor real de verdade — só contra HTTP falso
-em teste); Fase 7 (Translation Memory) com exact-match pronto. Ver `docs/ROADMAP.md` para o
-detalhamento completo por fase.
+em teste); Fase 7 (Translation Memory) com exact-match pronto; Project System (seção 33) com o núcleo
+pronto (`IProjectService`); **primeira tela de produto real escrita** (Home: importar `.package`,
+criar projeto, listar recentes) — compila e o compilador XAML aceita os bindings, mas **nunca foi
+executada visualmente**, porque nenhuma sessão até agora teve acesso a um desktop Windows interativo.
+Ver `docs/ROADMAP.md` para o detalhamento completo por fase.
 
 ## Completed
 
@@ -33,6 +36,15 @@ detalhamento completo por fase.
   `POST /chat/completions` por batch contra qualquer endpoint compatível com OpenAI (LM Studio local,
   potencialmente NVIDIA NIM), com recuperação controlada de JSON truncado/malformado da resposta do
   modelo. 9 testes contra um `HttpMessageHandler` falso — **nunca testado contra um servidor real**.
+- `IProjectService`/`EfProjectService` (Persistence) — CRUD de projetos (nome, arquivos `.package`,
+  par de locales), EF Core com migration real `AddProject`, cascade delete dos arquivos-fonte.
+  7 testes de integração contra SQLite real; um deles pegou um bug real do provider SQLite do EF Core
+  (não suporta `ORDER BY` em coluna `DateTimeOffset` — corrigido com ordenação client-side, DEC-008).
+- `HomePage`/`HomePageViewModel` (App) — primeira tela de produto: importar `.package` via
+  `IPathPickerService`, criar `TranslationProject`, contar STBLs via `IPackageService`, listar
+  projetos recentes. Resolvido por service locator estático (`App.Services`), não injeção de
+  construtor — `Frame.Navigate(Type)` do WinUI não suporta isso nativamente (DEC-009). Só validado
+  por `dotnet build`/compilador XAML — nunca clicado.
 - `AppDataPaths` (Infrastructure) resolvendo `%LOCALAPPDATA%\TS4Translator\{Data,Logs,Cache,Models}`.
 - Composition root em `App.xaml.cs`: `ServiceCollection` com `AddSims4Services()` +
   `AddTranslationServices()` + `AddPersistenceServices(...)`, migration aplicada no `OnLaunched`.
@@ -73,7 +85,7 @@ verificação empírica** antes de implementar (não são bloqueios, são riscos
 
 ## Tests currently failing
 
-Nenhum. 74 testes passando (`dotnet test TS4Translator.sln --filter "FullyQualifiedName!~TS4Translator.App"`).
+Nenhum. 81 testes passando (`dotnet test TS4Translator.sln --filter "FullyQualifiedName!~TS4Translator.App"`).
 O projeto `TS4Translator.App` não tem testes automatizados de UI ainda (não há framework de UI test
 configurado) e não foi executado visualmente nesta sessão — sem acesso a um desktop Windows interativo
 neste ambiente de execução, o build foi validado apenas por `dotnet build`, não por rodar a janela.

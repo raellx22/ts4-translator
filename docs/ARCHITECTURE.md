@@ -105,12 +105,16 @@ saída já existente não é sobrescrita).
 
 SQLite via EF Core, schema versionado por migrations reais (DEC-007). Implementado até agora:
 `TranslationMemory` (busca exata por hash SHA-256 do texto normalizado + par de locales — a
-"killer feature" da seção 63). `TranslatorDbContext` é resolvido via `IDbContextFactory<TranslatorDbContext>`,
+"killer feature" da seção 63) e `Project` (nome, arquivos `.package` importados, par de locales,
+timestamps — seção 33). `TranslatorDbContext` é resolvido via `IDbContextFactory<TranslatorDbContext>`,
 nunca injetado diretamente, porque um app desktop não tem escopo de requisição como o ASP.NET.
-`ServiceCollectionExtensions.AddPersistenceServices(databasePath)` registra a factory e
-`ITranslationMemory`. As demais entidades da seção 37 (Project, StringEntry, GlossaryTerm,
-TranslationJob, etc.) entram como migrations incrementais, uma por feature, quando essa feature for
-implementada — não antecipadamente. API keys **nunca** ficam aqui em texto puro — isso é
+`ServiceCollectionExtensions.AddPersistenceServices(databasePath)` registra a factory,
+`ITranslationMemory` e `IProjectService`. Listagens ordenadas por `DateTimeOffset` (ex.: "projetos
+recentes") são ordenadas do lado do cliente, não em SQL — o provider SQLite do EF Core não traduz
+`ORDER BY` sobre colunas `DateTimeOffset` (DEC-008, descoberto por um teste de integração real
+falhando, não por leitura de documentação). As demais entidades da seção 37 (StringEntry,
+GlossaryTerm, TranslationJob, etc.) entram como migrations incrementais, uma por feature, quando essa
+feature for implementada — não antecipadamente. API keys **nunca** ficam aqui em texto puro — isso é
 responsabilidade de `Infrastructure` via Windows Credential Manager/DPAPI (seção 19, ainda não
 implementado).
 
@@ -126,9 +130,21 @@ Gerado a partir do template `dotnet new winui-navview` (DEC-005), com o namespac
 `TS4Translator_App` para `TS4Translator.App`. O composition root (`App.xaml.cs`) monta um
 `ServiceCollection` simples (mesmo padrão do `SimsPackageBatcher`, não um `Generic Host` completo —
 ver DEC-007) chamando `AddSims4Services()`, `AddTranslationServices()`, `AddPersistenceServices(...)`,
-e roda `Database.Migrate()` uma vez antes de ativar a janela. As telas do produto (import, editor,
-dashboard) e a navegação real ainda não existem — hoje é a shell do template (NavigationView +
-Home/About/Settings) sem ViewModels conectados a nenhum serviço.
+registra `IPathPickerService`/`HomePageViewModel` locais ao projeto App, e roda `Database.Migrate()`
+uma vez antes de ativar a janela. `App.Services` (um service locator estático — DEC-009) e
+`App.WindowHandle` ficam disponíveis para páginas e serviços que precisam deles.
+
+- **Home** (`Pages/HomePage.xaml` + `ViewModels/HomePageViewModel.cs`) — a primeira tela de produto
+  real: botão "Importar packages" (via `IPathPickerService`/`FileOpenPicker`, seção 34), cria um
+  `TranslationProject` a partir dos arquivos escolhidos (locale fixo `en-US`→`pt-BR` por enquanto —
+  seletor de locale ainda não existe), mostra a contagem de tabelas STBL encontradas via
+  `IPackageService`, e lista projetos recentes via `IProjectService`.
+- **About**/**Settings** — ainda os placeholders do template, sem lógica.
+
+**Nunca executado interativamente** — sem acesso a um desktop Windows nesta sessão de
+desenvolvimento, a validação parou em "`dotnet build` compila e o compilador XAML aceita os `x:Bind`".
+Nenhum clique real, nenhuma verificação visual de Mica/tema, nenhum teste do file picker de verdade.
+Ver `docs/HANDOFF.md` para o que uma sessão com desktop Windows deveria confirmar primeiro.
 
 ## Convenções de qualidade
 

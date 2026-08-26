@@ -26,6 +26,8 @@ o conjunto de itens, não o primeiro que funcionar.
 - [x] SQLite com migrations reais (`TranslatorDbContext`, `InitialCreate`).
 - [x] Estrutura de documentação (este diretório).
 - [ ] Logging estruturado (seção 36) — não iniciado.
+- [x] Primeira tela de produto real (Home: importar `.package`, criar projeto, listar recentes) —
+  nunca executada visualmente, ver nota em `docs/ARCHITECTURE.md`/`docs/HANDOFF.md`.
 - [ ] Tela de Settings com abas reais (General/Translation/Providers/Argos/NVIDIA NIM/Models/Appearance/Advanced,
   seção 41) — hoje é o placeholder do template.
 - [ ] Seletor de tema claro/escuro/sistema explícito na UI (Mica já funciona via `MicaBackdrop` do
@@ -95,7 +97,19 @@ real nesta sessão (sem chave disponível). Antes de expor isso como "preset Riv
 - [x] `ITranslationMemory`/`SqliteTranslationMemory` — exact match por hash SHA-256 do texto
   normalizado + par de locales, com upsert. 5 testes de integração contra SQLite real.
 - [ ] Fuzzy matching (seção 26) — não iniciado.
-- [ ] Ligação com projeto/versão de mod (a entidade `Project`/`ModVersion` da seção 37 ainda não existe).
+- [ ] Ligação com projeto/versão de mod: `Project` já existe (ver Fase 1/33 abaixo); `ModVersion`
+  (para o diff de versões da Fase 8) ainda não.
+
+## FASE 33 (Project System, referenciada pela Fase 1) — **núcleo pronto**
+
+- [x] `IProjectService`/`EfProjectService` — criar, listar recentes (ordenado por atualização mais
+  recente, client-side por causa de DEC-008), buscar por ID, deletar (cascade nos arquivos-fonte).
+  7 testes de integração contra SQLite real.
+- [ ] Ligação com strings/traduções extraídas (ainda não existe uma entidade `StringEntry` — um
+  projeto hoje só sabe seus arquivos-fonte e seu par de locales, não suas strings).
+- [ ] Atualização de `UpdatedAtUtc` em qualquer operação futura que modifique o projeto (import,
+  tradução, exportação) — `EfProjectService` não faz isso automaticamente hoje, só `CreateAsync` seta
+  o timestamp inicial.
 
 ## FASE 8 — Mod Update Engine — **não iniciada**
 
@@ -116,16 +130,20 @@ mecânica de escrita de package; falta orquestrar validação + round-trip + rel
 
 ## Próximas tarefas concretas (em ordem sugerida)
 
-1. Testar `OpenAICompatibleProvider` contra um LM Studio local de verdade (algo que esta sessão não
-   pôde fazer sem acesso a um desktop Windows/LM Studio rodando) — confirma que o pipeline inteiro
-   (orchestrator → provider → HTTP real → parsing) funciona fora dos testes com HTTP falso.
-2. Entidade `Project` em Persistence (nova migration) + `IProjectService` em Core — sem isso, não há
-   como a UI listar "projetos recentes" (seção 33) nem ligar strings/traduções a um mod específico.
-3. Primeira tela de produto real na UI: importar um `.package`, mostrar contagem de strings
-   encontradas (liga Sims4 + a futura análise de mod à `NavigationView` existente).
-4. Armazenamento seguro de API key (Windows Credential Manager/DPAPI, seção 19) — pré-requisito para
+1. **Rodar o app de verdade.** Ver a nota no fim de `docs/HANDOFF.md` — nenhuma sessão até agora teve
+   acesso a um desktop Windows interativo. `HomePage` foi escrita e compila, mas nunca foi clicada.
+   Isso deveria ser a primeira ação de qualquer sessão com esse acesso, antes de construir mais em
+   cima dela.
+2. Drag-and-drop de arquivos/pastas na `HomePage` (seção 34 pede explicitamente, hoje só há o botão
+   "Importar packages" via file picker) — e suporte a pasta inteira, não só múltiplos arquivos.
+3. Entidade `StringEntry` (nova migration) — cada string extraída de um projeto, ligada ao `Project`
+   e ao `KeyHash`/`StblKey` de origem. Pré-requisito para o editor (Fase 9) e para o diff de versões
+   (Fase 8) existirem. A `HomePage` de hoje só conta STBLs, não extrai/persiste strings individuais.
+4. Testar `OpenAICompatibleProvider` contra um LM Studio local de verdade — confirma que o pipeline
+   inteiro (orchestrator → provider → HTTP real → parsing) funciona fora dos testes com HTTP falso.
+5. Armazenamento seguro de API key (Windows Credential Manager/DPAPI, seção 19) — pré-requisito para
    testar `OpenAICompatibleProvider` contra NVIDIA NIM (que exige uma), e para qualquer provider pago
    futuro.
-5. `AddHttpClient`/`IHttpClientFactory` em `TS4Translator.Infrastructure` — hoje quem instancia
+6. `AddHttpClient`/`IHttpClientFactory` em `TS4Translator.Infrastructure` — hoje quem instancia
    `OpenAICompatibleProvider` tem que criar o `HttpClient` manualmente; não crítico, mas deveria ser
    resolvido antes da UI de Settings existir de verdade (seção 41).

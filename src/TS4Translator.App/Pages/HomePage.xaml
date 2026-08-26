@@ -5,15 +5,51 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:local="using:TS4Translator.App.Pages"
+    xmlns:projects="using:TS4Translator.Core.Projects"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     mc:Ignorable="d">
 
-    <Grid Padding="24,16,24,16" RowSpacing="24">
+    <Grid Padding="24,16,24,16" RowSpacing="16">
         <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
-        <TextBlock Style="{StaticResource TitleTextBlockStyle}" Text="Home" />
-        <TextBlock Grid.Row="1" Text="This is the Home page" />
+
+        <TextBlock Style="{StaticResource TitleTextBlockStyle}" Text="TS4 Translator" />
+
+        <StackPanel
+            Grid.Row="1"
+            Orientation="Horizontal"
+            Spacing="12">
+            <Button Command="{x:Bind ViewModel.ImportPackagesCommand}" Content="Importar packages" />
+            <ProgressRing
+                Width="20"
+                Height="20"
+                IsActive="{x:Bind ViewModel.IsBusy, Mode=OneWay}" />
+        </StackPanel>
+
+        <TextBlock
+            Grid.Row="2"
+            Text="{x:Bind ViewModel.StatusText, Mode=OneWay}"
+            TextWrapping="Wrap" />
+
+        <ListView Grid.Row="3" ItemsSource="{x:Bind ViewModel.RecentProjects, Mode=OneWay}">
+            <ListView.ItemTemplate>
+                <DataTemplate x:DataType="projects:TranslationProject">
+                    <StackPanel
+                        Padding="0,8,0,8"
+                        Orientation="Vertical"
+                        Spacing="2">
+                        <TextBlock FontWeight="SemiBold" Text="{x:Bind Name}" />
+                        <TextBlock
+                            FontSize="12"
+                            Opacity="0.7"
+                            Text="{x:Bind SourcePackagePaths.Count}" />
+                    </StackPanel>
+                </DataTemplate>
+            </ListView.ItemTemplate>
+        </ListView>
     </Grid>
 </Page>

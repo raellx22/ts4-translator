@@ -16,9 +16,10 @@ WinUI existem ainda.
 
 Ver a seção "Completed" de `docs/STATUS.md` — não duplicado aqui para evitar as duas listas
 divergirem com o tempo. Em particular: o pipeline de tradução inteiro (`ITranslationProvider`,
-`IBatchBuilder`, `ITranslationOrchestrator`) e o primeiro provider real (`OpenAICompatibleProvider`,
-`src/TS4Translator.Providers/OpenAICompatible/`) já existem e estão testados — **não recrie essas
-interfaces nem esse provider**.
+`IBatchBuilder`, `ITranslationOrchestrator`), o primeiro provider real (`OpenAICompatibleProvider`),
+`IProjectService`, e uma primeira tela de produto (`HomePage`) já existem — **não recrie nenhum
+desses**. Todo o código compila e a suíte de 81 testes automatizados passa. **Nada disso foi
+verificado rodando o app de verdade** — ver a seção final deste arquivo antes de continuar.
 
 ## What is currently being worked on
 
@@ -26,19 +27,21 @@ Nada em progresso — a sessão anterior levou cada peça a um estado compiláve
 
 ## Exact next task
 
-Duas coisas de igual prioridade, escolha pela que fizer mais sentido dado o ambiente que você tem:
+**Se você tem um desktop Windows real disponível agora, isso vem antes de qualquer código novo:**
+rode `dotnet run --project src\TS4Translator.App\TS4Translator.App.csproj -p:Platform=x64` e confirme
+visualmente que a janela abre, o Mica aparece, a navegação Home/About/Settings funciona, e que o botão
+"Importar packages" na Home realmente abre um `FileOpenPicker` e, ao escolher um `.package`, cria um
+projeto e mostra a contagem de STBLs sem travar. Anote qualquer coisa que quebrar em
+`docs/STATUS.md` → "Known issues" antes de tentar consertar — pode ser um problema de uma linha (ex.:
+um `x:Bind` com o `Mode` errado) ou pode revelar que o design do service locator (DEC-009) precisa
+mudar. Depois disso, siga para a lista abaixo.
 
-**Se você tem um desktop Windows com LM Studio (ou qualquer servidor compatível com OpenAI) rodando:**
-teste `OpenAICompatibleProvider` contra ele de verdade — isso nunca foi feito, só contra HTTP falso em
-teste. Aponte `OpenAICompatibleProviderOptions.Endpoint` para o servidor local, rode uma tradução
-pequena via `TranslationOrchestrator`, e confirme que o formato de resposta do servidor real bate com
-o que o parser espera. Registre o resultado (funcionou / o que precisou ajustar) em `docs/DECISIONS.md`.
-
-**Caso contrário:** implemente a entidade `Project` em `TS4Translator.Persistence` (nova migration,
-`dotnet ef migrations add AddProject` a partir de `src/TS4Translator.Persistence/`) + `IProjectService`
-em `Core` (seção 33 do brief: nome, arquivos importados, idioma, target locale, provider, histórico).
-Sem isso não há como a UI listar "projetos recentes" nem ligar strings/traduções a um mod específico —
-é o pré-requisito bloqueando a primeira tela de produto real.
+**Se você não tem acesso a um desktop Windows**, ou já fez a verificação acima, a próxima tarefa é:
+Drag-and-drop de arquivos na `HomePage` (seção 34 pede isso explicitamente; hoje só existe o botão de
+file picker) — usar os eventos `DragOver`/`Drop` do WinUI no `Grid` raiz da página, filtrando por
+extensão `.package`, e chamar a mesma lógica de `HomePageViewModel.ImportPackagesAsync` mas recebendo
+os caminhos do `DataPackageView` em vez do picker (talvez valha refatorar `ImportPackagesAsync` para
+aceitar `IReadOnlyList<string>` diretamente e ter dois pontos de entrada — botão e drop — chamando-o).
 
 Depois disso, seguir a lista "Próximas tarefas concretas" no fim de `docs/ROADMAP.md`.
 
@@ -93,9 +96,10 @@ Ver `docs/ROADMAP.md`. Prioridade imediata: `ITranslationProvider` → `BatchBui
 
 ## Uma coisa importante sobre o ambiente de desenvolvimento anterior
 
-Esta sessão rodou sem acesso a um desktop Windows interativo (sem forma de tirar screenshot da janela
-WinUI ou clicar nela). Tudo foi validado por `dotnet build`/`dotnet test` na linha de comando. **Isso
-significa que a shell WinUI nunca foi vista rodando de fato.** Se você tem acesso a um desktop Windows
-real, rode `dotnet run --project src\TS4Translator.App\TS4Translator.App.csproj -p:Platform=x64`
-como primeira ação e confirme visualmente que a janela abre, o Mica aparece, e a navegação entre
-Home/About/Settings funciona, antes de continuar construindo em cima dela.
+Esta sessão (e a sessão anterior a ela) rodaram sem acesso a um desktop Windows interativo (sem forma
+de tirar screenshot da janela WinUI ou clicar nela). Tudo foi validado por `dotnet build`/`dotnet test`
+na linha de comando — inclusive a `HomePage` inteira, com seu botão de importação e list view de
+projetos recentes. **Isso significa que nenhuma tela WinUI deste app foi vista rodando de fato, nem
+uma vez.** O compilador XAML do WinUI pega muitos erros de binding em tempo de build, mas não todos —
+existe uma chance real de algo parecer certo aqui e falhar (ou simplesmente não fazer nada) ao clicar.
+Trate a seção "Exact next task" acima como a prioridade número um se você tiver esse acesso.

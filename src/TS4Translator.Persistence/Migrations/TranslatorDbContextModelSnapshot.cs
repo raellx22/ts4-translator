@@ -17,6 +17,55 @@ namespace TS4Translator.Persistence.Migrations
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.11");
 
+            modelBuilder.Entity("TS4Translator.Persistence.Entities.ProjectRecord", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SourceLocale")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("TargetLocale")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("UpdatedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("Projects");
+                });
+
+            modelBuilder.Entity("TS4Translator.Persistence.Entities.ProjectSourceFileRecord", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("FilePath")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ProjectId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ProjectId");
+
+                    b.ToTable("ProjectSourceFileRecord");
+                });
+
             modelBuilder.Entity("TS4Translator.Persistence.Entities.TranslationMemoryRecord", b =>
                 {
                     b.Property<int>("Id")
@@ -59,6 +108,22 @@ namespace TS4Translator.Persistence.Migrations
                         .IsUnique();
 
                     b.ToTable("TranslationMemory");
+                });
+
+            modelBuilder.Entity("TS4Translator.Persistence.Entities.ProjectSourceFileRecord", b =>
+                {
+                    b.HasOne("TS4Translator.Persistence.Entities.ProjectRecord", "Project")
+                        .WithMany("SourceFiles")
+                        .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Project");
+                });
+
+            modelBuilder.Entity("TS4Translator.Persistence.Entities.ProjectRecord", b =>
+                {
+                    b.Navigation("SourceFiles");
                 });
 #pragma warning restore 612, 618
         }

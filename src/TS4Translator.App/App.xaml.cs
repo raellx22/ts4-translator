@@ -1,6 +1,8 @@
 ﻿using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.UI.Xaml;
+using TS4Translator.App.Services;
+using TS4Translator.App.ViewModels;
 using TS4Translator.Infrastructure;
 using TS4Translator.Persistence;
 using TS4Translator.Sims4;
@@ -25,6 +27,16 @@ public partial class App : Application
     /// </summary>
     public static Window Window { get; private set; } = null!;
 
+    /// <summary>The native window handle (HWND) - required to own WinRT file/folder pickers under WinUI 3.</summary>
+    public static nint WindowHandle => WinRT.Interop.WindowNative.GetWindowHandle(Window);
+
+    /// <summary>
+    /// Service locator for pages, which WinUI's <c>Frame.Navigate(Type)</c> instantiates via a
+    /// parameterless constructor - there is no built-in way to inject a page's ViewModel through
+    /// navigation, so each page resolves its own ViewModel from here instead.
+    /// </summary>
+    public static IServiceProvider Services { get; private set; } = null!;
+
     /// <summary>
     /// Initializes the singleton application object.  This is the first line of authored code
     /// executed, and as such is the logical equivalent of main() or WinMain().
@@ -37,7 +49,10 @@ public partial class App : Application
             .AddSims4Services()
             .AddTranslationServices()
             .AddPersistenceServices(AppDataPaths.DatabaseFilePath)
+            .AddSingleton<IPathPickerService, WindowsAppSdkPathPickerService>()
+            .AddTransient<HomePageViewModel>()
             .BuildServiceProvider();
+        Services = _services;
     }
 
     /// <summary>

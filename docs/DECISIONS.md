@@ -217,3 +217,68 @@ automáticas — teria que escrever DDL/versionamento à mão); Dapper.
 **Consequências:** Toda entidade de persistência futura (Project, StringEntry, GlossaryTerm,
 TranslationJob, etc. — seção 37) deve ser adicionada como uma nova migration incremental, nunca editando
 `20260826172805_InitialCreate` depois que ela existir em qualquer branch compartilhado.
+
+---
+
+## DEC-008 — Ordenação por `DateTimeOffset` no SQLite: client-side, não em SQL
+
+**Contexto:** `EfProjectService.ListRecentAsync` originalmente fazia `OrderByDescending(p => p.UpdatedAtUtc).Take(maxCount)`
+diretamente na query EF. Um teste de integração real (`ListRecentAsync_ReturnsMostRecentlyUpdatedFirst`)
+falhou imediatamente com `NotSupportedException: SQLite does not support expressions of type
+'DateTimeOffset' in ORDER BY clauses` — o provider `Microsoft.EntityFrameworkCore.Sqlite` (10.0.11)
+simplesmente não traduz `ORDER BY` sobre uma coluna `DateTimeOffset` para SQL, mesmo a coluna sendo
+armazenada como TEXT ISO-8601 (que ordenaria corretamente por comparação lexicográfica se o SQL
+chegasse a ser gerado).
+
+**Decisão:** Buscar todos os registros do projeto com `.Include(...).ToListAsync()`, depois ordenar e
+paginar (`OrderByDescending`/`Take`) do lado do cliente, em LINQ-to-Objects.
+
+**Alternativas:** Adicionar uma coluna `long UpdatedAtUtcTicks` só para ordenação (mais uma coluna
+redundante para manter sincronizada em todo `SaveAsync`/`UpdateAsync`); usar SQL bruto via
+`FromSqlInterpolated`.
+
+**Motivo:** Este é exatamente o tipo de fato que não deve ser assumido de documentação — só foi
+descoberto porque havia um teste de integração real rodando contra SQLite real, não um provedor
+in-memory. Ordenação client-side é aceitável na escala real de "projetos recentes" (dezenas, não
+milhões, de linhas) e evita uma coluna derivada.
+
+**Consequências:** Qualquer query futura que precise ordenar por uma coluna `DateTimeOffset` no SQLite
+via EF Core tem o mesmo problema — sempre escrever um teste de integração real (não apenas um teste
+com um repositório fake) antes de confiar em uma ordenação por data/hora funcionar em produção.
+
+---
+
+## DEC-009 — Primeira tela real: ViewModel por service locator estático, `[ObservableProperty]` em propriedades parciais
+
+**Contexto:** A primeira tela de produto (`HomePage`: importar `.package`, criar `TranslationProject`,
+listar projetos recentes) precisa de um `HomePageViewModel` injetado com `IProjectService`,
+`IPackageService` e um serviço de file picker. Mas a shell gerada pelo template `winui-navview`
+navega com `NavFrame.Navigate(typeof(HomePage))` — a API `Frame.Navigate(Type)` do WinUI instancia a
+página via construtor sem parâmetros; não existe um jeito nativo de injetar dependências através dela.
+
+**Decisão:**
+- `App` expõe `public static IServiceProvider Services { get; }`, populado no construtor logo após
+  `BuildServiceProvider()`. Cada página resolve seu próprio ViewModel no construtor:
+  `ViewModel = App.Services.GetRequiredService<HomePageViewModel>();` antes de `InitializeComponent()`.
+  Isso é um service locator, não injeção de construtor "de verdade" — aceitável aqui porque é a única
+  alternativa razoável sem reescrever a navegação para passar parâmetros (`Frame.Navigate(Type, object)`
+  com um parâmetro por página seria mais estrutura para o mesmo resultado, neste estágio).
+- `HomePageViewModel` é registrado `Transient` (uma instância nova por navegação até a página, não
+  compartilhada) — os demais serviços de domínio que ele consome continuam `Singleton`.
+- `[ObservableProperty]` do CommunityToolkit.Mvvm 8.4.2 sobre um **campo** privado (`private bool
+  isBusy;`) falhou o build com `MVVMTK0045`: em apps WinUI 3/WinRT, o gerador de código do toolkit
+  exige a sintaxe de **propriedade parcial** (`[ObservableProperty] public partial bool IsBusy { get; set; }`,
+  recurso do C# 13) em vez de campo — a sintaxe antiga não produz o marshalling WinRT correto.
+  `HomePageViewModel` usa a sintaxe de propriedade parcial em toda propriedade observável.
+
+**Alternativas:** Passar o ViewModel como parâmetro de `Frame.Navigate` (mais correto a longo prazo,
+mais código de navegação para escrever agora); usar `CommunityToolkit.Mvvm`'s `WeakReferenceMessenger`
+ou um framework de navegação de terceiros.
+
+**Motivo:** Menor caminho até uma tela funcional e testável por `dotnet build`, sem introduzir uma
+camada de navegação própria antes de haver mais de duas páginas reais que precisem dela.
+
+**Consequências:** Se o número de páginas com ViewModels crescer o suficiente para o service locator
+ficar repetitivo ou para passar estado entre páginas via navegação se tornar necessário, revisar para
+`Frame.Navigate(Type, object)` com um parâmetro de navegação tipado por página, ou um `INavigationService`
+próprio — não adicionar isso preventivamente enquanto só uma página precisa de DI.
