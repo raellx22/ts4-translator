@@ -1,4 +1,5 @@
 using System.Globalization;
+using TS4Translator.Core.Glossary;
 using TS4Translator.Core.Translation;
 using TS4Translator.Core.Validation;
 
@@ -129,5 +130,63 @@ public class TranslationOrchestratorTests
         Assert.Equal("[fake] First.", outcomes[0].TranslatedText);
         Assert.Equal("Segundo.", outcomes[1].TranslatedText);
         Assert.Equal("[fake] Third.", outcomes[2].TranslatedText);
+    }
+
+    [Fact]
+    public async Task TranslateAsync_GlossaryTermAppearsInBatch_IsForwardedToProvider()
+    {
+        var provider = new FakeTranslationProvider();
+        var items = new[] { new TranslationSourceItem("1", "Talk to the Grim Reaper.") };
+        var glossary = new[] { new GlossaryTerm(1, "Grim Reaper", "Ceifador", NeverTranslate: false, CaseSensitive: false, Notes: null, ProjectId: null) };
+
+        await _sut.TranslateAsync(items, provider, English, PortugueseBrazil, glossary);
+
+        var observed = Assert.Single(provider.ObservedGlossaryTerms);
+        var term = Assert.Single(observed!);
+        Assert.Equal("Grim Reaper", term.Original);
+    }
+
+    [Fact]
+    public async Task TranslateAsync_GlossaryTermDoesNotAppearInBatch_IsNotForwardedToProvider()
+    {
+        var provider = new FakeTranslationProvider();
+        var items = new[] { new TranslationSourceItem("1", "Hello there.") };
+        var glossary = new[] { new GlossaryTerm(1, "Grim Reaper", "Ceifador", NeverTranslate: false, CaseSensitive: false, Notes: null, ProjectId: null) };
+
+        await _sut.TranslateAsync(items, provider, English, PortugueseBrazil, glossary);
+
+        var observed = Assert.Single(provider.ObservedGlossaryTerms);
+        Assert.Empty(observed!);
+    }
+
+    [Fact]
+    public async Task TranslateAsync_GlossaryFilteringIsPerBatch_OnlyRelevantTermsGoToEachBatch()
+    {
+        var orchestrator = new TranslationOrchestrator(new TokenProtector(), new TranslationValidator(), new BatchBuilder(maxItemsPerBatch: 1), _memory);
+        var provider = new FakeTranslationProvider();
+        var items = new[]
+        {
+            new TranslationSourceItem("1", "Talk to the Grim Reaper."),
+            new TranslationSourceItem("2", "Hello there."),
+        };
+        var glossary = new[] { new GlossaryTerm(1, "Grim Reaper", "Ceifador", NeverTranslate: false, CaseSensitive: false, Notes: null, ProjectId: null) };
+
+        await orchestrator.TranslateAsync(items, provider, English, PortugueseBrazil, glossary);
+
+        Assert.Equal(2, provider.ObservedGlossaryTerms.Count);
+        Assert.NotEmpty(provider.ObservedGlossaryTerms[0]!);
+        Assert.Empty(provider.ObservedGlossaryTerms[1]!);
+    }
+
+    [Fact]
+    public async Task TranslateAsync_NoGlossaryProvided_PassesNullToProvider()
+    {
+        var provider = new FakeTranslationProvider();
+        var items = new[] { new TranslationSourceItem("1", "Hello there.") };
+
+        await _sut.TranslateAsync(items, provider, English, PortugueseBrazil);
+
+        var observed = Assert.Single(provider.ObservedGlossaryTerms);
+        Assert.Null(observed);
     }
 }

@@ -56,6 +56,10 @@ o conjunto de itens, não o primeiro que funcionar.
 - [x] `ITranslationOrchestrator`/`TranslationOrchestrator` — pipeline completo: translation memory →
   protect → provider → reconciliação por ID → restore → validate → grava na memory. Reconciliação por
   ID testada explicitamente contra resultado ausente e resultado duplicado do provider (seção 10). 8 testes.
+- [x] Glossário (seção 23) — `IGlossaryService`/`EfGlossaryService`, termos globais ou por projeto,
+  `NeverTranslate`, propagado por `ITranslationOrchestrator`/`ITranslationProvider` e filtrado por
+  batch (só termos relevantes ao lote são enviados). `OpenAICompatibleProvider` inclui o glossário no
+  prompt. Ver DEC-012. Falta apenas a tela de UI para gerenciar termos (CRUD só via serviço/testes).
 - [ ] Retry/backoff/rate-limit/pause/resume/checkpoint (seção 11, resto) — não iniciado; depende de
   `TranslationJob` existir como entidade persistida (seção 35), o que também não existe ainda.
 - [ ] Translation Profiles (seção 22) — não iniciado; o orquestrador hoje não aceita nenhum prompt/estilo
@@ -111,19 +115,28 @@ real nesta sessão (sem chave disponível). Antes de expor isso como "preset Riv
   tradução, exportação) — `EfProjectService` não faz isso automaticamente hoje, só `CreateAsync` seta
   o timestamp inicial.
 
-## FASE 8 — Mod Update Engine — **não iniciada**
+## FASE 8 — Mod Update Engine — **groundwork pronto, fuzzy matching não iniciado**
 
-## FASE 9 — Editor — **primeira versão pronta e verificada de ponta a ponta**
+- [x] Diff de reimportação (`ImportDiffResult`: novo/alterado/inalterado/removido) calculado em
+  `EfProjectStringService.ReplaceStringsAsync` e reportado na Home após importar/reimportar. Uma
+  tradução existente cujo texto de origem mudou é marcada `NeedsReview`, não descartada. Ver DEC-012.
+- [ ] Fuzzy matching de string similar-mas-não-idêntica (seção 25/26) — hoje a comparação é só por hash
+  exato; uma pequena correção de texto no mod original é tratada como "mudou completamente", não como
+  "quase igual, reaproveitar com revisão".
+- [ ] `ModVersion`/histórico de versões do mod importado — não iniciado.
+
+## FASE 9 — Editor — **completa para o núcleo pedido, painel lateral não iniciado**
 
 - [x] `EditorPage`/`EditorPageViewModel` — lista virtualizada (original, tradução, status) por
   projeto, botão "Traduzir pendentes" (usa `ITranslationOrchestrator`), navegação a partir da lista
   de projetos recentes na Home. Confirmado rodando o app instalado (DEC-011).
-- [ ] Filtros (todas/pendentes/traduzidas/com erro — seção 30) — não iniciado, hoje a lista mostra tudo.
-- [ ] Pesquisa por texto/ID — não iniciado.
-- [ ] Edição manual persistente — a coluna de tradução é somente leitura de propósito (DEC-011); virar
-  editável exige `UpdateTranslationAsync` sendo chamado ao editar, com status `ManuallyEdited`, e algum
-  histórico simples (seção 31).
-- [ ] Painel lateral com tokens/glossário/histórico por string (seção 30) — não iniciado.
+- [x] Filtros (Todas/Pendentes/Traduzidas/Revisar/Editadas manualmente — seção 30) e pesquisa por texto
+  (original + tradução) na lista de strings. Ver DEC-012.
+- [x] Edição manual persistente — coluna de tradução editável, salva em `LostFocus` via
+  `UpdateTranslationAsync(..., ProjectStringStatus.ManuallyEdited, ...)`, com histórico simples
+  (`ProjectStringRevisionRecord`/`GetHistoryAsync`, seção 31). Ver DEC-012.
+- [ ] Painel lateral com tokens/glossário/histórico por string (seção 30) — `GetHistoryAsync` já existe
+  no serviço, falta só a UI de exibição; não iniciado.
 
 ## FASE 10 — Hybrid Translation — **não iniciada**
 
@@ -153,13 +166,19 @@ real nesta sessão (sem chave disponível). Antes de expor isso como "preset Riv
    pipeline foi verificado com o fallback "sem provider" e com HTTP falso em teste, mas o caminho
    HTTP real de ponta a ponta dentro do app (`SettingsPage` → salvar config → `EditorPage` → "Traduzir
    pendentes" → resposta real chegando) nunca rodou. Ver `docs/HANDOFF.md`.
-2. Drag-and-drop de arquivos/pastas na `HomePage` (seção 34 pede explicitamente, hoje só há o botão
-   "Importar packages" via file picker) — e suporte a pasta inteira, não só múltiplos arquivos.
-3. Edição manual persistente de tradução no Editor (hoje é somente leitura de propósito — DEC-011).
-4. Filtros e pesquisa na lista de strings do Editor (seção 30) — hoje mostra tudo, sem filtro.
-5. `AddHttpClient`/`IHttpClientFactory` em `TS4Translator.Infrastructure` — hoje `HttpClient` é um
+2. Tela de UI para gerenciar o Glossário (`IGlossaryService` já existe e está integrado ao pipeline —
+   DEC-012 — mas não há tela para adicionar/editar/remover termos; hoje só é testável via serviço).
+3. Preset "NVIDIA NIM"/Riva Translate em `SettingsPage` (ver Fase 5) e `ProviderConfiguration` com
+   suporte a múltiplos perfis salvos, não só um endpoint ativo.
+4. Translation Profiles (seção 22) — prompt/estilo customizado por projeto, wired em
+   `ITranslationOrchestrator`/`ITranslationProvider` (mesma forma que o glossário foi integrado).
+5. Fuzzy matching em Translation Memory e no diff de reimportação (seção 25/26) — hoje ambos são só
+   por hash exato.
+6. `AddHttpClient`/`IHttpClientFactory` em `TS4Translator.Infrastructure` — hoje `HttpClient` é um
    singleton simples registrado direto no `App`; não crítico, mas o padrão correto para um app que vai
    ganhar mais providers HTTP.
-6. Entidade `TranslationJob` (seção 35) — hoje "Traduzir pendentes" roda tudo de uma vez, sem
+7. Entidade `TranslationJob` (seção 35) — hoje "Traduzir pendentes" roda tudo de uma vez, sem
    checkpoint/retomada; para mods grandes (milhares de strings) isso vai precisar de progresso
    persistido, não só uma chamada síncrona bloqueante.
+8. `SettingsPage` reorganizada em abas reais (General/Translation/Providers/Argos/NVIDIA NIM/Models/Appearance/Advanced,
+   seção 41) e seletor de tema claro/escuro/sistema explícito.

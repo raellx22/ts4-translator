@@ -43,10 +43,13 @@ Interfaces e DTOs puros. Nenhuma implementação, nenhuma dependência de tercei
   `TokenValidationIssue(Kind)`. Ver DEC-004 para o design de proteção/restauração.
 - `Validation/` — `ITranslationValidator`, `ValidationIssue`, `ValidationSeverity` (Info/Warning/Error/Critical),
   `ValidationIssueCode`.
-- (Planejado, ainda não criado) `Packages/`, `Translation/` (provider/job contracts), `Memory/`,
-  `Glossary/`, `Projects/` — serão adicionados quando as fases correspondentes do roadmap começarem,
-  não antecipadamente (ver seção 60 do brief original: evitar abstração antes de haver uma implementação
-  real para validá-la).
+- `Packages/`, `Translation/` (provider/job contracts), `Memory/`, `Projects/` — contratos e modelos das
+  camadas correspondentes.
+- `Glossary/` — `GlossaryTerm` (record com `AppearsIn(text)`, usado pelo `TranslationOrchestrator` para
+  filtrar quais termos são relevantes a um batch específico) e `IGlossaryService`. Ver DEC-012.
+- (Planejado, ainda não criado) `TranslationJob`/estados de job (seção 35) — será adicionado quando
+  retry/pause/resume for implementado, não antecipadamente (seção 60 do brief: evitar abstração antes
+  de haver uma implementação real para validá-la).
 
 ### TS4Translator.Translation
 
@@ -64,7 +67,10 @@ Implementações que não dependem de nenhum SDK de terceiros nem de I/O:
   (nunca por posição/contagem — se o provider omitir ou duplicar um `Id`, o item vira uma falha
   explícita com `ValidationIssueCode.ProviderResultMissing`/`ProviderResultDuplicated`, nunca um
   deslocamento silencioso de traduções), restaura tokens, valida, e só grava na translation memory os
-  itens sem problema crítico.
+  itens sem problema crítico. `TranslateAsync` aceita um `glossaryTerms` opcional (seção 23):
+  `TranslationOrchestrator` filtra, **por batch**, só os termos cujo `GlossaryTerm.AppearsIn(text)`
+  bate com algum item daquele batch específico, antes de repassar ao provider — nunca o glossário
+  inteiro de uma vez. Ver DEC-012.
 
 Perfis de tradução (seção 22) ainda não existem — `TranslationOrchestrator` não aceita nenhum
 prompt/estilo customizado hoje, e todo `TranslationMemoryEntry` novo grava `ProfileName: null`.
@@ -93,8 +99,10 @@ saída já existente não é sobrescrita).
   `__TS4_TOKEN_NNNN__` literalmente. **Nunca confia que a resposta é JSON válido ou completo**
   (seção 46): se o array vier truncado ou malformado, cada objeto `{...}` completo é recuperado
   individualmente via um scanner de profundidade de chaves — objetos incompletos são descartados, não
-  travam o batch inteiro. 9 testes com um `HttpMessageHandler` falso (nenhum servidor real é
-  necessário nem contatado — seção 44).
+  travam o batch inteiro. Quando `glossaryTerms` traz itens relevantes (`Capabilities.SupportsGlossary: true`),
+  `BuildSystemPrompt` acrescenta uma seção listando cada termo (`NeverTranslate` vira "nunca traduzir";
+  os demais viram "deve ser traduzido como X") — ver DEC-012. 15 testes com um `HttpMessageHandler`
+  falso (nenhum servidor real é necessário nem contatado — seção 44).
 - `OpenAICompatible.OpenAICompatibleProviderFactory : ITranslationProviderFactory` — constrói o
   provider ativo a partir do que está salvo em `IProviderConfigurationService`; a UI (`EditorPage`,
   `SettingsPage`) só conhece essa fábrica, nunca `OpenAICompatibleProvider` diretamente.
@@ -111,16 +119,22 @@ SQLite via EF Core, schema versionado por migrations reais (DEC-007). Implementa
 "killer feature" da seção 63), `Project` (nome, arquivos `.package` importados, par de locales,
 timestamps — seção 33), `ProjectString` (cada string extraída, ligada ao `Project` e à `StblKey`/
 `KeyHash` de origem — upsert por hash preserva traduções ao reimportar a mesma versão de um mod,
-seção 25), e `ProviderConfiguration` (endpoint/modelo/temperatura do provider ativo; a API key em si
-não mora aqui — ver `Infrastructure`). `TranslatorDbContext` é resolvido via
+seção 25), `ProviderConfiguration` (endpoint/modelo/temperatura do provider ativo; a API key em si
+não mora aqui — ver `Infrastructure`), `ProjectStringRevision` (texto anterior de uma tradução
+sobrescrita, gravado por `EfProjectStringService.UpdateTranslationAsync` antes de qualquer overwrite —
+não na primeira tradução de uma string, seção 31), e `GlossaryTerm` (global quando `ProjectId == null`,
+específico de projeto quando não — DEC-012). `TranslatorDbContext` é resolvido via
 `IDbContextFactory<TranslatorDbContext>`, nunca injetado diretamente, porque um app desktop não tem
 escopo de requisição como o ASP.NET. `ServiceCollectionExtensions.AddPersistenceServices(databasePath)`
 registra a factory e todos os serviços acima. Listagens ordenadas por `DateTimeOffset` (ex.: "projetos
-recentes") são ordenadas do lado do cliente, não em SQL — o provider SQLite do EF Core não traduz
-`ORDER BY` sobre colunas `DateTimeOffset` (DEC-008, descoberto por um teste de integração real
-falhando, não por leitura de documentação). As demais entidades da seção 37 (GlossaryTerm,
-TranslationJob, etc.) entram como migrations incrementais, uma por feature, quando essa feature for
-implementada — não antecipadamente.
+recentes", histórico de revisões) são ordenadas do lado do cliente, não em SQL — o provider SQLite do
+EF Core não traduz `ORDER BY` sobre colunas `DateTimeOffset` (DEC-008, descoberto por um teste de
+integração real falhando, não por leitura de documentação).
+`EfProjectStringService.ReplaceStringsAsync` retorna um `ImportDiffResult` (novo/alterado/inalterado/
+removido) em vez de `void` — uma reimportação cujo texto de origem mudou numa entrada já traduzida
+marca a entrada `NeedsReview` sem descartar a tradução existente (DEC-012). A entidade `TranslationJob`
+da seção 37 entra como migration incremental quando retry/pause/resume for implementado — não
+antecipadamente.
 
 ### TS4Translator.Infrastructure
 
@@ -141,19 +155,24 @@ registra `IPathPickerService`/`HomePageViewModel` locais ao projeto App, e roda 
 uma vez antes de ativar a janela. `App.Services` (um service locator estático — DEC-009) e
 `App.WindowHandle` ficam disponíveis para páginas e serviços que precisam deles.
 
-- **Home** (`Pages/HomePage.xaml` + `ViewModels/HomePageViewModel.cs`) — importar `.package` (via
-  `IPathPickerService`/`FileOpenPicker`, seção 34), cria um `TranslationProject` a partir dos arquivos
-  escolhidos (locale fixo `en-US`→`pt-BR` por enquanto — seletor de locale ainda não existe), extrai
-  e persiste **cada string de cada STBL encontrada** via `IProjectStringService` (não só a contagem),
-  e lista projetos recentes via `IProjectService`. Clicar num projeto navega para o Editor
-  (`Frame.Navigate(typeof(EditorPage), project.Id)`).
+- **Home** (`Pages/HomePage.xaml` + `ViewModels/HomePageViewModel.cs`) — importar `.package` via
+  `IPathPickerService`/`FileOpenPicker` **ou** arrastando arquivos para a janela (`AllowDrop`/
+  `Page_DragOver`/`Page_Drop`, seção 34) — os dois caminhos convergem em `RunImportAsync`, cria um
+  `TranslationProject` a partir dos arquivos escolhidos (locale fixo `en-US`→`pt-BR` por enquanto —
+  seletor de locale ainda não existe), extrai e persiste **cada string de cada STBL encontrada** via
+  `IProjectStringService` (não só a contagem) e mostra o `ImportDiffResult` de cada import/reimport
+  (quantas novas/alteradas/reaproveitadas/removidas — DEC-012), e lista projetos recentes via
+  `IProjectService`. Clicar num projeto navega para o Editor (`Frame.Navigate(typeof(EditorPage), project.Id)`).
 - **Editor** (`Pages/EditorPage.xaml` + `ViewModels/EditorPageViewModel.cs`) — lista as strings de um
-  projeto (`ListView` virtualizada, original + tradução + status por linha); "Traduzir pendentes" roda
-  `ITranslationOrchestrator` contra o provider ativo (`ITranslationProviderFactory`); "Exportar" agrupa
-  por STBL de origem, troca o locale via `IStringTableService.WithLocale`, escreve com
-  `IPackageService.WriteStringTablesAsync`, e só reporta sucesso depois de reabrir o arquivo e
-  comparar cada string com o que deveria estar lá (round-trip real, seção 28). Edição manual de
-  tradução é somente leitura por enquanto — ver DEC-011.
+  projeto (`ListView` virtualizada, original + tradução editável + status por linha), com filtro por
+  status e busca por texto sobre uma lista mestra em memória; "Traduzir pendentes" roda
+  `ITranslationOrchestrator` (com o glossário aplicável, se houver) contra o provider ativo
+  (`ITranslationProviderFactory`); editar a tradução manualmente salva no `LostFocus`
+  (`UpdateTranslationAsync(..., ManuallyEdited, ...)`, gravando a versão anterior em
+  `ProjectStringRevision` — DEC-012); "Exportar" agrupa por STBL de origem, troca o locale via
+  `IStringTableService.WithLocale`, escreve com `IPackageService.WriteStringTablesAsync`, e só reporta
+  sucesso depois de reabrir o arquivo e comparar cada string com o que deveria estar lá (round-trip
+  real, seção 28).
 - **Settings** (`Pages/SettingsPage.xaml` + `ViewModels/SettingsPageViewModel.cs`) — formulário para
   configurar o provider OpenAI-compatible ativo (nome/endpoint/modelo/API key) via
   `IProviderConfigurationService`, com botão "Testar conexão" que chama o provider de verdade.

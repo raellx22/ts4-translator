@@ -1,4 +1,5 @@
 using System.Globalization;
+using TS4Translator.Core.Glossary;
 
 namespace TS4Translator.Core.Translation;
 
@@ -15,9 +16,15 @@ public interface ITranslationProvider
 
     ProviderCapabilities Capabilities { get; }
 
+    /// <param name="glossaryTerms">
+    /// Only the terms relevant to this specific batch (brief section 23 - never send the whole
+    /// glossary). A provider whose <see cref="ProviderCapabilities.SupportsGlossary"/> is false is
+    /// free to ignore this.
+    /// </param>
     Task<IReadOnlyList<TranslationResultItem>> TranslateBatchAsync(
         IReadOnlyList<TranslationRequestItem> items,
         CultureInfo sourceLocale,
         CultureInfo targetLocale,
+        IReadOnlyList<GlossaryTerm>? glossaryTerms = null,
         CancellationToken cancellationToken = default);
 }

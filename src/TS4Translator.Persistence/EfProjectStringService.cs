@@ -7,7 +7,7 @@ namespace TS4Translator.Persistence;
 
 public sealed class EfProjectStringService(IDbContextFactory<TranslatorDbContext> dbContextFactory) : IProjectStringService
 {
-    public async Task ReplaceStringsAsync(Guid projectId, StblKey sourceStbl, IReadOnlyList<(uint KeyHash, string Text)> entries, CancellationToken cancellationToken = default)
+    public async Task<ImportDiffResult> ReplaceStringsAsync(Guid projectId, StblKey sourceStbl, IReadOnlyList<(uint KeyHash, string Text)> entries, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(entries);
 
@@ -19,6 +19,9 @@ public sealed class EfProjectStringService(IDbContextFactory<TranslatorDbContext
             .ConfigureAwait(false);
 
         var incomingHashes = new HashSet<uint>();
+        var newCount = 0;
+        var changedCount = 0;
+        var unchangedCount = 0;
 
         foreach (var (keyHash, text) in entries)
         {
@@ -26,7 +29,23 @@ public sealed class EfProjectStringService(IDbContextFactory<TranslatorDbContext
 
             if (existing.TryGetValue(keyHash, out var record))
             {
-                record.OriginalText = text;
+                if (!string.Equals(record.OriginalText, text, StringComparison.Ordinal))
+                {
+                    record.OriginalText = text;
+                    // The source text changed under an existing translation - never present a
+                    // translation of the old text as if it still matched (brief section 25).
+                    if (record.TranslatedText is not null)
+                    {
+                        record.Status = nameof(ProjectStringStatus.NeedsReview);
+                        record.IssueSummary = "O texto original mudou desde a última tradução.";
+                    }
+
+                    changedCount++;
+                }
+                else
+                {
+                    unchangedCount++;
+                }
             }
             else
             {
@@ -39,15 +58,19 @@ public sealed class EfProjectStringService(IDbContextFactory<TranslatorDbContext
                     OriginalText = text,
                     Status = nameof(ProjectStringStatus.Pending),
                 });
+                newCount++;
             }
         }
 
-        foreach (var removedHash in existing.Keys.Except(incomingHashes))
+        var removedHashes = existing.Keys.Except(incomingHashes).ToList();
+        foreach (var removedHash in removedHashes)
         {
             dbContext.ProjectStrings.Remove(existing[removedHash]);
         }
 
         await dbContext.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+
+        return new ImportDiffResult(newCount, changedCount, unchangedCount, removedHashes.Count);
     }
 
     public async Task<IReadOnlyList<ProjectStringEntry>> GetStringsAsync(Guid projectId, CancellationToken cancellationToken = default)
@@ -86,11 +109,37 @@ public sealed class EfProjectStringService(IDbContextFactory<TranslatorDbContext
             return;
         }
 
+        if (record.TranslatedText is not null && !string.Equals(record.TranslatedText, translatedText, StringComparison.Ordinal))
+        {
+            dbContext.ProjectStringRevisions.Add(new ProjectStringRevisionRecord
+            {
+                StringEntryId = stringEntryId,
+                PreviousText = record.TranslatedText,
+                ChangedAtUtc = DateTimeOffset.UtcNow,
+            });
+        }
+
         record.TranslatedText = translatedText;
         record.Status = status.ToString();
         record.IssueSummary = issueSummary;
 
         await dbContext.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<IReadOnlyList<StringRevision>> GetHistoryAsync(int stringEntryId, CancellationToken cancellationToken = default)
+    {
+        await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+
+        var records = await dbContext.ProjectStringRevisions
+            .AsNoTracking()
+            .Where(r => r.StringEntryId == stringEntryId)
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        return records
+            .OrderByDescending(r => r.ChangedAtUtc)
+            .Select(r => new StringRevision(r.Id, r.StringEntryId, r.PreviousText, r.ChangedAtUtc))
+            .ToList();
     }
 
     private static ProjectStringEntry ToEntry(ProjectStringRecord record) => new(

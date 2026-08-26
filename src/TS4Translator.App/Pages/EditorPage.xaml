@@ -14,6 +14,7 @@
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
@@ -36,7 +37,20 @@
             Text="{x:Bind ViewModel.StatusText, Mode=OneWay}"
             TextWrapping="Wrap" />
 
-        <ListView Grid.Row="3" ItemsSource="{x:Bind ViewModel.Strings}">
+        <StackPanel
+            Grid.Row="3"
+            Orientation="Horizontal"
+            Spacing="12">
+            <ComboBox
+                ItemsSource="{x:Bind ViewModel.FilterOptions}"
+                SelectedItem="{x:Bind ViewModel.SelectedFilter, Mode=TwoWay}" />
+            <TextBox
+                Width="280"
+                PlaceholderText="Pesquisar original ou tradução..."
+                Text="{x:Bind ViewModel.SearchText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+        </StackPanel>
+
+        <ListView Grid.Row="4" ItemsSource="{x:Bind ViewModel.Strings}">
             <ListView.ItemTemplate>
                 <DataTemplate x:DataType="vm:StringRowViewModel">
                     <Grid Padding="0,8,0,8" ColumnSpacing="16">
@@ -49,9 +63,11 @@
                             Grid.Column="0"
                             Text="{x:Bind Original}"
                             TextWrapping="Wrap" />
-                        <TextBlock
+                        <TextBox
                             Grid.Column="1"
-                            Text="{x:Bind Translation, Mode=OneWay}"
+                            AcceptsReturn="True"
+                            LostFocus="TranslationTextBox_LostFocus"
+                            Text="{x:Bind Translation, Mode=TwoWay}"
                             TextWrapping="Wrap" />
                         <TextBlock
                             Grid.Column="2"

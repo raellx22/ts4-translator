@@ -32,9 +32,51 @@ public sealed partial class EditorPageViewModel(
     [ObservableProperty]
     public partial string ProjectName { get; set; } = string.Empty;
 
+    [ObservableProperty]
+    public partial string SearchText { get; set; } = string.Empty;
+
+    [ObservableProperty]
+    public partial string SelectedFilter { get; set; } = AllFilter;
+
+    private const string AllFilter = "Todas";
+
     private TranslationProject? _project;
+    private readonly List<StringRowViewModel> _allRows = [];
+
+    public IReadOnlyList<string> FilterOptions { get; } = [AllFilter, "Pendentes", "Traduzidas", "Revisar", "Editadas manualmente"];
 
     public ObservableCollection<StringRowViewModel> Strings { get; } = [];
+
+    partial void OnSearchTextChanged(string value) => ApplyFilter();
+
+    partial void OnSelectedFilterChanged(string value) => ApplyFilter();
+
+    private void ApplyFilter()
+    {
+        IEnumerable<StringRowViewModel> filtered = _allRows;
+
+        filtered = SelectedFilter switch
+        {
+            "Pendentes" => filtered.Where(r => r.Status == ProjectStringStatus.Pending),
+            "Traduzidas" => filtered.Where(r => r.Status == ProjectStringStatus.Translated),
+            "Revisar" => filtered.Where(r => r.Status == ProjectStringStatus.NeedsReview),
+            "Editadas manualmente" => filtered.Where(r => r.Status == ProjectStringStatus.ManuallyEdited),
+            _ => filtered,
+        };
+
+        if (!string.IsNullOrWhiteSpace(SearchText))
+        {
+            filtered = filtered.Where(r =>
+                r.Original.Contains(SearchText, StringComparison.CurrentCultureIgnoreCase) ||
+                (r.Translation?.Contains(SearchText, StringComparison.CurrentCultureIgnoreCase) ?? false));
+        }
+
+        Strings.Clear();
+        foreach (var row in filtered)
+        {
+            Strings.Add(row);
+        }
+    }
 
     [RelayCommand]
     private async Task LoadAsync(Guid projectId)
@@ -50,10 +92,25 @@ public sealed partial class EditorPageViewModel(
         StatusText = $"{_project.SourceLocale.Name} → {_project.TargetLocale.Name}";
 
         var entries = await projectStringService.GetStringsAsync(projectId);
-        Strings.Clear();
-        foreach (var entry in entries)
+        _allRows.Clear();
+        _allRows.AddRange(entries.Select(e => new StringRowViewModel(e)));
+        ApplyFilter();
+    }
+
+    /// <summary>Persists a manual edit made directly in the editor (brief sections 30/31). The previous translation, if any, is kept as a recoverable revision.</summary>
+    public async Task SaveManualEditAsync(StringRowViewModel row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+
+        try
         {
-            Strings.Add(new StringRowViewModel(entry));
+            var newText = row.Translation ?? string.Empty;
+            await projectStringService.UpdateTranslationAsync(row.Id, newText, ProjectStringStatus.ManuallyEdited, issueSummary: null);
+            row.ApplyResult(newText, ProjectStringStatus.ManuallyEdited, issueSummary: null);
+        }
+        catch (Exception exception)
+        {
+            StatusText = $"Falha ao salvar edição ({exception.GetType().Name}): {exception.Message}";
         }
     }
 
@@ -111,7 +168,7 @@ public sealed partial class EditorPageViewModel(
 
                 await projectStringService.UpdateTranslationAsync(stringId, outcome.TranslatedText, status, issueSummary);
 
-                var row = Strings.FirstOrDefault(r => r.Id == stringId);
+                var row = _allRows.FirstOrDefault(r => r.Id == stringId);
                 row?.ApplyResult(outcome.TranslatedText, status, issueSummary);
 
                 if (outcome.Success)
@@ -124,6 +181,7 @@ public sealed partial class EditorPageViewModel(
                 }
             }
 
+            ApplyFilter();
             StatusText = $"Tradução concluída: {succeeded} traduzida(s), {needsReview} para revisar, {failed} sem resposta do provider.";
         }
         catch (Exception exception)

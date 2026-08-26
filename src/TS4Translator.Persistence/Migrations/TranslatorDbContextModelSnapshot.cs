@@ -17,6 +17,39 @@ namespace TS4Translator.Persistence.Migrations
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.11");
 
+            modelBuilder.Entity("TS4Translator.Persistence.Entities.GlossaryTermRecord", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("CaseSensitive")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("NeverTranslate")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Notes")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Original")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("ProjectId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Translation")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ProjectId");
+
+                    b.ToTable("GlossaryTerms");
+                });
+
             modelBuilder.Entity("TS4Translator.Persistence.Entities.ProjectRecord", b =>
                 {
                     b.Property<Guid>("Id")
@@ -106,6 +139,29 @@ namespace TS4Translator.Persistence.Migrations
                     b.ToTable("ProjectStrings");
                 });
 
+            modelBuilder.Entity("TS4Translator.Persistence.Entities.ProjectStringRevisionRecord", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTimeOffset>("ChangedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PreviousText")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("StringEntryId")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("StringEntryId");
+
+                    b.ToTable("ProjectStringRevisions");
+                });
+
             modelBuilder.Entity("TS4Translator.Persistence.Entities.ProviderConfigurationRecord", b =>
                 {
                     b.Property<int>("Id")
@@ -179,6 +235,16 @@ namespace TS4Translator.Persistence.Migrations
                     b.ToTable("TranslationMemory");
                 });
 
+            modelBuilder.Entity("TS4Translator.Persistence.Entities.GlossaryTermRecord", b =>
+                {
+                    b.HasOne("TS4Translator.Persistence.Entities.ProjectRecord", "Project")
+                        .WithMany()
+                        .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.Cascade);
+
+                    b.Navigation("Project");
+                });
+
             modelBuilder.Entity("TS4Translator.Persistence.Entities.ProjectSourceFileRecord", b =>
                 {
                     b.HasOne("TS4Translator.Persistence.Entities.ProjectRecord", "Project")
@@ -199,6 +265,17 @@ namespace TS4Translator.Persistence.Migrations
                         .IsRequired();
 
                     b.Navigation("Project");
+                });
+
+            modelBuilder.Entity("TS4Translator.Persistence.Entities.ProjectStringRevisionRecord", b =>
+                {
+                    b.HasOne("TS4Translator.Persistence.Entities.ProjectStringRecord", "StringEntry")
+                        .WithMany()
+                        .HasForeignKey("StringEntryId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("StringEntry");
                 });
 
             modelBuilder.Entity("TS4Translator.Persistence.Entities.ProjectRecord", b =>

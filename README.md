@@ -14,18 +14,24 @@ A única peça ainda não testada com infraestrutura real é a chamada HTTP de t
 testar contra um LM Studio ou NVIDIA NIM de verdade). Ver [`docs/STATUS.md`](docs/STATUS.md) para o
 estado exato e [`docs/HANDOFF.md`](docs/HANDOFF.md) para retomar o trabalho em uma nova sessão.
 
-Implementado e testado até agora (101 testes automatizados, todos passando):
+Implementado e testado até agora (121 testes automatizados, todos passando):
 
 - Solução .NET 10 / WinUI 3 completa (`TS4Translator.sln`), com App, seis bibliotecas de camada e
   cinco projetos de teste, compilando limpo em x64.
 - Shell WinUI com `NavigationView`, título estendido e Mica (a partir do template `winui-navview`,
   ver [`docs/DECISIONS.md`](docs/DECISIONS.md) DEC-005), com DI (`ServiceCollection`) no composition
   root.
-- **Home**: importar `.package` (múltiplos arquivos), extrair e persistir cada string de cada STBL,
-  criar um `TranslationProject`, listar recentes.
-- **Editor**: lista as strings de um projeto; "Traduzir pendentes" roda o pipeline de tradução
-  completo contra o provider configurado; "Exportar" gera um package traduzido e só reporta sucesso
-  depois de reabrir o arquivo e validar cada string (round-trip real, seção 28 do brief).
+- **Home**: importar `.package` (múltiplos arquivos, via seletor ou arrastando para a janela), extrair
+  e persistir cada string de cada STBL, criar um `TranslationProject`, listar recentes. Reimportar um
+  mod já processado mostra quantas strings são novas/alteradas/reaproveitadas/removidas.
+- **Editor**: lista as strings de um projeto com filtro por status e busca de texto; "Traduzir
+  pendentes" roda o pipeline de tradução completo (aplicando o glossário, se houver termo relevante)
+  contra o provider configurado; edição manual da tradução é salva com histórico; "Exportar" gera um
+  package traduzido e só reporta sucesso depois de reabrir o arquivo e validar cada string (round-trip
+  real, seção 28 do brief).
+- **Glossário**: termos globais ou por projeto (nomes próprios, marcas — nunca traduzir, ou sempre
+  traduzir de um jeito específico), aplicados automaticamente durante a tradução. CRUD hoje só via
+  serviço (`IGlossaryService`) — ainda sem tela própria na UI.
 - **Configurações**: cadastra endpoint/modelo/API key de um provider compatível com OpenAI, com botão
   "Testar conexão". A API key é criptografada via DPAPI do Windows, nunca em texto puro.
 - Fluxo completo confirmado rodando o app instalado como MSIX, com um `.package` sintético — ver
@@ -43,9 +49,9 @@ Implementado e testado até agora (101 testes automatizados, todos passando):
   OpenAI), com recuperação controlada de JSON truncado/malformado. 11 testes contra um HTTP falso,
   nenhuma chamada de rede real ainda.
 
-Ainda não implementado: Argos Translate (offline), NVIDIA NIM validado com API key real, glossário,
-fuzzy matching, mod update engine, edição manual persistente, empacotamento MSIX de distribuição.
-Ver [`docs/ROADMAP.md`](docs/ROADMAP.md).
+Ainda não implementado: Argos Translate (offline), NVIDIA NIM validado com API key real, tela de UI
+para o glossário, fuzzy matching (mod update engine/translation memory), Translation Profiles,
+empacotamento MSIX de distribuição. Ver [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
 ## Por que este stack
 

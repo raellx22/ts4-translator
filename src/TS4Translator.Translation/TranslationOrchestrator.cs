@@ -1,4 +1,5 @@
 using System.Globalization;
+using TS4Translator.Core.Glossary;
 using TS4Translator.Core.Memory;
 using TS4Translator.Core.Tokens;
 using TS4Translator.Core.Translation;
@@ -22,6 +23,7 @@ public sealed class TranslationOrchestrator(
         ITranslationProvider provider,
         CultureInfo sourceLocale,
         CultureInfo targetLocale,
+        IReadOnlyList<GlossaryTerm>? glossaryTerms = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(items);
@@ -47,7 +49,7 @@ public sealed class TranslationOrchestrator(
 
         foreach (var batch in batchBuilder.Build(itemsNeedingTranslation))
         {
-            await TranslateBatchAsync(batch, provider, sourceLocale, targetLocale, outcomesById, cancellationToken).ConfigureAwait(false);
+            await TranslateBatchAsync(batch, provider, sourceLocale, targetLocale, glossaryTerms, outcomesById, cancellationToken).ConfigureAwait(false);
         }
 
         return items.Select(item => outcomesById[item.Id]).ToList();
@@ -58,13 +60,20 @@ public sealed class TranslationOrchestrator(
         ITranslationProvider provider,
         CultureInfo sourceLocale,
         CultureInfo targetLocale,
+        IReadOnlyList<GlossaryTerm>? glossaryTerms,
         Dictionary<string, TranslationOutcome> outcomesById,
         CancellationToken cancellationToken)
     {
         var protectedByitemId = batch.ToDictionary(item => item.Id, item => tokenProtector.Protect(item.Text));
         var requestItems = batch.Select(item => new TranslationRequestItem(item.Id, protectedByitemId[item.Id].ProtectedText)).ToList();
 
-        var results = await provider.TranslateBatchAsync(requestItems, sourceLocale, targetLocale, cancellationToken).ConfigureAwait(false);
+        // Only terms that actually appear somewhere in this batch's source text are sent to the
+        // provider - never the whole glossary (brief section 23).
+        var relevantTerms = glossaryTerms is { Count: > 0 }
+            ? glossaryTerms.Where(term => batch.Any(item => term.AppearsIn(item.Text))).ToList()
+            : null;
+
+        var results = await provider.TranslateBatchAsync(requestItems, sourceLocale, targetLocale, relevantTerms, cancellationToken).ConfigureAwait(false);
         var resultCountsById = results
             .GroupBy(r => r.Id, StringComparer.Ordinal)
             .ToDictionary(g => g.Key, g => g.ToList(), StringComparer.Ordinal);

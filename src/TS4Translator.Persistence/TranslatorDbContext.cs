@@ -13,6 +13,10 @@ public sealed class TranslatorDbContext(DbContextOptions<TranslatorDbContext> op
 
     internal DbSet<ProviderConfigurationRecord> ProviderConfigurations => Set<ProviderConfigurationRecord>();
 
+    internal DbSet<ProjectStringRevisionRecord> ProjectStringRevisions => Set<ProjectStringRevisionRecord>();
+
+    internal DbSet<GlossaryTermRecord> GlossaryTerms => Set<GlossaryTermRecord>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<TranslationMemoryRecord>()
@@ -31,6 +35,23 @@ public sealed class TranslatorDbContext(DbContextOptions<TranslatorDbContext> op
             entity.HasOne(r => r.Project)
                 .WithMany()
                 .HasForeignKey(r => r.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<ProjectStringRevisionRecord>(entity =>
+        {
+            entity.HasOne(r => r.StringEntry)
+                .WithMany()
+                .HasForeignKey(r => r.StringEntryId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<GlossaryTermRecord>(entity =>
+        {
+            entity.HasOne(r => r.Project)
+                .WithMany()
+                .HasForeignKey(r => r.ProjectId)
+                .IsRequired(false)
                 .OnDelete(DeleteBehavior.Cascade);
         });
     }

@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using TS4Translator.Core.Glossary;
 using TS4Translator.Core.Memory;
 using TS4Translator.Core.Projects;
 using TS4Translator.Core.Providers;
@@ -21,6 +22,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IProjectService, EfProjectService>();
         services.AddSingleton<IProjectStringService, EfProjectStringService>();
         services.AddSingleton<IProviderConfigurationService, EfProviderConfigurationService>();
+        services.AddSingleton<IGlossaryService, EfGlossaryService>();
 
         return services;
     }

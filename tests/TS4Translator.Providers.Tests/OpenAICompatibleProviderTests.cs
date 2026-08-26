@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Net;
 using System.Text.Json;
+using TS4Translator.Core.Glossary;
 using TS4Translator.Core.Translation;
 using TS4Translator.Providers.OpenAICompatible;
 
@@ -132,5 +133,48 @@ public class OpenAICompatibleProviderTests
             [new TranslationRequestItem("1", "Ask __TS4_TOKEN_0001__ to stay.")], English, PortugueseBrazil);
 
         Assert.Contains("__TS4_TOKEN_0001__", handler.LastRequestBody);
+    }
+
+    [Fact]
+    public async Task TranslateBatchAsync_GlossaryTermToTranslate_IncludesItInSystemPrompt()
+    {
+        var (sut, handler) = CreateSut(HttpStatusCode.OK, ChatCompletionEnvelope("[]"));
+        var glossary = new[] { new GlossaryTerm(1, "Grim Reaper", "Ceifador", NeverTranslate: false, CaseSensitive: false, Notes: null, ProjectId: null) };
+
+        await sut.TranslateBatchAsync([new TranslationRequestItem("1", "Talk to the Grim Reaper.")], English, PortugueseBrazil, glossary);
+
+        Assert.Contains("Grim Reaper", handler.LastRequestBody);
+        Assert.Contains("must be translated as", handler.LastRequestBody);
+        Assert.Contains("Ceifador", handler.LastRequestBody);
+    }
+
+    [Fact]
+    public async Task TranslateBatchAsync_GlossaryTermNeverTranslate_MarksItAsNeverTranslateInSystemPrompt()
+    {
+        var (sut, handler) = CreateSut(HttpStatusCode.OK, ChatCompletionEnvelope("[]"));
+        var glossary = new[] { new GlossaryTerm(1, "SimCity", "SimCity", NeverTranslate: true, CaseSensitive: false, Notes: null, ProjectId: null) };
+
+        await sut.TranslateBatchAsync([new TranslationRequestItem("1", "Welcome to SimCity.")], English, PortugueseBrazil, glossary);
+
+        Assert.Contains("must NEVER be translated", handler.LastRequestBody);
+    }
+
+    [Fact]
+    public async Task TranslateBatchAsync_NoGlossaryProvided_DoesNotAddGlossarySectionToPrompt()
+    {
+        var (sut, handler) = CreateSut(HttpStatusCode.OK, ChatCompletionEnvelope("[]"));
+
+        await sut.TranslateBatchAsync([new TranslationRequestItem("1", "Hello.")], English, PortugueseBrazil);
+
+        Assert.DoesNotContain("Glossary", handler.LastRequestBody);
+    }
+
+    [Fact]
+    public void Capabilities_ReportsGlossaryAndCustomPromptSupport()
+    {
+        var (sut, _) = CreateSut(HttpStatusCode.OK, ChatCompletionEnvelope("[]"));
+
+        Assert.True(sut.Capabilities.SupportsGlossary);
+        Assert.True(sut.Capabilities.SupportsCustomPrompt);
     }
 }

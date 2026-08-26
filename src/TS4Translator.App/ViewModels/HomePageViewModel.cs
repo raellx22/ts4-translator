@@ -9,10 +9,10 @@ using TS4Translator.Core.Projects;
 namespace TS4Translator.App.ViewModels;
 
 /// <summary>
-/// Backs the Home page: import `.package` files, create a project from them, extract every STBL's
-/// strings into it, and show recent projects. Deliberately hardcodes English source / Portuguese
-/// (Brazil) target for now - a locale picker belongs to a later, more complete import flow (brief
-/// section 34), not this first slice.
+/// Backs the Home page: import `.package` files (via picker or drag-and-drop, brief section 34),
+/// create a project from them, extract every STBL's strings into it, and show recent projects.
+/// Deliberately hardcodes English source / Portuguese (Brazil) target for now - a locale picker
+/// belongs to a later, more complete import flow, not this first slice.
 /// </summary>
 public sealed partial class HomePageViewModel : ObservableObject
 {
@@ -40,8 +40,8 @@ public sealed partial class HomePageViewModel : ObservableObject
         _projectStringService = projectStringService;
         _packageService = packageService;
         _pathPicker = pathPicker;
-        StatusText = "Importe um ou mais arquivos .package para começar.";
-        ImportPackagesCommand = new AsyncRelayCommand(ImportPackagesAsync);
+        StatusText = "Importe um ou mais arquivos .package para começar (ou arraste-os aqui).";
+        ImportPackagesCommand = new AsyncRelayCommand(ImportViaPickerAsync);
         _ = LoadRecentProjectsAsync();
     }
 
@@ -59,16 +59,25 @@ public sealed partial class HomePageViewModel : ObservableObject
         }
     }
 
-    private async Task ImportPackagesAsync()
+    private Task ImportViaPickerAsync() => RunImportAsync(async () =>
     {
-        // Everything in this method - including the picker call itself - must stay inside the
-        // try/catch. AsyncRelayCommand does not rethrow exceptions from its delegate onto the UI
-        // thread by default: an exception here would otherwise be silently swallowed (the command
-        // would just appear to do nothing when clicked). Confirmed by actually running the app -
-        // the picker call originally sat outside this try/catch and failures were invisible.
+        var files = await _pathPicker.PickPackageFilesAsync();
+        return files;
+    });
+
+    /// <summary>Entry point for drag-and-drop (brief section 34) - the code-behind pre-filters to `.package` files before calling this.</summary>
+    public Task ImportFilesAsync(IReadOnlyList<string> files) => RunImportAsync(() => Task.FromResult(files));
+
+    private async Task RunImportAsync(Func<Task<IReadOnlyList<string>>> resolveFiles)
+    {
+        // Everything in this method - including any picker call - must stay inside the try/catch.
+        // AsyncRelayCommand does not rethrow exceptions from its delegate onto the UI thread by
+        // default: an exception here would otherwise be silently swallowed (the command would just
+        // appear to do nothing). Confirmed by actually running the app - the picker call originally
+        // sat outside this try/catch and failures were invisible.
         try
         {
-            var files = await _pathPicker.PickPackageFilesAsync();
+            var files = await resolveFiles();
             if (files.Count == 0)
             {
                 return;
@@ -80,21 +89,30 @@ public sealed partial class HomePageViewModel : ObservableObject
             var project = await _projectService.CreateAsync(projectName, files, DefaultSourceLocale, DefaultTargetLocale);
 
             var totalStringTables = 0;
-            var totalStrings = 0;
+            var totalNew = 0;
+            var totalChanged = 0;
+            var totalUnchanged = 0;
+            var totalRemoved = 0;
+
             foreach (var file in files)
             {
                 var keys = await _packageService.FindStringTablesAsync(file);
                 foreach (var key in keys)
                 {
                     var entries = await _packageService.ReadStringTableAsync(file, key);
-                    await _projectStringService.ReplaceStringsAsync(project.Id, key, entries.Select(e => (e.KeyHash, e.Value)).ToList());
+                    var diff = await _projectStringService.ReplaceStringsAsync(project.Id, key, entries.Select(e => (e.KeyHash, e.Value)).ToList());
                     totalStringTables++;
-                    totalStrings += entries.Count;
+                    totalNew += diff.NewCount;
+                    totalChanged += diff.ChangedCount;
+                    totalUnchanged += diff.UnchangedCount;
+                    totalRemoved += diff.RemovedCount;
                 }
             }
 
             RecentProjects.Insert(0, project);
-            StatusText = $"'{project.Name}' importado: {files.Count} arquivo(s), {totalStringTables} tabela(s), {totalStrings} string(s) encontrada(s).";
+            var totalStrings = totalNew + totalChanged + totalUnchanged;
+            StatusText = $"'{project.Name}' importado: {files.Count} arquivo(s), {totalStringTables} tabela(s), {totalStrings} string(s) " +
+                $"({totalNew} nova(s), {totalChanged} alterada(s), {totalUnchanged} reaproveitada(s){(totalRemoved > 0 ? $", {totalRemoved} removida(s)" : string.Empty)}).";
         }
         catch (Exception exception)
         {

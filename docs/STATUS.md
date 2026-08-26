@@ -52,12 +52,23 @@ pronta e verificada. Ver `docs/ROADMAP.md` para o detalhamento completo por fase
   validando (round-trip real) um package traduzido de verdade. Ver DEC-011.
 - Navegação Home → Editor com parâmetro (`Frame.Navigate(typeof(EditorPage), project.Id)`), resolvida
   no `OnNavigatedTo` da página — primeira navegação com parâmetro do app.
+- Edição manual persistente no Editor: coluna de tradução editável, salva em `LostFocus`, cada
+  sobrescrita grava a versão anterior em `ProjectStringRevisionRecord` (histórico, mais recente
+  primeiro). Filtro por status e busca de texto na lista de strings. Ver DEC-012.
+- Drag-and-drop de `.package` na `HomePage` (além do file picker), unificado com a lógica de import por
+  `HomePageViewModel.RunImportAsync`. Reimportar um mod já processado agora reporta quantas strings são
+  novas/alteradas/reaproveitadas/removidas (`ImportDiffResult`), e uma tradução existente cujo texto de
+  origem mudou é marcada `NeedsReview` em vez de descartada. Ver DEC-012.
+- Glossário (`IGlossaryService`/`EfGlossaryService`) integrado ao pipeline de tradução: termos globais
+  ou por projeto, `NeverTranslate`, filtrados por batch (só os relevantes ao texto daquele lote são
+  enviados ao provider) e incluídos no prompt do `OpenAICompatibleProvider`. Ainda sem tela de UI para
+  gerenciar termos (CRUD só via serviço/testes). Ver DEC-012.
 - `AppDataPaths` (Infrastructure) resolvendo `%LOCALAPPDATA%\TS4Translator\{Data,Logs,Cache,Models}`.
 - Composition root em `App.xaml.cs` com todos os serviços registrados (`AddSims4Services`,
   `AddTranslationServices`, `AddPersistenceServices`, `AddInfrastructureServices`,
   `AddProviderServices`), migration aplicada no `OnLaunched`.
 - Shell WinUI (NavigationView, Mica, título estendido) a partir do template `winui-navview`.
-- Toda decisão relevante registrada em `docs/DECISIONS.md` (DEC-001 a DEC-011).
+- Toda decisão relevante registrada em `docs/DECISIONS.md` (DEC-001 a DEC-012).
 
 ## In progress
 
@@ -83,8 +94,6 @@ externa** (não são bloqueios de código, são coisas que só um teste com infr
   `HttpMessageHandler` falso em teste. O formato de requisição/resposta segue o contrato padrão de
   chat-completions da OpenAI, mas particularidades de um servidor real (timeouts, encoding chunked,
   headers não padrão) não foram verificadas.
-- Edição manual de tradução no Editor é somente leitura de propósito (DEC-011) — implementar como
-  editável sem persistir seria pior que não ter o campo.
 - CA1707 (underscore em identificadores) suprimido em `tests/` (DEC-003) — intencional.
 - CA1861 suprimido em todo o projeto `TS4Translator.Persistence` (DEC-007) por causa do código gerado
   pelo `dotnet ef migrations add` — intencional.
@@ -95,10 +104,14 @@ externa** (não são bloqueios de código, são coisas que só um teste com infr
 
 ## Tests currently failing
 
-Nenhum. 101 testes automatizados passando (`dotnet test TS4Translator.sln --filter "FullyQualifiedName!~TS4Translator.App"`).
+Nenhum. 121 testes automatizados passando (`dotnet test TS4Translator.sln --filter "FullyQualifiedName!~TS4Translator.App"`).
 `TS4Translator.App` não tem testes automatizados de UI (não há framework de UI test configurado), mas
 o fluxo completo (importar → extrair → editor → exportar com round-trip) foi verificado manualmente
-com sucesso, rodando o app de verdade — ver DEC-011.
+com sucesso, rodando o app de verdade — ver DEC-011. As features desta rodada (edição manual/histórico,
+drag-and-drop, diff de reimportação, glossário — DEC-012) foram cobertas por teste automatizado, mas
+**não** re-verificadas rodando o app instalado, por instrução explícita do usuário: ele vai avaliar e
+testar tudo pessoalmente no ambiente real depois desta conclusão, e qualquer problema encontrado entra
+numa rodada de correção separada.
 
 ## Commands to build
 
@@ -114,7 +127,7 @@ para desenvolvimento normal; empacotar como MSIX e instalar para testar picker d
 ## Next milestones
 
 Ver "Próximas tarefas concretas" no final de `docs/ROADMAP.md`. Em ordem:
-1. Testar a tradução com um provider real (LM Studio ou NVIDIA NIM).
-2. Drag-and-drop de arquivos na `HomePage` (seção 34).
-3. Edição manual persistente de tradução no Editor.
-4. Filtros e pesquisa na lista de strings do Editor.
+1. Testar a tradução com um provider real (LM Studio ou NVIDIA NIM) — ainda pendente, ver DEC-011.
+2. Tela de UI para gerenciar termos do Glossário (CRUD hoje só existe via `IGlossaryService`).
+3. Preset NVIDIA NIM em Configurações, Translation Profiles, fuzzy matching em Translation Memory.
+4. Reorganizar `SettingsPage` em abas reais (seção 41).

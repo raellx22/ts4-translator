@@ -1,8 +1,10 @@
 using System.Globalization;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using TS4Translator.Core.Glossary;
 using TS4Translator.Core.Translation;
 
 namespace TS4Translator.Providers.OpenAICompatible;
@@ -27,13 +29,14 @@ public sealed class OpenAICompatibleProvider(HttpClient httpClient, OpenAICompat
     public string Name { get; } = $"openai-compatible:{options.Model}";
 
     public ProviderCapabilities Capabilities { get; } = new(
-        SupportsBatch: true, SupportsStreaming: false, SupportsCustomPrompt: false,
-        SupportsGlossary: false, SupportsLocalExecution: false, RequiresApiKey: false, MaxContextSize: null);
+        SupportsBatch: true, SupportsStreaming: false, SupportsCustomPrompt: true,
+        SupportsGlossary: true, SupportsLocalExecution: false, RequiresApiKey: false, MaxContextSize: null);
 
     public async Task<IReadOnlyList<TranslationResultItem>> TranslateBatchAsync(
         IReadOnlyList<TranslationRequestItem> items,
         CultureInfo sourceLocale,
         CultureInfo targetLocale,
+        IReadOnlyList<GlossaryTerm>? glossaryTerms = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(items);
@@ -46,7 +49,7 @@ public sealed class OpenAICompatibleProvider(HttpClient httpClient, OpenAICompat
             options.Model,
             options.Temperature,
             [
-                new ChatMessage("system", BuildSystemPrompt(sourceLocale, targetLocale)),
+                new ChatMessage("system", BuildSystemPrompt(sourceLocale, targetLocale, glossaryTerms)),
                 new ChatMessage("user", JsonSerializer.Serialize(items.Select(i => new PromptRequestItem(i.Id, i.ProtectedText)))),
             ]);
 
@@ -70,14 +73,30 @@ public sealed class OpenAICompatibleProvider(HttpClient httpClient, OpenAICompat
             .ToList();
     }
 
-    private static string BuildSystemPrompt(CultureInfo sourceLocale, CultureInfo targetLocale) =>
-        $"""
-         You are a translation engine translating video game UI text from {sourceLocale.EnglishName} to {targetLocale.EnglishName}.
-         You will receive a JSON array of objects, each with "id" and "text".
-         Respond with ONLY a JSON array of objects, each with "id" (copied exactly from the input) and "translation" (the translated text).
-         Do not add commentary, explanations, or markdown code fences - respond with the raw JSON array only.
-         Text of the form __TS4_TOKEN_0001__ is a placeholder and must be copied into your translation exactly as-is, unchanged, in a natural position for the target language's grammar.
-         """;
+    private static string BuildSystemPrompt(CultureInfo sourceLocale, CultureInfo targetLocale, IReadOnlyList<GlossaryTerm>? glossaryTerms)
+    {
+        var prompt = new StringBuilder($"""
+            You are a translation engine translating video game UI text from {sourceLocale.EnglishName} to {targetLocale.EnglishName}.
+            You will receive a JSON array of objects, each with "id" and "text".
+            Respond with ONLY a JSON array of objects, each with "id" (copied exactly from the input) and "translation" (the translated text).
+            Do not add commentary, explanations, or markdown code fences - respond with the raw JSON array only.
+            Text of the form __TS4_TOKEN_0001__ is a placeholder and must be copied into your translation exactly as-is, unchanged, in a natural position for the target language's grammar.
+            """);
+
+        if (glossaryTerms is { Count: > 0 })
+        {
+            prompt.AppendLine();
+            prompt.AppendLine("Glossary - apply these exactly, they override your own judgement:");
+            foreach (var term in glossaryTerms)
+            {
+                prompt.AppendLine(term.NeverTranslate
+                    ? $"- \"{term.Original}\" must NEVER be translated; keep it exactly as-is."
+                    : $"- \"{term.Original}\" must be translated as \"{term.Translation}\".");
+            }
+        }
+
+        return prompt.ToString();
+    }
 
     private static List<PromptResponseItem> ParseWithRecovery(string content)
     {

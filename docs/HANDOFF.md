@@ -2,9 +2,16 @@
 
 Leia isto antes de qualquer outra coisa se você é uma nova sessão/agente retomando este projeto.
 Depois leia `README.md`, `docs/STATUS.md`, `docs/ROADMAP.md`, `docs/ARCHITECTURE.md`, `docs/DECISIONS.md`,
-`docs/BUILD.md`, nessa ordem. Não reconstrua a arquitetura do zero — ela existe, compila, tem 101
+`docs/BUILD.md`, nessa ordem. Não reconstrua a arquitetura do zero — ela existe, compila, tem 121
 testes automatizados passando, e **o caminho prático completo (importar → extrair → editor →
 exportar com validação) foi verificado de ponta a ponta rodando o app instalado de verdade.**
+
+**Importante sobre o estado atual:** o usuário pediu explicitamente para "concluir o projeto" antes de
+fazer ele mesmo uma avaliação/teste completo no ambiente real, com uma rodada de correção separada para
+qualquer problema que encontrar. Por isso, o lote mais recente de trabalho (edição manual + histórico,
+drag-and-drop, diff de reimportação, glossário — DEC-012) está coberto por teste automatizado real, mas
+**não** foi re-verificado rodando o app instalado como MSIX (ao contrário do que DEC-010/DEC-011
+fizeram para o pipeline anterior). Não assuma que está "verificado na prática" até o usuário confirmar.
 
 ## Current state
 
@@ -12,9 +19,11 @@ Ver `docs/STATUS.md` para o snapshot exato (atualizado junto com este arquivo). 
 Sims4 Core, Translation Core (TokenProtector/TranslationValidator/BatchBuilder/TranslationOrchestrator),
 Translation Memory exact-match, Project System, extração/persistência de strings
 (`IProjectStringService`), configuração de provider com API key segura via DPAPI
-(`IProviderConfigurationService`/`ISecretStore`), e as três telas de produto (`HomePage`, `EditorPage`,
-`SettingsPage`) — tudo pronto e testado. **A única peça do caminho principal ainda não exercitada com
-dados reais é a chamada HTTP de tradução em si** (nunca rodou contra um LM Studio ou NVIDIA NIM de
+(`IProviderConfigurationService`/`ISecretStore`), as três telas de produto (`HomePage`, `EditorPage`,
+`SettingsPage`), e — nesta rodada mais recente (DEC-012) — edição manual persistente com histórico,
+drag-and-drop de `.package` na Home com diff de reimportação, e Glossário integrado ao pipeline de
+tradução — tudo pronto e testado (121 testes). **A única peça do caminho principal ainda não exercitada
+com dados reais é a chamada HTTP de tradução em si** (nunca rodou contra um LM Studio ou NVIDIA NIM de
 verdade, só contra HTTP falso em teste e contra o fallback "sem provider configurado" no app real).
 
 ## What has already been implemented
@@ -22,7 +31,10 @@ verdade, só contra HTTP falso em teste e contra o fallback "sem provider config
 Ver a seção "Completed" de `docs/STATUS.md` — não duplicado aqui para evitar as duas listas
 divergirem com o tempo. **Não recrie**: o pipeline de tradução inteiro, `IProjectStringService`,
 `ISecretStore`/`IProviderConfigurationService`, `ITranslationProviderFactory`, `EditorPage`,
-`SettingsPage`, ou `IPackageService.WriteStringTablesAsync` (múltiplas STBLs num package).
+`SettingsPage`, `IPackageService.WriteStringTablesAsync` (múltiplas STBLs num package),
+`IGlossaryService`/`EfGlossaryService`, o parâmetro `glossaryTerms` em
+`ITranslationProvider`/`ITranslationOrchestrator`, ou o histórico de revisão
+(`ProjectStringRevisionRecord`/`GetHistoryAsync`).
 
 ## What is currently being worked on
 
@@ -46,19 +58,18 @@ API key da NVIDIA NIM):
 4. Se algo falhar, o `StatusText` do Editor já mostra tipo+mensagem da exceção (`EditorPageViewModel.TranslateAsync`)
    — comece por aí antes de instrumentar mais.
 
-Depois de confirmar isso, o próximo item real de código é drag-and-drop de arquivos na `HomePage`
-(brief seção 34 — hoje só existe o botão de file picker). Usar os eventos `DragOver`/`Drop` do WinUI
-no `Grid` raiz de `Pages/HomePage.xaml`, filtrando por `.package`, reaproveitando a lógica de
-`HomePageViewModel.ImportPackagesAsync` (considere extrair o corpo do método para aceitar
-`IReadOnlyList<string>` diretamente, com dois pontos de entrada — botão e drop). Isso **não** precisa
-do procedimento MSIX para testar — `dotnet run` é suficiente, drag-and-drop não passa por um broker.
+Depois de confirmar isso, o próximo item real de código é uma tela de UI para gerenciar o Glossário —
+`IGlossaryService` (`AddTermAsync`/`GetTermsAsync`/`DeleteTermAsync`) já existe e já está integrado ao
+pipeline de tradução (DEC-012), mas não há nenhuma página que o exponha; hoje um termo só pode ser
+criado chamando o serviço diretamente (ou em teste). Seguir o mesmo padrão de `SettingsPage` (ViewModel
+resolvido via `App.Services`, `ObservableCollection` para a lista, comandos para adicionar/remover).
 
 Depois disso, seguir a lista "Próximas tarefas concretas" no fim de `docs/ROADMAP.md`.
 
 ## Important files
 
 - `docs/DECISIONS.md` — leia antes de mudar qualquer versão de pacote ou formato de arquivo; a
-  maioria das escolhas não óbvias já foi justificada ali (DEC-001 a DEC-011).
+  maioria das escolhas não óbvias já foi justificada ali (DEC-001 a DEC-012).
 - `docs/BUILD.md` — como compilar, testar, rodar, e (importante) como empacotar/instalar um MSIX
   local para testar qualquer fluxo que use `FileOpenPicker` ou outra API mediada por broker do
   Windows. `dotnet run` sozinho **não** funciona para esses casos (DEC-010) — não gaste tempo
@@ -102,7 +113,9 @@ Todas em `docs/DECISIONS.md`, mas as mais fáceis de "corrigir" por engano:
   descartada por teste real (o usuário reproduziu o mesmo erro sem elevação nenhuma). A causa
   confirmada é o modo de registro de pacote do `dotnet run` (ver DEC-010).
 - **Não** deixar a coluna de tradução do Editor editável sem persistir a edição (`UpdateTranslationAsync`)
-  — um campo que edita e não salva é pior do que não ter o campo (DEC-011).
+  — um campo que edita e não salva é pior do que não ter o campo (DEC-011; já resolvido em DEC-012).
+- **Não** fazer o `TranslationOrchestrator` enviar o glossário inteiro a cada chamada de provider — só
+  os termos cujo `GlossaryTerm.AppearsIn(text)` bate com o batch específico (DEC-012, seção 23 do brief).
 
 ## Known bugs
 
@@ -113,7 +126,7 @@ documentados que não são bugs confirmados.
 
 ## Tests currently failing
 
-Nenhum. 101 testes automatizados passando.
+Nenhum. 121 testes automatizados passando.
 
 ## Commands to build / test / run
 
@@ -121,8 +134,8 @@ Ver `docs/BUILD.md` — não duplicado aqui.
 
 ## Next milestones
 
-Ver `docs/ROADMAP.md`. Prioridade imediata: testar a tradução com um provider real → drag-and-drop na
-`HomePage` → edição manual persistente no Editor → filtros/pesquisa no Editor.
+Ver `docs/ROADMAP.md`. Prioridade imediata: testar a tradução com um provider real → tela de UI para o
+Glossário → preset NVIDIA NIM → Translation Profiles → fuzzy matching.
 
 ## Sobre o ambiente de desenvolvimento
 

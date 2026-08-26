@@ -415,3 +415,75 @@ feito aqui.
 **Consequências:** A próxima sessão (ou o usuário, com um provider real configurado) deveria validar
 o caminho de tradução com HTTP de verdade antes de qualquer outra feature nova — é o único elo do
 pipeline principal ainda não exercitado de ponta a ponta com dados reais.
+
+---
+
+## DEC-012 — Edição manual persistente + histórico, drag-and-drop, diff de reimportação, e Glossário
+
+**Contexto:** O usuário pediu para "concluir o projeto" antes de fazer seu próprio teste prático
+completo (avaliação e correção de bugs ficam para uma rodada seguinte). Esta rodada fechou quatro
+itens do roadmap que dependiam uns dos outros ou do mesmo ponto de extensão (`EfProjectStringService`,
+`ITranslationProvider`/`ITranslationOrchestrator`):
+
+**1. Edição manual persistente + histórico (seção 30/31, resolve a limitação deixada em aberto na
+DEC-011):**
+- `EditorPage` agora tem a coluna de tradução como `TextBox` editável (`AcceptsReturn="True"`), salva
+  no `LostFocus` via `EditorPageViewModel.SaveManualEditAsync` → `UpdateTranslationAsync(..., ProjectStringStatus.ManuallyEdited, ...)`.
+- Toda sobrescrita de uma tradução não-nula grava a versão anterior em `ProjectStringRevisionRecord`
+  (`ChangedAtUtc`, texto anterior) **antes** de sobrescrever — nunca a primeira tradução (não há nada
+  antes dela para preservar). `GetHistoryAsync` devolve mais recente primeiro, ordenado client-side
+  (mesma lição do DEC-008 — `DateTimeOffset` não ordena em SQL no SQLite).
+- Adicionado filtro por status (Todas/Pendentes/Traduzidas/Revisar/Editadas manualmente) e busca de
+  texto (Original + Tradução, case-insensitive) na `EditorPage`, sobre uma lista mestra `_allRows` em
+  memória — o projeto de um mod real tem no máximo alguns milhares de strings, filtrar em memória é
+  suficiente e evita reconsultar o banco a cada tecla digitada.
+
+**2. Drag-and-drop de `.package` na Home + diff de reimportação (seção 25, "mod update engine" —
+groundwork; fuzzy matching completo fica para depois):**
+- `HomePageViewModel.ImportPackagesAsync`/o novo `Drop` handler foram unificados em `RunImportAsync`,
+  que aceita qualquer fonte de lista de arquivos (picker ou `DataPackageOperation.Copy` do drop) —
+  evita duplicar a lógica de criar projeto + extrair STBLs + reportar status entre os dois caminhos.
+- `IProjectStringService.ReplaceStringsAsync` agora retorna `ImportDiffResult` (New/Changed/Unchanged/Removed/TotalAfterImport)
+  em vez de `void`. Quando o hash de uma entrada já existe mas o texto original mudou e **já havia
+  uma tradução**, a entrada é marcada `NeedsReview` com um resumo explicando o motivo, mas a tradução
+  antiga **não é descartada** — o tradutor decide se ela ainda serve ou precisa de revisão, em vez do
+  sistema decidir por ele apagando o trabalho já feito.
+- A Home mostra a contagem por categoria depois de cada import/reimport (ex.: "3 nova(s), 1 alterada(s),
+  12 reaproveitada(s), 1 removida(s)") — dá visibilidade real do que uma nova versão do mod mudou, sem
+  ainda ser o fuzzy-matching completo de string similar-mas-não-idêntica que a seção 25 também pede.
+
+**3. Glossário integrado ao pipeline de tradução (seção 23):**
+- `GlossaryTerm`/`IGlossaryService`/`EfGlossaryService`: termo tem `NeverTranslate` (nunca traduzir,
+  ex. nomes de marca) e `CaseSensitive`; pode ser global (`ProjectId == null`, visível a todo projeto)
+  ou específico de um projeto. `GetTermsAsync(projectId)` traz `WHERE ProjectId == null OR ProjectId == projectId`.
+- **Mudança de assinatura que se propagou por três camadas:** `ITranslationProvider.TranslateBatchAsync`
+  e `ITranslationOrchestrator.TranslateAsync` ganharam um parâmetro opcional
+  `IReadOnlyList<GlossaryTerm>? glossaryTerms = null` (opcional e por último, antes do `CancellationToken`,
+  para não quebrar nenhum chamador existente). `TranslationOrchestrator` filtra, **por batch**, apenas
+  os termos cujo `GlossaryTerm.AppearsIn(text)` bate com algum item daquele batch específico — nunca
+  envia o glossário inteiro a cada chamada de provider (economiza tokens de prompt e reduz ruído para
+  o modelo). `OpenAICompatibleProvider.BuildSystemPrompt` acrescenta uma seção "Glossary - apply these
+  exactly" ao prompt de sistema quando há termos relevantes; ganhou `SupportsGlossary: true` e
+  `SupportsCustomPrompt: true` em `Capabilities`.
+- Quando nenhum termo do lote de entrada bate com o batch atual, o filtro (`Where(...).ToList()`)
+  produz uma lista **vazia**, não `null` — só é `null` quando a lista de entrada em si é `null`/vazia.
+  Para qualquer provider que cheque `glossaryTerms is { Count: > 0 }` (como o `OpenAICompatibleProvider`
+  faz), lista vazia e `null` são equivalentes; documentado aqui para não confundir uma futura sessão
+  escrevendo um novo provider.
+
+**Testes adicionados:** 6 em `EfProjectStringServiceTests` (diff de import + histórico), 4 em
+`TranslationOrchestratorTests` (filtragem de glossário por batch, incluindo o caso de lista vazia
+acima), 4 em `OpenAICompatibleProviderTests` (prompt com/sem glossário, `NeverTranslate`), 6 em um novo
+`EfGlossaryServiceTests` (CRUD + escopo global vs. projeto). Total da suíte: 101 → 121 testes, todos
+passando (`Core.Tests` continua sem nenhum teste — apenas scaffolding do template, não uma regressão).
+
+**Alternativas:** Para o glossário, uma interface separada `ITranslationProvider.TranslateBatchAsync`
+sem o parâmetro, com o glossário injetado só no `TranslationOrchestrator` via um wrapper de prompt
+genérico — rejeitada porque cada provider precisa decidir *como* comunicar o glossário ao seu próprio
+formato de prompt (um provider de tradução por API dedicada como DeepL não usa prompt de sistema, e
+precisaria de um outro mecanismo).
+
+**Consequências:** Qualquer novo `ITranslationProvider` precisa decidir explicitamente se usa
+`glossaryTerms` (`SupportsGlossary: true`) ou o ignora (`false`) — não há comportamento padrão
+implícito. UI ainda não tem uma tela de gerenciamento de glossário (CRUD só existe via `IGlossaryService`/testes
+de integração) — é o próximo item natural de UI a fazer.

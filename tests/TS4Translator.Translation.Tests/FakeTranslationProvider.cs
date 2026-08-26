@@ -1,4 +1,5 @@
 using System.Globalization;
+using TS4Translator.Core.Glossary;
 using TS4Translator.Core.Translation;
 
 namespace TS4Translator.Translation.Tests;
@@ -26,10 +27,14 @@ public sealed class FakeTranslationProvider(
 
     public List<int> ObservedBatchSizes { get; } = [];
 
+    public List<IReadOnlyList<GlossaryTerm>?> ObservedGlossaryTerms { get; } = [];
+
     public Task<IReadOnlyList<TranslationResultItem>> TranslateBatchAsync(
-        IReadOnlyList<TranslationRequestItem> items, CultureInfo sourceLocale, CultureInfo targetLocale, CancellationToken cancellationToken = default)
+        IReadOnlyList<TranslationRequestItem> items, CultureInfo sourceLocale, CultureInfo targetLocale,
+        IReadOnlyList<GlossaryTerm>? glossaryTerms = null, CancellationToken cancellationToken = default)
     {
         ObservedBatchSizes.Add(items.Count);
+        ObservedGlossaryTerms.Add(glossaryTerms);
 
         var results = items
             .Select(item => new TranslationResultItem(item.Id, _translate(item.ProtectedText)))
