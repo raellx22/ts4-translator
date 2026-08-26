@@ -103,8 +103,11 @@ real nesta sessão (sem chave disponível). Antes de expor isso como "preset Riv
 ## FASE 7 — Translation Memory — **exact match concluído, fuzzy não iniciado**
 
 - [x] `ITranslationMemory`/`SqliteTranslationMemory` — exact match por hash SHA-256 do texto
-  normalizado + par de locales, com upsert. 5 testes de integração contra SQLite real.
-- [ ] Fuzzy matching (seção 26) — não iniciado.
+  normalizado + par de locales, com upsert. 10 testes de integração contra SQLite real.
+- [x] Fuzzy matching (seção 26) — `StringSimilarity` (Levenshtein) + `FindSimilarAsync`, usado pelo
+  orquestrador com limiar conservador (97%) para reaproveitar automaticamente uma tradução quase
+  idêntica sem chamar o provider, sempre marcando para revisão. Ver DEC-016. Falta uma UI de
+  "sugestões" navegável usando o limiar mais permissivo (85%) já exposto pela API.
 - [ ] Ligação com projeto/versão de mod: `Project` já existe (ver Fase 1/33 abaixo); `ModVersion`
   (para o diff de versões da Fase 8) ainda não.
 
@@ -124,9 +127,10 @@ real nesta sessão (sem chave disponível). Antes de expor isso como "preset Riv
 - [x] Diff de reimportação (`ImportDiffResult`: novo/alterado/inalterado/removido) calculado em
   `EfProjectStringService.ReplaceStringsAsync` e reportado na Home após importar/reimportar. Uma
   tradução existente cujo texto de origem mudou é marcada `NeedsReview`, não descartada. Ver DEC-012.
-- [ ] Fuzzy matching de string similar-mas-não-idêntica (seção 25/26) — hoje a comparação é só por hash
-  exato; uma pequena correção de texto no mod original é tratada como "mudou completamente", não como
-  "quase igual, reaproveitar com revisão".
+- [x] Fuzzy matching de string similar-mas-não-idêntica no pipeline de tradução (seção 26) — ver Fase 7
+  acima e DEC-016. O diff de reimportação (`ImportDiffResult`) em si continua só por hash exato: uma
+  pequena correção de texto no mod ainda conta como "alterada" no diff (correto - o texto de fato
+  mudou), mas a tradução dessa string alterada agora pode se beneficiar do fuzzy match ao traduzir.
 - [ ] `ModVersion`/histórico de versões do mod importado — não iniciado.
 
 ## FASE 9 — Editor — **completa para o núcleo pedido, painel lateral não iniciado**
@@ -175,8 +179,9 @@ real nesta sessão (sem chave disponível). Antes de expor isso como "preset Riv
    Editor).
 3. `ProviderConfiguration` com suporte a múltiplos perfis salvos (LM Studio + NVIDIA NIM ao mesmo
    tempo, por exemplo), não só um endpoint ativo por vez.
-4. Fuzzy matching em Translation Memory e no diff de reimportação (seção 25/26) — hoje ambos são só
-   por hash exato.
+4. UI de "sugestões de fuzzy match" navegável no Editor (a API já existe com limiar permissivo de 85% —
+   DEC-016 — só falta a tela; hoje o único consumo automático é o limiar conservador de 97% do
+   orquestrador).
 5. `AddHttpClient`/`IHttpClientFactory` em `TS4Translator.Infrastructure` — hoje `HttpClient` é um
    singleton simples registrado direto no `App`; não crítico, mas o padrão correto para um app que vai
    ganhar mais providers HTTP.

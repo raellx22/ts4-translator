@@ -62,7 +62,11 @@ Implementações que não dependem de nenhum SDK de terceiros nem de I/O:
 - `BatchBuilder : IBatchBuilder` — agrupa itens por contagem e por total de caracteres; um item maior
   que o limite sozinho vira seu próprio batch em vez de ser cortado.
 - `TranslationOrchestrator : ITranslationOrchestrator` — o pipeline completo da seção 10/11: consulta
-  `ITranslationMemory` primeiro (pula o provider quando já existe tradução exata); para o restante,
+  `ITranslationMemory.FindExactAsync` primeiro (pula o provider quando já existe tradução exata); se
+  não houver hit exato, tenta `FindSimilarAsync` com um limiar conservador de 97% (`StringSimilarity`,
+  Levenshtein) — uma correção pequena de texto no mod reaproveita a tradução anterior sem chamar o
+  provider, mas sempre volta marcada `ValidationIssueCode.FuzzyMatchReused` para revisão humana, nunca
+  como sucesso silencioso (seção 26/63, DEC-016); para o restante (sem hit exato nem fuzzy),
   agrupa em batches, protege tokens, chama o provider, **reconcilia cada resultado pelo `Id` do item**
   (nunca por posição/contagem — se o provider omitir ou duplicar um `Id`, o item vira uma falha
   explícita com `ValidationIssueCode.ProviderResultMissing`/`ProviderResultDuplicated`, nunca um
@@ -118,8 +122,9 @@ saída já existente não é sobrescrita).
 ### TS4Translator.Persistence
 
 SQLite via EF Core, schema versionado por migrations reais (DEC-007). Implementado até agora:
-`TranslationMemory` (busca exata por hash SHA-256 do texto normalizado + par de locales — a
-"killer feature" da seção 63), `Project` (nome, arquivos `.package` importados, par de locales,
+`TranslationMemory` (busca exata por hash SHA-256 do texto normalizado + par de locales, mais busca
+fuzzy por similaridade de Levenshtein via `FindSimilarAsync` — a "killer feature" da seção 63, ver
+DEC-016), `Project` (nome, arquivos `.package` importados, par de locales,
 timestamps — seção 33), `ProjectString` (cada string extraída, ligada ao `Project` e à `StblKey`/
 `KeyHash` de origem — upsert por hash preserva traduções ao reimportar a mesma versão de um mod,
 seção 25), `ProviderConfiguration` (endpoint/modelo/temperatura do provider ativo; a API key em si

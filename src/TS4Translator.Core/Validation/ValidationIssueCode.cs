@@ -16,4 +16,7 @@ public enum ValidationIssueCode
 
     /// <summary>The translation provider's response included more than one result for this item's id.</summary>
     ProviderResultDuplicated,
+
+    /// <summary>Reused from a similar-but-not-identical previous translation (fuzzy match, brief section 26); needs human review.</summary>
+    FuzzyMatchReused,
 }

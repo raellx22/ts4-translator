@@ -77,12 +77,15 @@ pronta e verificada. Ver `docs/ROADMAP.md` para o detalhamento completo por fase
   toda a integração de glossário (DEC-012) estar pronta e testada em todas as camadas — agora
   `EditorPageViewModel.TranslateAsync` chama `IGlossaryService.GetTermsAsync` antes de traduzir. Ver
   DEC-015.
+- Fuzzy matching em Translation Memory (seção 26/63) — `StringSimilarity` (Levenshtein) +
+  `ITranslationMemory.FindSimilarAsync`; o orquestrador reaproveita uma entrada ≥97% similar em vez de
+  chamar o provider, sempre marcando o resultado para revisão (`FuzzyMatchReused`). Ver DEC-016.
 - `AppDataPaths` (Infrastructure) resolvendo `%LOCALAPPDATA%\TS4Translator\{Data,Logs,Cache,Models}`.
 - Composition root em `App.xaml.cs` com todos os serviços registrados (`AddSims4Services`,
   `AddTranslationServices`, `AddPersistenceServices`, `AddInfrastructureServices`,
   `AddProviderServices`), migration aplicada no `OnLaunched`.
 - Shell WinUI (NavigationView, Mica, título estendido) a partir do template `winui-navview`.
-- Toda decisão relevante registrada em `docs/DECISIONS.md` (DEC-001 a DEC-015).
+- Toda decisão relevante registrada em `docs/DECISIONS.md` (DEC-001 a DEC-016).
 
 ## In progress
 
@@ -118,7 +121,9 @@ externa** (não são bloqueios de código, são coisas que só um teste com infr
 
 ## Tests currently failing
 
-Nenhum. 129 testes automatizados passando (`dotnet test TS4Translator.sln --filter "FullyQualifiedName!~TS4Translator.App"`).
+Nenhum. 144 testes automatizados passando (`dotnet test TS4Translator.sln --filter "FullyQualifiedName!~TS4Translator.App"`).
+`TS4Translator.Core.Tests` finalmente tem testes reais (`StringSimilarityTests`) — estava vazio (só
+scaffolding do template) desde o início do projeto.
 `TS4Translator.App` não tem testes automatizados de UI (não há framework de UI test configurado), mas
 o fluxo completo (importar → extrair → editor → exportar com round-trip) foi verificado manualmente
 com sucesso, rodando o app de verdade — ver DEC-011. As features desta rodada (edição manual/histórico,
@@ -144,5 +149,6 @@ para desenvolvimento normal; empacotar como MSIX e instalar para testar picker d
 Ver "Próximas tarefas concretas" no final de `docs/ROADMAP.md`. Em ordem:
 1. Testar a tradução com um provider real (LM Studio ou NVIDIA NIM) — ainda pendente, ver DEC-011.
 2. UI de glossário por projeto (hoje só o escopo global tem tela — DEC-013).
-3. Fuzzy matching em Translation Memory e no diff de reimportação.
-4. Reorganizar `SettingsPage` em abas reais (seção 41).
+3. UI de "sugestões de fuzzy match" navegável no Editor (a API já existe com limiar mais permissivo,
+   0.85 — DEC-016 — só falta a tela).
+4. `TranslationJob`/progresso para lotes grandes, `SettingsPage` em abas reais (seção 41).

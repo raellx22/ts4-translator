@@ -18,6 +18,17 @@ public sealed class TranslationOrchestrator(
     IBatchBuilder batchBuilder,
     ITranslationMemory translationMemory) : ITranslationOrchestrator
 {
+    /// <summary>
+    /// How close a fuzzy match needs to be (brief section 26) to be reused automatically instead of
+    /// calling the provider. Deliberately conservative - this is not a browsable "fuzzy suggestions"
+    /// UI where a human picks from several candidates, it silently substitutes for a provider call, so
+    /// it only fires for near-identical text (e.g. a punctuation or whitespace tweak in the mod's
+    /// original), never for genuinely different wording. The result still comes back flagged
+    /// <see cref="Core.Validation.ValidationIssueCode.FuzzyMatchReused"/> for human review either way.
+    /// </summary>
+    private const double FuzzyReuseThreshold = 0.97;
+
+
     public async Task<IReadOnlyList<TranslationOutcome>> TranslateAsync(
         IReadOnlyList<TranslationSourceItem> items,
         ITranslationProvider provider,
@@ -41,11 +52,19 @@ public sealed class TranslationOrchestrator(
             if (memoryHit is not null)
             {
                 outcomesById[item.Id] = new TranslationOutcome(item.Id, item.Text, memoryHit.TranslatedText, Success: true, Issues: []);
+                continue;
             }
-            else
+
+            var fuzzyHit = await translationMemory.FindSimilarAsync(item.Text, sourceLocale, targetLocale, FuzzyReuseThreshold, cancellationToken).ConfigureAwait(false);
+            if (fuzzyHit is not null)
             {
-                itemsNeedingTranslation.Add(item);
+                var issue = new ValidationIssue(ValidationIssueCode.FuzzyMatchReused, ValidationSeverity.Warning,
+                    $"Reused from a {fuzzyHit.Similarity:P0} similar previous translation - please review.");
+                outcomesById[item.Id] = new TranslationOutcome(item.Id, item.Text, fuzzyHit.Entry.TranslatedText, Success: false, Issues: [issue]);
+                continue;
             }
+
+            itemsNeedingTranslation.Add(item);
         }
 
         foreach (var batch in batchBuilder.Build(itemsNeedingTranslation))

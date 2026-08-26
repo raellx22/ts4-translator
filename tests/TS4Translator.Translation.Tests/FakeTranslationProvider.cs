@@ -29,12 +29,16 @@ public sealed class FakeTranslationProvider(
 
     public List<IReadOnlyList<GlossaryTerm>?> ObservedGlossaryTerms { get; } = [];
 
+    public List<string?> ObservedCustomInstructions { get; } = [];
+
     public Task<IReadOnlyList<TranslationResultItem>> TranslateBatchAsync(
         IReadOnlyList<TranslationRequestItem> items, CultureInfo sourceLocale, CultureInfo targetLocale,
-        IReadOnlyList<GlossaryTerm>? glossaryTerms = null, CancellationToken cancellationToken = default)
+        IReadOnlyList<GlossaryTerm>? glossaryTerms = null, string? customInstructions = null,
+        CancellationToken cancellationToken = default)
     {
         ObservedBatchSizes.Add(items.Count);
         ObservedGlossaryTerms.Add(glossaryTerms);
+        ObservedCustomInstructions.Add(customInstructions);
 
         var results = items
             .Select(item => new TranslationResultItem(item.Id, _translate(item.ProtectedText)))

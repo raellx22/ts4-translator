@@ -20,14 +20,15 @@ Sims4 Core, Translation Core (TokenProtector/TranslationValidator/BatchBuilder/T
 Translation Memory exact-match, Project System, extração/persistência de strings
 (`IProjectStringService`), configuração de provider com API key segura via DPAPI
 (`IProviderConfigurationService`/`ISecretStore`), as quatro telas de produto (`HomePage`, `EditorPage`,
-`SettingsPage`, `GlossaryPage`), e — nesta rodada mais recente (DEC-012 a DEC-015) — edição manual
+`SettingsPage`, `GlossaryPage`), e — nesta rodada mais recente (DEC-012 a DEC-016) — edição manual
 persistente com histórico, drag-and-drop de `.package` na Home com diff de reimportação, Glossário
-(serviço + UI de escopo global), preset NVIDIA NIM em Configurações, e Translation Profiles (instruções
-de estilo livres por projeto) — tudo pronto e testado (129 testes automatizados + `GlossaryPage`/preset
-NVIDIA NIM verificados rodando o app de verdade). **A única peça do caminho principal ainda não
-exercitada com dados reais é a chamada HTTP de tradução em si** (nunca rodou contra um LM Studio ou
-NVIDIA NIM de verdade, só contra HTTP falso em teste e contra o fallback "sem provider configurado" no
-app real).
+(serviço + UI de escopo global), preset NVIDIA NIM em Configurações, Translation Profiles (instruções
+de estilo livres por projeto), e fuzzy matching em Translation Memory (Levenshtein, reaproveita ≥97%
+similar sem chamar o provider, sempre marcado para revisão) — tudo pronto e testado (144 testes
+automatizados + `GlossaryPage`/preset NVIDIA NIM verificados rodando o app de verdade). **A única peça
+do caminho principal ainda não exercitada com dados reais é a chamada HTTP de tradução em si** (nunca
+rodou contra um LM Studio ou NVIDIA NIM de verdade, só contra HTTP falso em teste e contra o fallback
+"sem provider configurado" no app real).
 
 **Importante:** ao adicionar `customInstructions` (DEC-015), foi descoberto que o glossário (DEC-012)
 nunca chegou a ser de fato usado pelo app real — `EditorPageViewModel.TranslateAsync` nunca buscava os
@@ -90,7 +91,7 @@ Depois disso, seguir a lista "Próximas tarefas concretas" no fim de `docs/ROADM
 ## Important files
 
 - `docs/DECISIONS.md` — leia antes de mudar qualquer versão de pacote ou formato de arquivo; a
-  maioria das escolhas não óbvias já foi justificada ali (DEC-001 a DEC-015).
+  maioria das escolhas não óbvias já foi justificada ali (DEC-001 a DEC-016).
 - `docs/BUILD.md` — como compilar, testar, rodar, e (importante) como empacotar/instalar um MSIX
   local para testar qualquer fluxo que use `FileOpenPicker` ou outra API mediada por broker do
   Windows. `dotnet run` sozinho **não** funciona para esses casos (DEC-010) — não gaste tempo
@@ -151,7 +152,7 @@ documentados que não são bugs confirmados.
 
 ## Tests currently failing
 
-Nenhum. 129 testes automatizados passando.
+Nenhum. 144 testes automatizados passando.
 
 ## Commands to build / test / run
 
@@ -160,7 +161,8 @@ Ver `docs/BUILD.md` — não duplicado aqui.
 ## Next milestones
 
 Ver `docs/ROADMAP.md`. Prioridade imediata: testar a tradução com um provider real → UI de glossário
-por projeto → fuzzy matching em Translation Memory → `TranslationJob`/progresso → `SettingsPage` em abas.
+por projeto → UI de sugestões de fuzzy match navegável → `TranslationJob`/progresso → `SettingsPage`
+em abas.
 
 ## Sobre o ambiente de desenvolvimento
 

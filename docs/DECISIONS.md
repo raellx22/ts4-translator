@@ -609,3 +609,47 @@ Total: 121 → 129 testes.
 uma entidade `TranslationProfile` própria nesse momento — não antecipadamente. Qualquer parâmetro
 opcional futuro adicionado a `ITranslationOrchestrator.TranslateAsync` deve ter todo call site real
 (não só os testes) auditado manualmente, pelo motivo acima.
+
+---
+
+## DEC-016 — Fuzzy matching em Translation Memory: Levenshtein em memória, limiar conservador de 97% para reuso automático
+
+**Contexto:** A seção 26 do brief (e a seção 63, que chama a combinação de translation memory + fuzzy
+matching de "killer feature" do produto) pede que uma correção pequena no texto original de um mod
+(ex.: um erro de digitação corrigido em uma atualização) ainda aproveite a tradução anterior, em vez de
+tratar a string como inteiramente nova (que é o que `FindExactAsync`, por hash, faz hoje — um único
+caractere diferente já produz um hash diferente e perde o reaproveitamento).
+
+**Decisão:**
+- `StringSimilarity.Ratio` (`Core/Memory/`) implementa distância de Levenshtein clássica (matriz de
+  duas linhas, O(n·m) tempo/O(min(n,m)) memória) e converte para uma razão 0.0–1.0
+  (`1 - distância / comprimento_máximo`). Testado isoladamente em `TS4Translator.Core.Tests` (o
+  projeto estava vazio até agora — só scaffolding do template — esta é a primeira suíte real nele).
+- `ITranslationMemory.FindSimilarAsync(text, source, target, minSimilarity = 0.85)` retorna o
+  `FuzzyMatchResult` (entrada + similaridade) mais próximo acima do limiar, ou `null`. Implementado em
+  `SqliteTranslationMemory` trazendo todas as entradas do par de locales para memória e pontuando uma a
+  uma — não há função de similaridade de string no SQL do SQLite. Aceitável na escala real de uma
+  translation memory de um modder (dezenas de milhares de entradas, não milhões); revisitar com um
+  índice mais esperto (n-gram/trigram) só se isso aparecer como gargalo real medido, não
+  preventivamente.
+- `TranslationOrchestrator` chama `FindSimilarAsync` **depois** de `FindExactAsync` falhar e **antes**
+  de enviar o item ao provider, com um limiar próprio e deliberadamente alto —
+  `FuzzyReuseThreshold = 0.97` — porque esse ponto do pipeline **substitui silenciosamente uma chamada
+  ao provider**, sem nenhuma UI de "escolha entre candidatos" para o tradutor decidir; só dispara para
+  texto quase idêntico (uma pontuação ou espaço mudou), nunca para reformulações genuinamente
+  diferentes. O resultado reaproveitado sempre volta com `Success: false` e um
+  `ValidationIssueCode.FuzzyMatchReused` (severidade `Warning`), então cai como `NeedsReview` no
+  Editor — nunca é apresentado como uma tradução "confirmada" igual a um hit exato ou a uma tradução
+  fresca do provider.
+
+**Alternativas:** (a) Um limiar único (ex. 0.85) compartilhado entre a API genérica e o uso automático
+no orquestrador — rejeitada porque 0.85 é apropriado para uma futura UI de "sugestões" onde um humano
+escolhe entre candidatos, mas perigoso demais para substituir uma tradução real sem revisão nenhuma.
+(b) Um algoritmo de similaridade mais sofisticado (Jaro-Winkler, embeddings) — Levenshtein já resolve o
+caso concreto do brief (pequenas edições de texto) com zero dependência nova.
+
+**Consequências:** Uma correção de texto genuinamente pequena (< 3% de diferença) é reaproveitada sem
+chamar o provider, mas sempre marcada para revisão — nunca conta como "traduzida" silenciosamente. Uma
+UI de "sugestões de fuzzy match" navegável (mostrar os 3-5 candidatos mais próximos para o tradutor
+escolher, usando o limiar mais permissivo de 0.85 já exposto pela API) continua não implementada — é o
+próximo passo natural se isso se mostrar valioso na prática.

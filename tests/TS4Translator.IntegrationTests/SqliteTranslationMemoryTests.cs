@@ -101,4 +101,59 @@ public sealed class SqliteTranslationMemoryTests : IDisposable
 
         Assert.NotNull(found);
     }
+
+    [Fact]
+    public async Task FindSimilarAsync_NearDuplicateAboveThreshold_IsFound()
+    {
+        await _sut.SaveAsync(new TranslationMemoryEntry("Ask about their old job.", English, PortugueseBrazil, "Perguntar sobre o antigo emprego.", "argos", null, DateTimeOffset.UtcNow));
+
+        var found = await _sut.FindSimilarAsync("Ask about their new job.", English, PortugueseBrazil, minSimilarity: 0.85);
+
+        Assert.NotNull(found);
+        Assert.Equal("Perguntar sobre o antigo emprego.", found.Entry.TranslatedText);
+        Assert.True(found.Similarity is > 0.85 and < 1.0);
+    }
+
+    [Fact]
+    public async Task FindSimilarAsync_CompletelyDifferentText_ReturnsNull()
+    {
+        await _sut.SaveAsync(new TranslationMemoryEntry("Ask about their old job.", English, PortugueseBrazil, "Perguntar sobre o antigo emprego.", "argos", null, DateTimeOffset.UtcNow));
+
+        var found = await _sut.FindSimilarAsync("The weather is nice today.", English, PortugueseBrazil, minSimilarity: 0.85);
+
+        Assert.Null(found);
+    }
+
+    [Fact]
+    public async Task FindSimilarAsync_BelowRequestedThreshold_ReturnsNull()
+    {
+        await _sut.SaveAsync(new TranslationMemoryEntry("Ask about their old job.", English, PortugueseBrazil, "Perguntar sobre o antigo emprego.", "argos", null, DateTimeOffset.UtcNow));
+
+        // Same near-duplicate as the "above threshold" test, but demanding near-exact similarity.
+        var found = await _sut.FindSimilarAsync("Ask about their new job.", English, PortugueseBrazil, minSimilarity: 0.999);
+
+        Assert.Null(found);
+    }
+
+    [Fact]
+    public async Task FindSimilarAsync_PicksTheClosestOfMultipleCandidates()
+    {
+        await _sut.SaveAsync(new TranslationMemoryEntry("Ask about their old job.", English, PortugueseBrazil, "Versão distante.", "argos", null, DateTimeOffset.UtcNow));
+        await _sut.SaveAsync(new TranslationMemoryEntry("Ask about their new job!", English, PortugueseBrazil, "Versão próxima.", "argos", null, DateTimeOffset.UtcNow));
+
+        var found = await _sut.FindSimilarAsync("Ask about their new job.", English, PortugueseBrazil, minSimilarity: 0.5);
+
+        Assert.NotNull(found);
+        Assert.Equal("Versão próxima.", found.Entry.TranslatedText);
+    }
+
+    [Fact]
+    public async Task FindSimilarAsync_DifferentTargetLocale_DoesNotCrossContaminate()
+    {
+        await _sut.SaveAsync(new TranslationMemoryEntry("Ask about their old job.", English, French, "Version française.", "argos", null, DateTimeOffset.UtcNow));
+
+        var found = await _sut.FindSimilarAsync("Ask about their new job.", English, PortugueseBrazil, minSimilarity: 0.85);
+
+        Assert.Null(found);
+    }
 }

@@ -14,7 +14,7 @@ A única peça ainda não testada com infraestrutura real é a chamada HTTP de t
 testar contra um LM Studio ou NVIDIA NIM de verdade). Ver [`docs/STATUS.md`](docs/STATUS.md) para o
 estado exato e [`docs/HANDOFF.md`](docs/HANDOFF.md) para retomar o trabalho em uma nova sessão.
 
-Implementado e testado até agora (129 testes automatizados, todos passando):
+Implementado e testado até agora (144 testes automatizados, todos passando):
 
 - Solução .NET 10 / WinUI 3 completa (`TS4Translator.sln`), com App, seis bibliotecas de camada e
   cinco projetos de teste, compilando limpo em x64.
@@ -41,8 +41,10 @@ Implementado e testado até agora (129 testes automatizados, todos passando):
   de linha antes de qualquer tradução, e reconcilia o resultado por identidade de placeholder (não por
   ordem). 23 testes.
 - `TranslationValidator`/`BatchBuilder`/`TranslationOrchestrator`: pipeline completo
-  memory→protect→provider→reconciliação por ID→restore→validate, nunca confiando na ordem/contagem
-  dos resultados do provider. 61 testes ao todo cobrindo essas peças.
+  memory (exata→fuzzy≥97%)→protect→provider→reconciliação por ID→restore→validate, nunca confiando na
+  ordem/contagem dos resultados do provider. Um reaproveitamento fuzzy sempre volta marcado para
+  revisão, nunca como sucesso silencioso. 35 testes ao todo cobrindo essas peças.
+- `StringSimilarity` (Levenshtein): base do fuzzy matching acima. 7 testes isolados.
 - `Sims4PackageService`/`SmartSimStringTableService`: leitura/escrita real de STBL via
   `LlamaLogic.Packages` (inclusive múltiplas STBLs num único package de saída), locale (incluindo
   PT-BR) via `SmartSimUtilities`, nunca sobrescrevendo o package original. 13 testes.

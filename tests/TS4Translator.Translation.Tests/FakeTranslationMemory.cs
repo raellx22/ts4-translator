@@ -16,6 +16,28 @@ public sealed class FakeTranslationMemory : ITranslationMemory
         return Task.FromResult(entry);
     }
 
+    public Task<FuzzyMatchResult?> FindSimilarAsync(string originalText, CultureInfo sourceLocale, CultureInfo targetLocale, double minSimilarity = 0.85, CancellationToken cancellationToken = default)
+    {
+        var normalized = originalText.Trim();
+        FuzzyMatchResult? best = null;
+
+        foreach (var ((text, source, target), entry) in _entries)
+        {
+            if (source != sourceLocale.Name || target != targetLocale.Name)
+            {
+                continue;
+            }
+
+            var similarity = StringSimilarity.Ratio(normalized, text);
+            if (similarity >= minSimilarity && (best is null || similarity > best.Similarity))
+            {
+                best = new FuzzyMatchResult(entry, similarity);
+            }
+        }
+
+        return Task.FromResult(best);
+    }
+
     public Task SaveAsync(TranslationMemoryEntry entry, CancellationToken cancellationToken = default)
     {
         SaveCallCount++;

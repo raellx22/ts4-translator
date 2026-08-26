@@ -189,4 +189,79 @@ public class TranslationOrchestratorTests
         var observed = Assert.Single(provider.ObservedGlossaryTerms);
         Assert.Null(observed);
     }
+
+    [Fact]
+    public async Task TranslateAsync_CustomInstructionsProvided_ForwardedToEveryBatch()
+    {
+        var orchestrator = new TranslationOrchestrator(new TokenProtector(), new TranslationValidator(), new BatchBuilder(maxItemsPerBatch: 1), _memory);
+        var provider = new FakeTranslationProvider();
+        var items = new[]
+        {
+            new TranslationSourceItem("1", "First."),
+            new TranslationSourceItem("2", "Second."),
+        };
+
+        await orchestrator.TranslateAsync(items, provider, English, PortugueseBrazil, glossaryTerms: null, customInstructions: "Keep a playful tone.");
+
+        Assert.Equal(2, provider.ObservedCustomInstructions.Count);
+        Assert.All(provider.ObservedCustomInstructions, i => Assert.Equal("Keep a playful tone.", i));
+    }
+
+    [Fact]
+    public async Task TranslateAsync_NoCustomInstructionsProvided_PassesNullToProvider()
+    {
+        var provider = new FakeTranslationProvider();
+        var items = new[] { new TranslationSourceItem("1", "Hello there.") };
+
+        await _sut.TranslateAsync(items, provider, English, PortugueseBrazil);
+
+        var observed = Assert.Single(provider.ObservedCustomInstructions);
+        Assert.Null(observed);
+    }
+
+    [Fact]
+    public async Task TranslateAsync_NearDuplicateOfAMemoryEntry_ReusesItInsteadOfCallingProviderButFlagsForReview()
+    {
+        // Differs from the stored entry by a single trailing character (37 chars, 1 edit -> ~97.3%
+        // similarity) - just close enough to clear the orchestrator's conservative 97% reuse bar.
+        await _memory.SaveAsync(new Core.Memory.TranslationMemoryEntry("Ask your sim to talk about their job.", English, PortugueseBrazil, "Peça ao seu sim para falar sobre o trabalho dele.", "manual", null, DateTimeOffset.UtcNow));
+        var provider = new FakeTranslationProvider();
+        var items = new[] { new TranslationSourceItem("1", "Ask your sim to talk about their job!") };
+
+        var outcomes = await _sut.TranslateAsync(items, provider, English, PortugueseBrazil);
+
+        Assert.False(outcomes[0].Success);
+        Assert.Equal("Peça ao seu sim para falar sobre o trabalho dele.", outcomes[0].TranslatedText);
+        Assert.Contains(outcomes[0].Issues, i => i.Code == ValidationIssueCode.FuzzyMatchReused);
+        Assert.Empty(provider.ObservedBatchSizes);
+    }
+
+    [Fact]
+    public async Task TranslateAsync_MemoryEntryIsSimilarButNotCloseEnough_FallsThroughToProvider()
+    {
+        // "old job"/"new job" is only ~93% similar - close enough for a browsable fuzzy-suggestions
+        // UI, but below the orchestrator's conservative 97% bar for silently substituting a provider
+        // call, so this must still reach the provider.
+        await _memory.SaveAsync(new Core.Memory.TranslationMemoryEntry("Ask your sim about their old job at the lot.", English, PortugueseBrazil, "Versão antiga.", "manual", null, DateTimeOffset.UtcNow));
+        var provider = new FakeTranslationProvider();
+        var items = new[] { new TranslationSourceItem("1", "Ask your sim about their new job at the lot.") };
+
+        var outcomes = await _sut.TranslateAsync(items, provider, English, PortugueseBrazil);
+
+        Assert.Equal("[fake] Ask your sim about their new job at the lot.", outcomes[0].TranslatedText);
+        Assert.Single(provider.ObservedBatchSizes);
+    }
+
+    [Fact]
+    public async Task TranslateAsync_NoCloseMemoryEntry_FallsThroughToProvider()
+    {
+        await _memory.SaveAsync(new Core.Memory.TranslationMemoryEntry("Completely unrelated text.", English, PortugueseBrazil, "Texto completamente não relacionado.", "manual", null, DateTimeOffset.UtcNow));
+        var provider = new FakeTranslationProvider();
+        var items = new[] { new TranslationSourceItem("1", "Ask about their new job.") };
+
+        var outcomes = await _sut.TranslateAsync(items, provider, English, PortugueseBrazil);
+
+        Assert.Equal("[fake] Ask about their new job.", outcomes[0].TranslatedText);
+        Assert.Single(provider.ObservedBatchSizes);
+    }
 }

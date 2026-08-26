@@ -177,4 +177,26 @@ public class OpenAICompatibleProviderTests
         Assert.True(sut.Capabilities.SupportsGlossary);
         Assert.True(sut.Capabilities.SupportsCustomPrompt);
     }
+
+    [Fact]
+    public async Task TranslateBatchAsync_CustomInstructionsProvided_IncludesThemInSystemPrompt()
+    {
+        var (sut, handler) = CreateSut(HttpStatusCode.OK, ChatCompletionEnvelope("[]"));
+
+        await sut.TranslateBatchAsync(
+            [new TranslationRequestItem("1", "Hello.")], English, PortugueseBrazil,
+            glossaryTerms: null, customInstructions: "Keep a playful, informal tone.");
+
+        Assert.Contains("Keep a playful, informal tone.", handler.LastRequestBody);
+    }
+
+    [Fact]
+    public async Task TranslateBatchAsync_NoCustomInstructionsProvided_DoesNotAddInstructionsSectionToPrompt()
+    {
+        var (sut, handler) = CreateSut(HttpStatusCode.OK, ChatCompletionEnvelope("[]"));
+
+        await sut.TranslateBatchAsync([new TranslationRequestItem("1", "Hello.")], English, PortugueseBrazil);
+
+        Assert.DoesNotContain("Additional style", handler.LastRequestBody);
+    }
 }

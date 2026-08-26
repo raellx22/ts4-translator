@@ -109,4 +109,41 @@ public sealed class EfProjectServiceTests : IDisposable
 
         Assert.Empty(created.SourcePackagePaths);
     }
+
+    [Fact]
+    public async Task CreateAsync_CustomInstructionsDefaultsToNull()
+    {
+        var created = await _sut.CreateAsync("New project", [], English, PortugueseBrazil);
+
+        Assert.Null(created.CustomInstructions);
+    }
+
+    [Fact]
+    public async Task UpdateCustomInstructionsAsync_ThenGetAsync_RoundTrips()
+    {
+        var created = await _sut.CreateAsync("Styled project", [], English, PortugueseBrazil);
+
+        await _sut.UpdateCustomInstructionsAsync(created.Id, "Keep a playful, informal tone.");
+        var fetched = await _sut.GetAsync(created.Id);
+
+        Assert.Equal("Keep a playful, informal tone.", fetched!.CustomInstructions);
+    }
+
+    [Fact]
+    public async Task UpdateCustomInstructionsAsync_EmptyString_ClearsToNull()
+    {
+        var created = await _sut.CreateAsync("Styled project", [], English, PortugueseBrazil);
+        await _sut.UpdateCustomInstructionsAsync(created.Id, "Some style.");
+
+        await _sut.UpdateCustomInstructionsAsync(created.Id, "   ");
+        var fetched = await _sut.GetAsync(created.Id);
+
+        Assert.Null(fetched!.CustomInstructions);
+    }
+
+    [Fact]
+    public async Task UpdateCustomInstructionsAsync_UnknownId_DoesNotThrow()
+    {
+        await _sut.UpdateCustomInstructionsAsync(Guid.NewGuid(), "Anything");
+    }
 }
