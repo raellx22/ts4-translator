@@ -7,40 +7,45 @@ exportar um package de tradução separado — sem jamais alterar o mod original
 
 ## Estado do projeto
 
-**Em desenvolvimento inicial (Fase 1/2/3).** A primeira tela de produto (importar um mod, ver a
-contagem de strings, criar um projeto) já funciona de ponta a ponta, verificado rodando o app de
-verdade — mas ainda não há tradução, editor, nem exportação. Ver [`docs/STATUS.md`](docs/STATUS.md)
-para o estado exato e [`docs/HANDOFF.md`](docs/HANDOFF.md) para retomar o trabalho em uma nova sessão.
+**O caminho prático completo já funciona de ponta a ponta**, verificado rodando o app instalado de
+verdade: importar um `.package` → extrair cada string → traduzir as pendentes (com um provider
+compatível com OpenAI configurado) → exportar um package traduzido com validação de round-trip real.
+A única peça ainda não testada com infraestrutura real é a chamada HTTP de tradução em si (falta
+testar contra um LM Studio ou NVIDIA NIM de verdade). Ver [`docs/STATUS.md`](docs/STATUS.md) para o
+estado exato e [`docs/HANDOFF.md`](docs/HANDOFF.md) para retomar o trabalho em uma nova sessão.
 
-Implementado e testado até agora (81 testes automatizados, todos passando):
+Implementado e testado até agora (101 testes automatizados, todos passando):
 
 - Solução .NET 10 / WinUI 3 completa (`TS4Translator.sln`), com App, seis bibliotecas de camada e
   cinco projetos de teste, compilando limpo em x64.
 - Shell WinUI com `NavigationView`, título estendido e Mica (a partir do template `winui-navview`,
   ver [`docs/DECISIONS.md`](docs/DECISIONS.md) DEC-005), com DI (`ServiceCollection`) no composition
-  root. A tela **Home** já é funcional de ponta a ponta: importar `.package` → contar STBLs → criar
-  `TranslationProject` → listar recentes — confirmado rodando o app de verdade, não só compilando
-  (ver DEC-010 e [`docs/BUILD.md`](docs/BUILD.md) para como testar isso você mesmo).
-- `IProjectService`/`EfProjectService`: CRUD de projetos com EF Core/SQLite. 7 testes de integração.
+  root.
+- **Home**: importar `.package` (múltiplos arquivos), extrair e persistir cada string de cada STBL,
+  criar um `TranslationProject`, listar recentes.
+- **Editor**: lista as strings de um projeto; "Traduzir pendentes" roda o pipeline de tradução
+  completo contra o provider configurado; "Exportar" gera um package traduzido e só reporta sucesso
+  depois de reabrir o arquivo e validar cada string (round-trip real, seção 28 do brief).
+- **Configurações**: cadastra endpoint/modelo/API key de um provider compatível com OpenAI, com botão
+  "Testar conexão". A API key é criptografada via DPAPI do Windows, nunca em texto puro.
+- Fluxo completo confirmado rodando o app instalado como MSIX, com um `.package` sintético — ver
+  DEC-011 e [`docs/BUILD.md`](docs/BUILD.md) para como testar isso você mesmo.
 - `TokenProtector`: protege tokens `{0.SimFirstName}`/`{M0.He}`/`{F0.She}`, tags de markup e quebras
   de linha antes de qualquer tradução, e reconcilia o resultado por identidade de placeholder (não por
   ordem). 23 testes.
-- `TranslationValidator`: consolida os problemas de token com verificações independentes (tradução
-  vazia, idêntica ao original, discrepância de tamanho, markup desbalanceado). 12 testes.
+- `TranslationValidator`/`BatchBuilder`/`TranslationOrchestrator`: pipeline completo
+  memory→protect→provider→reconciliação por ID→restore→validate, nunca confiando na ordem/contagem
+  dos resultados do provider. 61 testes ao todo cobrindo essas peças.
 - `Sims4PackageService`/`SmartSimStringTableService`: leitura/escrita real de STBL via
-  `LlamaLogic.Packages`, locale (incluindo PT-BR) via `SmartSimUtilities`, nunca sobrescrevendo o
-  package original. 11 testes com packages sintéticos.
-- `SqliteTranslationMemory`: EF Core + SQLite com migration real, busca exata por texto+par de
-  locales — a base da funcionalidade de reaproveitar traduções ao atualizar um mod (seção 63). 5 testes
-  de integração.
-- `ITranslationOrchestrator`/`BatchBuilder`: pipeline memory→protect→provider→reconciliação por
-  ID→restore→validate, nunca confiando na ordem/contagem dos resultados do provider. 14 testes.
-- `OpenAICompatibleProvider`: primeiro provider real (LM Studio, NVIDIA NIM e qualquer endpoint
-  compatível com OpenAI), com recuperação controlada de JSON truncado/malformado. 9 testes contra um
-  HTTP falso, nenhuma chamada de rede real.
+  `LlamaLogic.Packages` (inclusive múltiplas STBLs num único package de saída), locale (incluindo
+  PT-BR) via `SmartSimUtilities`, nunca sobrescrevendo o package original. 13 testes.
+- `OpenAICompatibleProvider`: provider real (LM Studio, NVIDIA NIM e qualquer endpoint compatível com
+  OpenAI), com recuperação controlada de JSON truncado/malformado. 11 testes contra um HTTP falso,
+  nenhuma chamada de rede real ainda.
 
-Ainda não implementado: Argos Translate, glossário, projetos, editor de strings, fuzzy matching,
-exportação ponta a ponta, empacotamento MSIX de distribuição. Ver [`docs/ROADMAP.md`](docs/ROADMAP.md).
+Ainda não implementado: Argos Translate (offline), NVIDIA NIM validado com API key real, glossário,
+fuzzy matching, mod update engine, edição manual persistente, empacotamento MSIX de distribuição.
+Ver [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
 ## Por que este stack
 

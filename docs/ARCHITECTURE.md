@@ -95,6 +95,9 @@ saída já existente não é sobrescrita).
   individualmente via um scanner de profundidade de chaves — objetos incompletos são descartados, não
   travam o batch inteiro. 9 testes com um `HttpMessageHandler` falso (nenhum servidor real é
   necessário nem contatado — seção 44).
+- `OpenAICompatible.OpenAICompatibleProviderFactory : ITranslationProviderFactory` — constrói o
+  provider ativo a partir do que está salvo em `IProviderConfigurationService`; a UI (`EditorPage`,
+  `SettingsPage`) só conhece essa fábrica, nunca `OpenAICompatibleProvider` diretamente.
 - Ainda faltam: Argos Translate (Fase 4, bloqueado em prototipagem de empacotamento — ver ROADMAP),
   NVIDIA NIM com preset Riva Translate (Fase 5 — reutiliza `OpenAICompatibleProvider` por baixo, já que
   o endpoint é compatível com OpenAI; falta só a validação do formato de prompt real com uma API key),
@@ -105,24 +108,28 @@ saída já existente não é sobrescrita).
 
 SQLite via EF Core, schema versionado por migrations reais (DEC-007). Implementado até agora:
 `TranslationMemory` (busca exata por hash SHA-256 do texto normalizado + par de locales — a
-"killer feature" da seção 63) e `Project` (nome, arquivos `.package` importados, par de locales,
-timestamps — seção 33). `TranslatorDbContext` é resolvido via `IDbContextFactory<TranslatorDbContext>`,
-nunca injetado diretamente, porque um app desktop não tem escopo de requisição como o ASP.NET.
-`ServiceCollectionExtensions.AddPersistenceServices(databasePath)` registra a factory,
-`ITranslationMemory` e `IProjectService`. Listagens ordenadas por `DateTimeOffset` (ex.: "projetos
+"killer feature" da seção 63), `Project` (nome, arquivos `.package` importados, par de locales,
+timestamps — seção 33), `ProjectString` (cada string extraída, ligada ao `Project` e à `StblKey`/
+`KeyHash` de origem — upsert por hash preserva traduções ao reimportar a mesma versão de um mod,
+seção 25), e `ProviderConfiguration` (endpoint/modelo/temperatura do provider ativo; a API key em si
+não mora aqui — ver `Infrastructure`). `TranslatorDbContext` é resolvido via
+`IDbContextFactory<TranslatorDbContext>`, nunca injetado diretamente, porque um app desktop não tem
+escopo de requisição como o ASP.NET. `ServiceCollectionExtensions.AddPersistenceServices(databasePath)`
+registra a factory e todos os serviços acima. Listagens ordenadas por `DateTimeOffset` (ex.: "projetos
 recentes") são ordenadas do lado do cliente, não em SQL — o provider SQLite do EF Core não traduz
 `ORDER BY` sobre colunas `DateTimeOffset` (DEC-008, descoberto por um teste de integração real
-falhando, não por leitura de documentação). As demais entidades da seção 37 (StringEntry,
-GlossaryTerm, TranslationJob, etc.) entram como migrations incrementais, uma por feature, quando essa
-feature for implementada — não antecipadamente. API keys **nunca** ficam aqui em texto puro — isso é
-responsabilidade de `Infrastructure` via Windows Credential Manager/DPAPI (seção 19, ainda não
-implementado).
+falhando, não por leitura de documentação). As demais entidades da seção 37 (GlossaryTerm,
+TranslationJob, etc.) entram como migrations incrementais, uma por feature, quando essa feature for
+implementada — não antecipadamente.
 
 ### TS4Translator.Infrastructure
 
 `AppDataPaths` resolve e cria `%LOCALAPPDATA%\TS4Translator\{Data,Logs,Cache,Models}` (seção 48) —
-usado pelo `App` para apontar o SQLite e, futuramente, logs/modelos Argos. Logging estruturado e
-armazenamento seguro de credenciais (seção 19) ainda não implementados.
+usado pelo `App` para apontar o SQLite e, futuramente, logs/modelos Argos. `DpapiSecretStore :
+ISecretStore` guarda API keys criptografadas via DPAPI do Windows (`CurrentUser` scope) em
+`%LOCALAPPDATA%\TS4Translator\Data\Secrets`, nunca em texto puro nem no SQLite (seção 19) —
+`IProviderConfigurationService` (em `Persistence`) delega a ele através da interface, sem referenciar
+o assembly `Infrastructure` diretamente. Logging estruturado ainda não implementado.
 
 ### TS4Translator.App
 
@@ -134,12 +141,23 @@ registra `IPathPickerService`/`HomePageViewModel` locais ao projeto App, e roda 
 uma vez antes de ativar a janela. `App.Services` (um service locator estático — DEC-009) e
 `App.WindowHandle` ficam disponíveis para páginas e serviços que precisam deles.
 
-- **Home** (`Pages/HomePage.xaml` + `ViewModels/HomePageViewModel.cs`) — a primeira tela de produto
-  real: botão "Importar packages" (via `IPathPickerService`/`FileOpenPicker`, seção 34), cria um
-  `TranslationProject` a partir dos arquivos escolhidos (locale fixo `en-US`→`pt-BR` por enquanto —
-  seletor de locale ainda não existe), mostra a contagem de tabelas STBL encontradas via
-  `IPackageService`, e lista projetos recentes via `IProjectService`.
-- **About**/**Settings** — ainda os placeholders do template, sem lógica.
+- **Home** (`Pages/HomePage.xaml` + `ViewModels/HomePageViewModel.cs`) — importar `.package` (via
+  `IPathPickerService`/`FileOpenPicker`, seção 34), cria um `TranslationProject` a partir dos arquivos
+  escolhidos (locale fixo `en-US`→`pt-BR` por enquanto — seletor de locale ainda não existe), extrai
+  e persiste **cada string de cada STBL encontrada** via `IProjectStringService` (não só a contagem),
+  e lista projetos recentes via `IProjectService`. Clicar num projeto navega para o Editor
+  (`Frame.Navigate(typeof(EditorPage), project.Id)`).
+- **Editor** (`Pages/EditorPage.xaml` + `ViewModels/EditorPageViewModel.cs`) — lista as strings de um
+  projeto (`ListView` virtualizada, original + tradução + status por linha); "Traduzir pendentes" roda
+  `ITranslationOrchestrator` contra o provider ativo (`ITranslationProviderFactory`); "Exportar" agrupa
+  por STBL de origem, troca o locale via `IStringTableService.WithLocale`, escreve com
+  `IPackageService.WriteStringTablesAsync`, e só reporta sucesso depois de reabrir o arquivo e
+  comparar cada string com o que deveria estar lá (round-trip real, seção 28). Edição manual de
+  tradução é somente leitura por enquanto — ver DEC-011.
+- **Settings** (`Pages/SettingsPage.xaml` + `ViewModels/SettingsPageViewModel.cs`) — formulário para
+  configurar o provider OpenAI-compatible ativo (nome/endpoint/modelo/API key) via
+  `IProviderConfigurationService`, com botão "Testar conexão" que chama o provider de verdade.
+- **About** — ainda o placeholder do template, sem lógica.
 
 **Executado e clicado de verdade, fluxo completo confirmado** (DEC-010) — Mica, tema, navegação, e a
 importação de ponta a ponta (seletor de arquivo → contagem de STBL → criação do projeto → lista de

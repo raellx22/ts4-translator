@@ -2,51 +2,63 @@
 
 Leia isto antes de qualquer outra coisa se você é uma nova sessão/agente retomando este projeto.
 Depois leia `README.md`, `docs/STATUS.md`, `docs/ROADMAP.md`, `docs/ARCHITECTURE.md`, `docs/DECISIONS.md`,
-`docs/BUILD.md`, nessa ordem. Não reconstrua a arquitetura do zero — ela existe, compila e tem 81
-testes automatizados passando, e a primeira tela de produto funciona de ponta a ponta de verdade.
+`docs/BUILD.md`, nessa ordem. Não reconstrua a arquitetura do zero — ela existe, compila, tem 101
+testes automatizados passando, e **o caminho prático completo (importar → extrair → editor →
+exportar com validação) foi verificado de ponta a ponta rodando o app instalado de verdade.**
 
 ## Current state
 
-Ver `docs/STATUS.md` para o snapshot exato (atualizado junto com este arquivo). Resumo: fundação da
-solution pronta; camada Sims4 (STBL/locale) pronta com testes reais; TokenProtector, TranslationValidator,
-BatchBuilder e TranslationOrchestrator prontos com testes; translation memory (exact-match) pronta com
-SQLite real; `IProjectService` pronto; `OpenAICompatibleProvider` pronto (nunca testado contra um
-servidor real, só contra HTTP falso); e a `HomePage` (importar `.package` → contar STBLs → criar
-projeto → listar recentes) **confirmada funcionando de ponta a ponta rodando o app de verdade**, não
-só compilando.
+Ver `docs/STATUS.md` para o snapshot exato (atualizado junto com este arquivo). Resumo: fundação,
+Sims4 Core, Translation Core (TokenProtector/TranslationValidator/BatchBuilder/TranslationOrchestrator),
+Translation Memory exact-match, Project System, extração/persistência de strings
+(`IProjectStringService`), configuração de provider com API key segura via DPAPI
+(`IProviderConfigurationService`/`ISecretStore`), e as três telas de produto (`HomePage`, `EditorPage`,
+`SettingsPage`) — tudo pronto e testado. **A única peça do caminho principal ainda não exercitada com
+dados reais é a chamada HTTP de tradução em si** (nunca rodou contra um LM Studio ou NVIDIA NIM de
+verdade, só contra HTTP falso em teste e contra o fallback "sem provider configurado" no app real).
 
 ## What has already been implemented
 
 Ver a seção "Completed" de `docs/STATUS.md` — não duplicado aqui para evitar as duas listas
-divergirem com o tempo. **Não recrie**: o pipeline de tradução (`ITranslationProvider`,
-`IBatchBuilder`, `ITranslationOrchestrator`), o `OpenAICompatibleProvider`, o `IProjectService`, e a
-`HomePage`.
+divergirem com o tempo. **Não recrie**: o pipeline de tradução inteiro, `IProjectStringService`,
+`ISecretStore`/`IProviderConfigurationService`, `ITranslationProviderFactory`, `EditorPage`,
+`SettingsPage`, ou `IPackageService.WriteStringTablesAsync` (múltiplas STBLs num package).
 
 ## What is currently being worked on
 
-Nada em progresso. Todo trabalho desta sessão foi levado a um estado compilável, testado, e — pela
-primeira vez neste projeto — verificado rodando o app de verdade, antes de parar.
+Nada em progresso. Todo trabalho desta sessão foi levado a um estado compilável, testado, e
+verificado rodando o app de verdade antes de parar.
 
 ## Exact next task
 
-Drag-and-drop de arquivos/pastas na `HomePage` (brief seção 34 pede isso explicitamente; hoje só
-existe o botão "Importar packages" via file picker). Usar os eventos `DragOver`/`Drop` do WinUI no
-`Grid` raiz de `Pages/HomePage.xaml`, filtrando por extensão `.package`, reaproveitando a mesma lógica
-de `HomePageViewModel.ImportPackagesAsync` (talvez valha extrair o corpo do método para aceitar
-`IReadOnlyList<string>` diretamente, com dois pontos de entrada — botão e drop — chamando essa lógica
-compartilhada).
+**Testar a tradução com um provider real.** Isso não é uma tarefa de código — é uma verificação que
+precisa de infraestrutura externa (um LM Studio rodando localmente com um modelo carregado, ou uma
+API key da NVIDIA NIM):
 
-**Importante**: para testar isso manualmente (drag-and-drop, como qualquer outra interação de UI que
-não passe por um broker do Windows), `dotnet run` funciona normalmente — não é necessário empacotar
-como MSIX para isso. O empacotamento só é necessário para testar o `FileOpenPicker` (ver `docs/BUILD.md`).
+1. Rode o app (via `dotnet run` é suficiente — `SettingsPage`/`EditorPage` não usam `FileOpenPicker`,
+   só o import na `HomePage` precisa do procedimento MSIX de `docs/BUILD.md`).
+2. Vá em Configurações, preencha Endpoint (`http://localhost:1234/v1` para LM Studio, ou
+   `https://integrate.api.nvidia.com/v1` para NVIDIA NIM) e Model (o nome exato do modelo carregado, ou
+   `nvidia/riva-translate-4b-instruct-v2` para NIM), e a API key se for NIM. Clique "Testar conexão".
+3. Se a conexão funcionar, importe um `.package` (real ou sintético) e clique "Traduzir pendentes" no
+   Editor. Confirme que as traduções aparecem e fazem sentido, e que `Status` reflete corretamente
+   sucesso/revisão necessária.
+4. Se algo falhar, o `StatusText` do Editor já mostra tipo+mensagem da exceção (`EditorPageViewModel.TranslateAsync`)
+   — comece por aí antes de instrumentar mais.
 
-Depois disso, seguir a lista "Próximas tarefas concretas" no fim de `docs/ROADMAP.md` — a prioridade
-seguinte é a entidade `StringEntry`.
+Depois de confirmar isso, o próximo item real de código é drag-and-drop de arquivos na `HomePage`
+(brief seção 34 — hoje só existe o botão de file picker). Usar os eventos `DragOver`/`Drop` do WinUI
+no `Grid` raiz de `Pages/HomePage.xaml`, filtrando por `.package`, reaproveitando a lógica de
+`HomePageViewModel.ImportPackagesAsync` (considere extrair o corpo do método para aceitar
+`IReadOnlyList<string>` diretamente, com dois pontos de entrada — botão e drop). Isso **não** precisa
+do procedimento MSIX para testar — `dotnet run` é suficiente, drag-and-drop não passa por um broker.
+
+Depois disso, seguir a lista "Próximas tarefas concretas" no fim de `docs/ROADMAP.md`.
 
 ## Important files
 
 - `docs/DECISIONS.md` — leia antes de mudar qualquer versão de pacote ou formato de arquivo; a
-  maioria das escolhas não óbvias já foi justificada ali (DEC-001 a DEC-010).
+  maioria das escolhas não óbvias já foi justificada ali (DEC-001 a DEC-011).
 - `docs/BUILD.md` — como compilar, testar, rodar, e (importante) como empacotar/instalar um MSIX
   local para testar qualquer fluxo que use `FileOpenPicker` ou outra API mediada por broker do
   Windows. `dotnet run` sozinho **não** funciona para esses casos (DEC-010) — não gaste tempo
@@ -59,9 +71,13 @@ seguinte é a entidade `StringEntry`.
 - `src/TS4Translator.Persistence/Migrations/` — nunca edite uma migration manualmente depois que ela
   existir em qualquer branch compartilhado; adicione uma nova migration com `dotnet ef migrations
   add <Nome>` a partir de `src/TS4Translator.Persistence/`.
-- `src/TS4Translator.App/ViewModels/HomePageViewModel.cs` — note que a chamada ao picker está
-  **dentro** do `try/catch`, de propósito (DEC-010) — `AsyncRelayCommand` não relança exceções do
-  delegate por padrão, então qualquer código novo em um `AsyncRelayCommand` precisa do mesmo cuidado.
+- `src/TS4Translator.App/ViewModels/HomePageViewModel.cs`/`EditorPageViewModel.cs`/`SettingsPageViewModel.cs`
+  — note que toda chamada de I/O fica **dentro** do `try/catch` do método `[RelayCommand]`, de
+  propósito (DEC-010) — `AsyncRelayCommand`/`[RelayCommand]` assíncrono não relança exceções do
+  delegate por padrão, então qualquer código novo num command precisa do mesmo cuidado.
+- `src/TS4Translator.App/ViewModels/EditorPageViewModel.cs` (`ExportAsync`) — nunca reporte
+  exportação como sucesso sem a validação de round-trip (reabrir o arquivo gerado e comparar cada
+  string) rodar primeiro. É o requisito da seção 28 do brief, e já está implementado — não remova.
 - `../SimsPackageBatcher/` (fora deste repo, mesmo diretório pai) — projeto irmão já finalizado que
   prova o stack inteiro funciona neste ambiente; útil como referência de padrões (DI simples via
   `ServiceCollection`, uso de `LlamaLogic.Packages`, testes de integração com packages sintéticos)
@@ -85,17 +101,19 @@ Todas em `docs/DECISIONS.md`, mas as mais fáceis de "corrigir" por engano:
 - **Não** reintroduzir a ideia de que o problema do picker era elevação de privilégios — foi
   descartada por teste real (o usuário reproduziu o mesmo erro sem elevação nenhuma). A causa
   confirmada é o modo de registro de pacote do `dotnet run` (ver DEC-010).
+- **Não** deixar a coluna de tradução do Editor editável sem persistir a edição (`UpdateTranslationAsync`)
+  — um campo que edita e não salva é pior do que não ter o campo (DEC-011).
 
 ## Known bugs
 
-Nenhum bug conhecido no código existente. Dois bugs reais encontrados nesta sessão já foram
+Nenhum bug conhecido no código existente. Bugs reais encontrados em sessões anteriores já foram
 corrigidos e commitados (exceção engolida pelo `AsyncRelayCommand`; o "bug" do picker era um problema
 de processo de teste, não de código — ver DEC-010). Ver "Known issues" em `docs/STATUS.md` para riscos
 documentados que não são bugs confirmados.
 
 ## Tests currently failing
 
-Nenhum. 81 testes automatizados passando.
+Nenhum. 101 testes automatizados passando.
 
 ## Commands to build / test / run
 
@@ -103,8 +121,8 @@ Ver `docs/BUILD.md` — não duplicado aqui.
 
 ## Next milestones
 
-Ver `docs/ROADMAP.md`. Prioridade imediata: drag-and-drop na `HomePage` → entidade `StringEntry` →
-testar `OpenAICompatibleProvider` contra um LM Studio real → armazenamento seguro de API key.
+Ver `docs/ROADMAP.md`. Prioridade imediata: testar a tradução com um provider real → drag-and-drop na
+`HomePage` → edição manual persistente no Editor → filtros/pesquisa no Editor.
 
 ## Sobre o ambiente de desenvolvimento
 

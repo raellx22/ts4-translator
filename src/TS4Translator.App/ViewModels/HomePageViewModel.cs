@@ -9,9 +9,10 @@ using TS4Translator.Core.Projects;
 namespace TS4Translator.App.ViewModels;
 
 /// <summary>
-/// Backs the Home page: import `.package` files, create a project from them, and show recent
-/// projects. Deliberately hardcodes English source / Portuguese (Brazil) target for now - a
-/// locale picker belongs to a later, more complete import flow (brief section 34), not this first slice.
+/// Backs the Home page: import `.package` files, create a project from them, extract every STBL's
+/// strings into it, and show recent projects. Deliberately hardcodes English source / Portuguese
+/// (Brazil) target for now - a locale picker belongs to a later, more complete import flow (brief
+/// section 34), not this first slice.
 /// </summary>
 public sealed partial class HomePageViewModel : ObservableObject
 {
@@ -19,6 +20,7 @@ public sealed partial class HomePageViewModel : ObservableObject
     private static readonly CultureInfo DefaultTargetLocale = CultureInfo.GetCultureInfo("pt-BR");
 
     private readonly IProjectService _projectService;
+    private readonly IProjectStringService _projectStringService;
     private readonly IPackageService _packageService;
     private readonly IPathPickerService _pathPicker;
 
@@ -28,9 +30,14 @@ public sealed partial class HomePageViewModel : ObservableObject
     [ObservableProperty]
     public partial string StatusText { get; set; }
 
-    public HomePageViewModel(IProjectService projectService, IPackageService packageService, IPathPickerService pathPicker)
+    public HomePageViewModel(
+        IProjectService projectService,
+        IProjectStringService projectStringService,
+        IPackageService packageService,
+        IPathPickerService pathPicker)
     {
         _projectService = projectService;
+        _projectStringService = projectStringService;
         _packageService = packageService;
         _pathPicker = pathPicker;
         StatusText = "Importe um ou mais arquivos .package para começar.";
@@ -69,18 +76,25 @@ public sealed partial class HomePageViewModel : ObservableObject
 
             IsBusy = true;
 
+            var projectName = Path.GetFileNameWithoutExtension(files[0]);
+            var project = await _projectService.CreateAsync(projectName, files, DefaultSourceLocale, DefaultTargetLocale);
+
             var totalStringTables = 0;
+            var totalStrings = 0;
             foreach (var file in files)
             {
                 var keys = await _packageService.FindStringTablesAsync(file);
-                totalStringTables += keys.Count;
+                foreach (var key in keys)
+                {
+                    var entries = await _packageService.ReadStringTableAsync(file, key);
+                    await _projectStringService.ReplaceStringsAsync(project.Id, key, entries.Select(e => (e.KeyHash, e.Value)).ToList());
+                    totalStringTables++;
+                    totalStrings += entries.Count;
+                }
             }
 
-            var projectName = Path.GetFileNameWithoutExtension(files[0]);
-            var project = await _projectService.CreateAsync(projectName, files, DefaultSourceLocale, DefaultTargetLocale);
             RecentProjects.Insert(0, project);
-
-            StatusText = $"'{project.Name}' importado: {files.Count} arquivo(s), {totalStringTables} tabela(s) de strings encontrada(s).";
+            StatusText = $"'{project.Name}' importado: {files.Count} arquivo(s), {totalStringTables} tabela(s), {totalStrings} string(s) encontrada(s).";
         }
         catch (Exception exception)
         {

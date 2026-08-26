@@ -8,12 +8,51 @@
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     mc:Ignorable="d">
 
-    <Grid Padding="24,16,24,16" RowSpacing="24">
+    <Grid Padding="24,16,24,16" RowSpacing="16" MaxWidth="600" HorizontalAlignment="Left">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
-            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
-        <TextBlock Style="{StaticResource TitleTextBlockStyle}" Text="Settings" />
-        <TextBlock Grid.Row="1" Text="This is the Settings page" />
+
+        <TextBlock Style="{StaticResource TitleTextBlockStyle}" Text="Configurações" />
+
+        <TextBlock
+            Grid.Row="1"
+            Text="Provider de tradução (compatível com OpenAI - LM Studio, NVIDIA NIM, etc.)"
+            TextWrapping="Wrap" />
+
+        <StackPanel Grid.Row="2" Spacing="8">
+            <TextBox Header="Nome" Text="{x:Bind ViewModel.Name, Mode=TwoWay}" />
+            <TextBox Header="Endpoint" PlaceholderText="http://localhost:1234/v1" Text="{x:Bind ViewModel.Endpoint, Mode=TwoWay}" />
+            <TextBox Header="Modelo" PlaceholderText="nome do modelo carregado" Text="{x:Bind ViewModel.Model, Mode=TwoWay}" />
+            <PasswordBox Header="API key (opcional para servidores locais)" Password="{x:Bind ViewModel.ApiKey, Mode=TwoWay}" />
+            <TextBlock
+                FontSize="12"
+                Opacity="0.7"
+                Text="Deixe em branco para manter a API key já salva sem alterá-la."
+                TextWrapping="Wrap" />
+        </StackPanel>
+
+        <StackPanel
+            Grid.Row="3"
+            Orientation="Horizontal"
+            Spacing="12">
+            <Button Command="{x:Bind ViewModel.SaveCommand}" Content="Salvar" />
+            <Button Command="{x:Bind ViewModel.TestConnectionCommand}" Content="Testar conexão" />
+            <ProgressRing
+                Width="20"
+                Height="20"
+                IsActive="{x:Bind ViewModel.IsBusy, Mode=OneWay}" />
+        </StackPanel>
+
+        <TextBlock
+            Grid.Row="4"
+            Text="{x:Bind ViewModel.StatusText, Mode=OneWay}"
+            TextWrapping="Wrap" />
     </Grid>
 </Page>

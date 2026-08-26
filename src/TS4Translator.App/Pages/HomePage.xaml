@@ -35,7 +35,11 @@
             Text="{x:Bind ViewModel.StatusText, Mode=OneWay}"
             TextWrapping="Wrap" />
 
-        <ListView Grid.Row="3" ItemsSource="{x:Bind ViewModel.RecentProjects, Mode=OneWay}">
+        <ListView
+            Grid.Row="3"
+            IsItemClickEnabled="True"
+            ItemClick="RecentProjects_ItemClick"
+            ItemsSource="{x:Bind ViewModel.RecentProjects, Mode=OneWay}">
             <ListView.ItemTemplate>
                 <DataTemplate x:DataType="projects:TranslationProject">
                     <StackPanel

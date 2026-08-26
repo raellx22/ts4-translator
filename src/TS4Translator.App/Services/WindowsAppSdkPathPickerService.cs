@@ -21,4 +21,19 @@ public sealed class WindowsAppSdkPathPickerService : IPathPickerService
         var files = await picker.PickMultipleFilesAsync();
         return files.Select(file => file.Path).ToArray();
     }
+
+    public async Task<string?> PickSaveFileAsync(string suggestedFileName)
+    {
+        var picker = new FileSavePicker
+        {
+            CommitButtonText = "Exportar",
+            SuggestedStartLocation = PickerLocationId.DocumentsLibrary,
+            SuggestedFileName = suggestedFileName,
+        };
+        picker.FileTypeChoices.Add("Sims 4 Package", [".package"]);
+
+        WinRT.Interop.InitializeWithWindow.Initialize(picker, App.WindowHandle);
+        var file = await picker.PickSaveFileAsync();
+        return file?.Path;
+    }
 }

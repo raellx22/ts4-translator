@@ -35,20 +35,20 @@ public sealed class Sims4PackageService : IPackageService
             .ToList();
     }
 
-    public async Task WriteStringTableAsync(string outputPackagePath, StblKey key, IReadOnlyList<StringTableEntry> entries, CancellationToken cancellationToken = default)
+    public Task WriteStringTableAsync(string outputPackagePath, StblKey key, IReadOnlyList<StringTableEntry> entries, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(entries);
+        return WriteStringTablesAsync(outputPackagePath, new Dictionary<StblKey, IReadOnlyList<StringTableEntry>> { [key] = entries }, cancellationToken);
+    }
+
+    public async Task WriteStringTablesAsync(string outputPackagePath, IReadOnlyDictionary<StblKey, IReadOnlyList<StringTableEntry>> tables, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(outputPackagePath);
-        ArgumentNullException.ThrowIfNull(entries);
+        ArgumentNullException.ThrowIfNull(tables);
 
         if (File.Exists(outputPackagePath))
         {
             throw new IOException($"The output package already exists: '{outputPackagePath}'.");
-        }
-
-        var model = new StringTableModel();
-        foreach (var entry in entries)
-        {
-            model.Set(entry.KeyHash, entry.Value);
         }
 
         var directory = Path.GetDirectoryName(Path.GetFullPath(outputPackagePath));
@@ -58,8 +58,19 @@ public sealed class Sims4PackageService : IPackageService
         }
 
         await using var package = new DataBasePackedFile();
-        var resourceKey = SmartSimStringTableService.ToResourceKey(key);
-        await package.SetAsync(resourceKey, model, CompressionMode.Auto, cancellationToken).ConfigureAwait(false);
+
+        foreach (var (key, entries) in tables)
+        {
+            var model = new StringTableModel();
+            foreach (var entry in entries)
+            {
+                model.Set(entry.KeyHash, entry.Value);
+            }
+
+            var resourceKey = SmartSimStringTableService.ToResourceKey(key);
+            await package.SetAsync(resourceKey, model, CompressionMode.Auto, cancellationToken).ConfigureAwait(false);
+        }
+
         await package.SaveAsAsync(outputPackagePath, ResourceKeyOrder.TypeGroupInstance, cancellationToken).ConfigureAwait(false);
     }
 }

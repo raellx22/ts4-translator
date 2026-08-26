@@ -97,4 +97,43 @@ public sealed class Sims4PackageServiceTests : IDisposable
 
         await Assert.ThrowsAnyAsync<Exception>(() => _sut.ReadStringTableAsync(outputPath, differentKey));
     }
+
+    [Fact]
+    public async Task WriteStringTablesAsync_MultipleStbls_AllAppearInOnePackage()
+    {
+        var keyA = new StblKey(Group: 0, FullInstance: 0x01UL);
+        var keyB = new StblKey(Group: 0, FullInstance: 0x02UL);
+        var outputPath = OutputPath("multi.package");
+
+        var tables = new Dictionary<StblKey, IReadOnlyList<StringTableEntry>>
+        {
+            [keyA] = [new StringTableEntry(1, "From table A")],
+            [keyB] = [new StringTableEntry(2, "From table B")],
+        };
+
+        await _sut.WriteStringTablesAsync(outputPath, tables);
+        var found = await _sut.FindStringTablesAsync(outputPath);
+
+        Assert.Equal(2, found.Count);
+        Assert.Contains(keyA, found);
+        Assert.Contains(keyB, found);
+        var entriesA = await _sut.ReadStringTableAsync(outputPath, keyA);
+        var entriesB = await _sut.ReadStringTableAsync(outputPath, keyB);
+        Assert.Equal("From table A", Assert.Single(entriesA).Value);
+        Assert.Equal("From table B", Assert.Single(entriesB).Value);
+    }
+
+    [Fact]
+    public async Task WriteStringTablesAsync_OutputAlreadyExists_ThrowsAndDoesNotOverwrite()
+    {
+        var outputPath = OutputPath("multi-existing.package");
+        await File.WriteAllTextAsync(outputPath, "not a real package");
+        var tables = new Dictionary<StblKey, IReadOnlyList<StringTableEntry>>
+        {
+            [new StblKey(0, 1)] = [new StringTableEntry(1, "x")],
+        };
+
+        await Assert.ThrowsAsync<IOException>(() => _sut.WriteStringTablesAsync(outputPath, tables));
+        Assert.Equal("not a real package", await File.ReadAllTextAsync(outputPath));
+    }
 }

@@ -353,3 +353,65 @@ não era necessário — o problema era só o modo de lançamento).
 criar) para que futuras sessões não percam tempo reinvestigando a mesma causa. `HomePage` está
 confirmada funcionalmente completa para o caso feliz (import → contagem de STBL → projeto criado) —
 ver `docs/STATUS.md`.
+
+---
+
+## DEC-011 — Pipeline completo (extrair→traduzir→exportar) confirmado de ponta a ponta
+
+**Contexto:** Depois do primeiro fluxo de importação funcionar (DEC-010), o pedido seguinte foi
+"finalizar" o suficiente para um teste prático real: importar um mod de verdade, traduzir, e exportar
+um package traduzido de verdade. Isso exigiu completar várias peças que só existiam como contrato/teste
+isolado até aqui.
+
+**O que foi adicionado nesta rodada, todo coberto por testes automatizados (101 no total) e depois
+verificado rodando o app de verdade (empacotado como MSIX, ver DEC-010/`docs/BUILD.md`):**
+
+- `IProjectStringService`/`EfProjectStringService` — persiste as strings individuais de um projeto
+  (não só a contagem de STBLs), com upsert por hash que preserva traduções existentes ao reimportar
+  a mesma versão de um mod (seção 25) e remove hashes que desapareceram da fonte.
+- `ISecretStore`/`DpapiSecretStore` — API key de provider criptografada via DPAPI do Windows, nunca
+  em texto puro (seção 19), em arquivo próprio fora do SQLite.
+- `IProviderConfigurationService`/`EfProviderConfigurationService` — guarda endpoint/model/temperatura
+  no SQLite e delega a API key ao `ISecretStore`.
+- `ITranslationProviderFactory`/`OpenAICompatibleProviderFactory` — constrói um `OpenAICompatibleProvider`
+  de verdade a partir da configuração salva, sem a UI precisar saber qual provider concreto existe por
+  trás (seção 4).
+- `IPackageService.WriteStringTablesAsync` — nova sobrecarga que escreve **múltiplas** STBLs num único
+  package de saída (um projeto pode ter mais de uma STBL de origem; a exportação final deve ser um
+  arquivo só, não um por STBL). `WriteStringTableAsync` (a original, uma STBL) passou a delegar para
+  essa.
+- `EditorPage`/`EditorPageViewModel` — lista as strings de um projeto, botão "Traduzir pendentes"
+  (roda o `TranslationOrchestrator` já existente contra o provider configurado, atualiza status/issue
+  por string) e botão "Exportar" (agrupa por STBL de origem, troca o locale via `IStringTableService.WithLocale`,
+  escreve via `WriteStringTablesAsync`, e só reporta sucesso depois de **reabrir o arquivo gerado e
+  comparar cada string byte a byte com o que deveria ter sido escrito** — seção 28, round-trip
+  validation real, não assumida).
+- `SettingsPage`/`SettingsPageViewModel` — formulário para configurar o provider (nome, endpoint,
+  modelo, API key opcional) e um botão "Testar conexão" que chama o provider de verdade com uma
+  string trivial.
+- Navegação Home → Editor: clique num item da lista de projetos recentes usa `Frame.Navigate(typeof(EditorPage), project.Id)`
+  — a primeira navegação com parâmetro do app; `EditorPage.OnNavigatedTo` lê `e.Parameter as Guid` e
+  aciona `ViewModel.LoadCommand`.
+
+**Verificado de ponta a ponta nesta sessão, com um `.package` sintético (gerado por um mini-projeto
+console reaproveitando `Sims4PackageService`, nunca commitado)**: importar → 4 strings extraídas e
+persistidas → abrir o projeto no Editor → todas as 4 strings visíveis com status "Pendente" → clicar
+"Traduzir pendentes" sem provider configurado mostra a mensagem correta pedindo para configurar em
+Configurações (não trava, não quebra) → clicar "Exportar" sem nenhuma tradução feita usa o texto
+original como fallback, gera `exemplo2_pt-BR.package`, e reporta **"Exportado e validado com sucesso"**
+depois da validação de round-trip passar de verdade.
+
+**O que ainda não foi verificado com um provider real** (nenhum LM Studio nem chave NVIDIA disponível
+nesta sessão): o botão "Traduzir pendentes" de fato preenchendo traduções via HTTP real. O código é o
+mesmo `OpenAICompatibleProvider` já testado com HTTP falso (74→91 testes cobrindo essa peça
+especificamente) mas o caminho HTTP real ponta a ponta dentro do app nunca rodou. Ver `docs/HANDOFF.md`.
+
+**Decisão:** Edição manual de tradução na `EditorPage` foi deixada **somente leitura** por enquanto
+(`TextBlock`, não `TextBox`) — implementar um campo editável que parecesse funcionar mas não
+persistisse a edição no banco seria pior do que não ter o campo (brief seção 60: não deixar
+funcionalidade pela metade). Persistir edição manual é um item real do roadmap (seção 30/31), não
+feito aqui.
+
+**Consequências:** A próxima sessão (ou o usuário, com um provider real configurado) deveria validar
+o caminho de tradução com HTTP de verdade antes de qualquer outra feature nova — é o único elo do
+pipeline principal ainda não exercitado de ponta a ponta com dados reais.

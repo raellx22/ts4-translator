@@ -5,6 +5,7 @@ using TS4Translator.App.Services;
 using TS4Translator.App.ViewModels;
 using TS4Translator.Infrastructure;
 using TS4Translator.Persistence;
+using TS4Translator.Providers;
 using TS4Translator.Sims4;
 using TS4Translator.Translation;
 
@@ -49,8 +50,12 @@ public partial class App : Application
             .AddSims4Services()
             .AddTranslationServices()
             .AddPersistenceServices(AppDataPaths.DatabaseFilePath)
+            .AddInfrastructureServices()
+            .AddProviderServices()
             .AddSingleton<IPathPickerService, WindowsAppSdkPathPickerService>()
             .AddTransient<HomePageViewModel>()
+            .AddTransient<EditorPageViewModel>()
+            .AddTransient<SettingsPageViewModel>()
             .BuildServiceProvider();
         Services = _services;
     }

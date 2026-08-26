@@ -18,4 +18,12 @@ public interface IPackageService
     /// resource built from <paramref name="entries"/>. Fails if a file already exists at that path.
     /// </summary>
     Task WriteStringTableAsync(string outputPackagePath, StblKey key, IReadOnlyList<StringTableEntry> entries, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Writes a brand-new package at <paramref name="outputPackagePath"/> containing one STBL resource
+    /// per entry in <paramref name="tables"/> — used when a project's strings span more than one
+    /// source STBL and the export should still be a single output package. Fails if a file already
+    /// exists at that path.
+    /// </summary>
+    Task WriteStringTablesAsync(string outputPackagePath, IReadOnlyDictionary<StblKey, IReadOnlyList<StringTableEntry>> tables, CancellationToken cancellationToken = default);
 }

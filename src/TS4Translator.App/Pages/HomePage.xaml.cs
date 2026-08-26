@@ -1,6 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.UI.Xaml.Controls;
 using TS4Translator.App.ViewModels;
+using TS4Translator.Core.Projects;
 
 // To learn more about WinUI, the WinUI project structure,
 // and more about our project templates, see: http://aka.ms/winui-project-info.
@@ -15,5 +16,13 @@ public sealed partial class HomePage : Page
     {
         ViewModel = App.Services.GetRequiredService<HomePageViewModel>();
         InitializeComponent();
+    }
+
+    private void RecentProjects_ItemClick(object sender, ItemClickEventArgs e)
+    {
+        if (e.ClickedItem is TranslationProject project)
+        {
+            Frame.Navigate(typeof(EditorPage), project.Id);
+        }
     }
 }

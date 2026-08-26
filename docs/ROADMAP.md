@@ -113,12 +113,31 @@ real nesta sessão (sem chave disponível). Antes de expor isso como "preset Riv
 
 ## FASE 8 — Mod Update Engine — **não iniciada**
 
-## FASE 9 — Editor — **não iniciada**
+## FASE 9 — Editor — **primeira versão pronta e verificada de ponta a ponta**
+
+- [x] `EditorPage`/`EditorPageViewModel` — lista virtualizada (original, tradução, status) por
+  projeto, botão "Traduzir pendentes" (usa `ITranslationOrchestrator`), navegação a partir da lista
+  de projetos recentes na Home. Confirmado rodando o app instalado (DEC-011).
+- [ ] Filtros (todas/pendentes/traduzidas/com erro — seção 30) — não iniciado, hoje a lista mostra tudo.
+- [ ] Pesquisa por texto/ID — não iniciado.
+- [ ] Edição manual persistente — a coluna de tradução é somente leitura de propósito (DEC-011); virar
+  editável exige `UpdateTranslationAsync` sendo chamado ao editar, com status `ManuallyEdited`, e algum
+  histórico simples (seção 31).
+- [ ] Painel lateral com tokens/glossário/histórico por string (seção 30) — não iniciado.
 
 ## FASE 10 — Hybrid Translation — **não iniciada**
 
-## FASE 11 — Export — **não iniciada** (mas `IPackageService.WriteStringTableAsync` já cobre a
-mecânica de escrita de package; falta orquestrar validação + round-trip + relatório em torno dela).
+## FASE 11 — Export — **núcleo pronto e verificado de ponta a ponta**
+
+- [x] `EditorPageViewModel.ExportAsync` — agrupa as strings do projeto por STBL de origem, troca o
+  locale via `IStringTableService.WithLocale`, escreve um único package via
+  `IPackageService.WriteStringTablesAsync`, e só reporta sucesso depois de reabrir o arquivo e
+  comparar cada string com o esperado (round-trip real, seção 28). Confirmado gerando e validando um
+  `.package` de verdade rodando o app instalado (DEC-011).
+- [ ] Relatório de exportação mais detalhado (contagem de avisos/erros por string, não só
+  sucesso/falha geral) — não iniciado.
+- [ ] Backup automático / opção de incorporar ao package original (seção 7, sempre opcional e nunca
+  padrão) — não iniciado; hoje só existe o caminho "package separado", que é o exigido como padrão.
 
 ## FASE 12 — UX/Polish — **não iniciada**
 
@@ -130,16 +149,17 @@ mecânica de escrita de package; falta orquestrar validação + round-trip + rel
 
 ## Próximas tarefas concretas (em ordem sugerida)
 
-1. Drag-and-drop de arquivos/pastas na `HomePage` (seção 34 pede explicitamente, hoje só há o botão
+1. **Testar a tradução com um provider real** (LM Studio local ou NVIDIA NIM com API key) — todo o
+   pipeline foi verificado com o fallback "sem provider" e com HTTP falso em teste, mas o caminho
+   HTTP real de ponta a ponta dentro do app (`SettingsPage` → salvar config → `EditorPage` → "Traduzir
+   pendentes" → resposta real chegando) nunca rodou. Ver `docs/HANDOFF.md`.
+2. Drag-and-drop de arquivos/pastas na `HomePage` (seção 34 pede explicitamente, hoje só há o botão
    "Importar packages" via file picker) — e suporte a pasta inteira, não só múltiplos arquivos.
-2. Entidade `StringEntry` (nova migration) — cada string extraída de um projeto, ligada ao `Project`
-   e ao `KeyHash`/`StblKey` de origem. Pré-requisito para o editor (Fase 9) e para o diff de versões
-   (Fase 8) existirem. A `HomePage` de hoje só conta STBLs, não extrai/persiste strings individuais.
-3. Testar `OpenAICompatibleProvider` contra um LM Studio local de verdade — confirma que o pipeline
-   inteiro (orchestrator → provider → HTTP real → parsing) funciona fora dos testes com HTTP falso.
-4. Armazenamento seguro de API key (Windows Credential Manager/DPAPI, seção 19) — pré-requisito para
-   testar `OpenAICompatibleProvider` contra NVIDIA NIM (que exige uma), e para qualquer provider pago
-   futuro.
-5. `AddHttpClient`/`IHttpClientFactory` em `TS4Translator.Infrastructure` — hoje quem instancia
-   `OpenAICompatibleProvider` tem que criar o `HttpClient` manualmente; não crítico, mas deveria ser
-   resolvido antes da UI de Settings existir de verdade (seção 41).
+3. Edição manual persistente de tradução no Editor (hoje é somente leitura de propósito — DEC-011).
+4. Filtros e pesquisa na lista de strings do Editor (seção 30) — hoje mostra tudo, sem filtro.
+5. `AddHttpClient`/`IHttpClientFactory` em `TS4Translator.Infrastructure` — hoje `HttpClient` é um
+   singleton simples registrado direto no `App`; não crítico, mas o padrão correto para um app que vai
+   ganhar mais providers HTTP.
+6. Entidade `TranslationJob` (seção 35) — hoje "Traduzir pendentes" roda tudo de uma vez, sem
+   checkpoint/retomada; para mods grandes (milhares de strings) isso vai precisar de progresso
+   persistido, não só uma chamada síncrona bloqueante.

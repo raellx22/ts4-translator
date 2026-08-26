@@ -4,115 +4,117 @@
 
 ## Current phase
 
-Fase 1 (Fundação) quase concluída; Fase 2 (Sims4 Core) com o núcleo pronto; Fase 3 (Translation Core)
-com o pipeline inteiro pronto (TokenProtector, TranslationValidator, BatchBuilder,
-TranslationOrchestrator); Fase 6 (Providers) com o primeiro provider real pronto
-(`OpenAICompatibleProvider`, nunca testado contra um servidor real de verdade — só contra HTTP falso
-em teste); Fase 7 (Translation Memory) com exact-match pronto; Project System (seção 33) com o núcleo
-pronto (`IProjectService`); **primeira tela de produto real escrita, executada de verdade e com o
-fluxo completo confirmado funcionando ponta a ponta** (Home: importar `.package` → contar STBLs →
-criar projeto → aparecer na lista de recentes). Ver DEC-010: a shell WinUI, Mica, tema, navegação, e
-agora o próprio fluxo de importação, foram confirmados com screenshots reais rodando o app como um
-pacote MSIX instalado (não via `dotnet run` — ver `docs/BUILD.md` para o procedimento). Dois bugs reais
-foram encontrados e corrigidos nesse processo: uma exceção engolida pelo `AsyncRelayCommand`, e o
-próprio bloqueio do `FileOpenPicker` (não era bug de código — era o modo de lançamento via `dotnet run`).
-Ver `docs/ROADMAP.md` para o detalhamento completo por fase.
+O caminho prático completo já funciona de ponta a ponta, verificado rodando o app instalado de
+verdade (não só compilando): **importar um `.package` → extrair e persistir cada string → abrir no
+Editor → traduzir as pendentes (via um provider compatível com OpenAI configurado em Configurações) →
+exportar um package traduzido com validação de round-trip real**. Ver DEC-011 para o relato completo
+da verificação.
+
+O único elo desse caminho ainda não exercitado com dados reais é a chamada HTTP de tradução em si —
+foi testada com HTTP falso (91 testes) e o fallback "sem provider configurado" foi confirmado no app
+de verdade, mas nenhuma sessão até agora teve acesso a um LM Studio local rodando ou a uma API key da
+NVIDIA para testar a tradução acontecendo de fato. Essa é a próxima verificação prioritária.
+
+Fora do caminho principal: Fase 0/1/2 essencialmente concluídas; Fase 3 (Translation Core) com o
+pipeline inteiro pronto; Fase 6 com o primeiro provider real (`OpenAICompatibleProvider`); Fase 7
+(Translation Memory) com exact-match pronto; Fase 9 (Editor) e Fase 11 (Export) com a primeira versão
+pronta e verificada. Ver `docs/ROADMAP.md` para o detalhamento completo por fase.
 
 ## Completed
 
-- Solution `.sln` (formato clássico — DEC-002) com 7 projetos `src/` + 4 `tests/`, todos compilando
+- Solution `.sln` (formato clássico — DEC-002) com 7 projetos `src/` + 5 `tests/`, todos compilando
   limpo em x64 com `TreatWarningsAsErrors`.
 - Stack fixado e documentado (DEC-001): .NET SDK 10.0.400, Windows App SDK 2.4.0,
-  LlamaLogic.Packages 3.8.2, CommunityToolkit.Mvvm 8.4.2 (referenciado, ainda não usado em nenhum
-  ViewModel real), Microsoft.Extensions.DependencyInjection 10.0.11, EF Core/Sqlite 10.0.11.
-- `TokenProtector` (Translation) + `ITokenProtector` (Core) — 23 testes.
-- `TranslationValidator` (Translation) + `ITranslationValidator` (Core) — 12 testes.
-- `Sims4PackageService`/`SmartSimStringTableService` (Sims4) + `IPackageService`/`IStringTableService`
-  (Core) — 11 testes com packages sintéticos, locale PT-BR/EN/FR confirmado por teste real, não por
-  suposição (ver DEC-006 — a doc XML do LlamaLogic estava errada sobre o tipo de exceção lançado).
-- `SqliteTranslationMemory` (Persistence) + `ITranslationMemory` (Core), EF Core com migration real
-  `InitialCreate` — 5 testes de integração.
-- `ITranslationProvider`/`ProviderCapabilities`/`ITranslationOrchestrator` (Core) +
-  `BatchBuilder`/`TranslationOrchestrator` (Translation) — pipeline completo protege→provider→
-  reconcilia por ID→restaura→valida→memory. 14 testes (6 BatchBuilder + 8 orquestrador), com
-  providers/memory falsos.
-- `OpenAICompatibleProvider` (Providers) — primeiro `ITranslationProvider` real: um
-  `POST /chat/completions` por batch contra qualquer endpoint compatível com OpenAI (LM Studio local,
-  potencialmente NVIDIA NIM), com recuperação controlada de JSON truncado/malformado da resposta do
-  modelo. 9 testes contra um `HttpMessageHandler` falso — **nunca testado contra um servidor real**.
-- `IProjectService`/`EfProjectService` (Persistence) — CRUD de projetos (nome, arquivos `.package`,
-  par de locales), EF Core com migration real `AddProject`, cascade delete dos arquivos-fonte.
-  7 testes de integração contra SQLite real; um deles pegou um bug real do provider SQLite do EF Core
-  (não suporta `ORDER BY` em coluna `DateTimeOffset` — corrigido com ordenação client-side, DEC-008).
-- `HomePage`/`HomePageViewModel` (App) — primeira tela de produto: importar `.package` via
-  `IPathPickerService`, criar `TranslationProject`, contar STBLs via `IPackageService`, listar
-  projetos recentes. Resolvido por service locator estático (`App.Services`), não injeção de
-  construtor — `Frame.Navigate(Type)` do WinUI não suporta isso nativamente (DEC-009). **Fluxo
-  completo confirmado funcionando de ponta a ponta** rodando o app como MSIX instalado: seletor de
-  arquivo abre, arquivo `.package` sintético selecionado, STBL contada corretamente, projeto criado e
-  exibido na lista de recentes — com screenshot real (ver DEC-010, `docs/BUILD.md`).
+  LlamaLogic.Packages 3.8.2, CommunityToolkit.Mvvm 8.4.2, Microsoft.Extensions.DependencyInjection
+  10.0.11, EF Core/Sqlite 10.0.11.
+- `TokenProtector`/`TranslationValidator`/`BatchBuilder`/`TranslationOrchestrator` (Translation) — o
+  pipeline de tradução inteiro: protege tokens → chama o provider → reconcilia por ID → restaura →
+  valida → grava em translation memory. 84 testes cobrindo essas quatro peças.
+- `Sims4PackageService`/`SmartSimStringTableService` (Sims4) — leitura/escrita real de STBL,
+  `WriteStringTablesAsync` escrevendo múltiplas STBLs num único package de saída (necessário para
+  exportação real de projetos com mais de uma STBL de origem), locale confirmado por teste real, não
+  por suposição (DEC-006). 13 testes com packages sintéticos.
+- `SqliteTranslationMemory`, `EfProjectService`, `EfProjectStringService`, `EfProviderConfigurationService`
+  (Persistence) — SQLite via EF Core, 4 migrations reais (`InitialCreate`, `AddProject`,
+  `AddProjectString`, `AddProviderConfiguration`). 28 testes de integração contra SQLite real; um
+  pegou um bug real do provider SQLite do EF Core (`ORDER BY` em `DateTimeOffset`, DEC-008).
+- `DpapiSecretStore`/`ISecretStore` (Infrastructure) — API key de provider criptografada via DPAPI do
+  Windows, nunca em texto puro nem no SQLite (seção 19). 6 testes com criptografia real, em diretório
+  isolado.
+- `OpenAICompatibleProvider`/`OpenAICompatibleProviderFactory` (Providers) — provider real
+  (LM Studio, NVIDIA NIM, qualquer endpoint compatível com OpenAI), construído a partir da
+  configuração salva pelo usuário. 11 testes contra um `HttpMessageHandler` falso — **nunca exercitado
+  contra um servidor real**.
+- `HomePage`, `EditorPage`, `SettingsPage` (App) — as três telas de produto reais. Fluxo completo
+  (importar → extrair → traduzir/exportar) confirmado rodando o app instalado como MSIX, com um
+  `.package` sintético: 4 strings extraídas e persistidas, editor mostrando todas com status,
+  "Traduzir pendentes" mostrando a mensagem correta sem provider configurado, "Exportar" gerando e
+  validando (round-trip real) um package traduzido de verdade. Ver DEC-011.
+- Navegação Home → Editor com parâmetro (`Frame.Navigate(typeof(EditorPage), project.Id)`), resolvida
+  no `OnNavigatedTo` da página — primeira navegação com parâmetro do app.
 - `AppDataPaths` (Infrastructure) resolvendo `%LOCALAPPDATA%\TS4Translator\{Data,Logs,Cache,Models}`.
-- Composition root em `App.xaml.cs`: `ServiceCollection` com `AddSims4Services()` +
-  `AddTranslationServices()` + `AddPersistenceServices(...)`, migration aplicada no `OnLaunched`.
-- Shell WinUI (NavigationView, Mica, título estendido) a partir do template `winui-navview` — sem
-  telas de produto ainda.
-- Toda decisão relevante registrada em `docs/DECISIONS.md` (DEC-001 a DEC-010).
+- Composition root em `App.xaml.cs` com todos os serviços registrados (`AddSims4Services`,
+  `AddTranslationServices`, `AddPersistenceServices`, `AddInfrastructureServices`,
+  `AddProviderServices`), migration aplicada no `OnLaunched`.
+- Shell WinUI (NavigationView, Mica, título estendido) a partir do template `winui-navview`.
+- Toda decisão relevante registrada em `docs/DECISIONS.md` (DEC-001 a DEC-011).
 
 ## In progress
 
-Nada em edição neste momento — todo trabalho iniciado nesta sessão foi levado a um estado compilável
-e testado antes de passar para o próximo item.
+Nada em edição neste momento — todo trabalho desta sessão foi levado a um estado compilável, testado,
+e verificado rodando o app de verdade antes de parar.
 
 ## Blocked
 
-Nada bloqueado por motivo interno ao app no momento. O bloqueio de verificação do `FileOpenPicker`
-documentado em versões anteriores deste arquivo foi resolvido — não era bug de código, era o modo de
-lançamento via `dotnet run` (ver DEC-010, `docs/BUILD.md`). Dois itens têm **incerteza de fato
-pendente de verificação externa**:
+Nada bloqueado por motivo interno ao app. Três itens têm **incerteza de fato pendente de verificação
+externa** (não são bloqueios de código, são coisas que só um teste com infraestrutura real resolve):
 
-1. Formato exato do prompt esperado por `nvidia/riva-translate-4b-instruct-v2` — duas fontes
+1. **A tradução via `OpenAICompatibleProvider` nunca rodou contra um servidor real** — nem LM Studio
+   local nem NVIDIA NIM. É a lacuna mais importante a fechar antes de considerar o caminho principal
+   totalmente verificado. Ver `docs/HANDOFF.md`.
+2. Formato exato do prompt esperado por `nvidia/riva-translate-4b-instruct-v2` — duas fontes
    discordam (playground ao vivo vs. NGC catalog). Precisa de uma API key NVIDIA real para testar.
-2. Nenhuma receita testada de empacotar Argos Translate sem exigir Python do usuário — vai exigir
+3. Nenhuma receita testada de empacotar Argos Translate sem exigir Python do usuário — vai exigir
    prototipagem própria (ver Fase 4 no roadmap) antes de comprometer a arquitetura.
 
 ## Known issues
 
-- `OpenAICompatibleProvider` has never been exercised against a real server (LM Studio, NIM, or
-  otherwise) — only against a fake `HttpMessageHandler` in tests. The request/response shape follows
-  the standard OpenAI chat-completions contract, but real-world quirks (server timeouts, chunked
-  encoding, non-standard headers) are unverified.
-
-- CA1707 (underscore em identificadores) suprimido em `tests/` (DEC-003) — intencional, não é dívida
-  técnica.
+- `OpenAICompatibleProvider` nunca foi exercitado contra um servidor real — só contra
+  `HttpMessageHandler` falso em teste. O formato de requisição/resposta segue o contrato padrão de
+  chat-completions da OpenAI, mas particularidades de um servidor real (timeouts, encoding chunked,
+  headers não padrão) não foram verificadas.
+- Edição manual de tradução no Editor é somente leitura de propósito (DEC-011) — implementar como
+  editável sem persistir seria pior que não ter o campo.
+- CA1707 (underscore em identificadores) suprimido em `tests/` (DEC-003) — intencional.
 - CA1861 suprimido em todo o projeto `TS4Translator.Persistence` (DEC-007) por causa do código gerado
   pelo `dotnet ef migrations add` — intencional.
 - Regex de tags de markup do `TokenProtector` (`<...>`) é genérico o suficiente para, em teoria,
   capturar um "menor que" seguido de "maior que" que não seja markup real — nunca testado contra STBL
-  real do jogo (só contra exemplos sintéticos da própria suíte de testes). Repriorizar se aparecer em
-  mods reais.
+  real do jogo (só contra exemplos sintéticos da própria suíte de testes e um `.package` sintético de
+  verificação manual). Repriorizar se aparecer em mods reais.
 
 ## Tests currently failing
 
-Nenhum. 81 testes automatizados passando (`dotnet test TS4Translator.sln --filter "FullyQualifiedName!~TS4Translator.App"`).
+Nenhum. 101 testes automatizados passando (`dotnet test TS4Translator.sln --filter "FullyQualifiedName!~TS4Translator.App"`).
 `TS4Translator.App` não tem testes automatizados de UI (não há framework de UI test configurado), mas
-o fluxo principal da `HomePage` foi verificado manualmente com sucesso, rodando o app de verdade —
-ver DEC-010.
+o fluxo completo (importar → extrair → editor → exportar com round-trip) foi verificado manualmente
+com sucesso, rodando o app de verdade — ver DEC-011.
 
 ## Commands to build
 
 Ver `docs/BUILD.md` — inclui build/test normais, como rodar via `dotnet run` para desenvolvimento do
 dia a dia, e o procedimento completo (empacotar MSIX, assinar, instalar) necessário para testar
-qualquer fluxo que use `FileOpenPicker` ou outra API mediada por broker do Windows.
+qualquer fluxo que use `FileOpenPicker`/`FileSavePicker` ou outra API mediada por broker do Windows.
 
 ## How to run the application
 
 Ver `docs/BUILD.md`. Resumo: `dotnet run --project src\TS4Translator.App\TS4Translator.App.csproj -p:Platform=x64`
-para desenvolvimento normal; empacotar como MSIX e instalar para testar o picker de arquivos.
+para desenvolvimento normal; empacotar como MSIX e instalar para testar picker de arquivo/salvar.
 
 ## Next milestones
 
 Ver "Próximas tarefas concretas" no final de `docs/ROADMAP.md`. Em ordem:
-1. Drag-and-drop de arquivos na `HomePage` (seção 34).
-2. Entidade `StringEntry` (nova migration) — strings extraídas ligadas a um `Project`.
-3. Testar `OpenAICompatibleProvider` contra um LM Studio local de verdade.
-4. Armazenamento seguro de API key (Windows Credential Manager/DPAPI, seção 19).
+1. Testar a tradução com um provider real (LM Studio ou NVIDIA NIM).
+2. Drag-and-drop de arquivos na `HomePage` (seção 34).
+3. Edição manual persistente de tradução no Editor.
+4. Filtros e pesquisa na lista de strings do Editor.
