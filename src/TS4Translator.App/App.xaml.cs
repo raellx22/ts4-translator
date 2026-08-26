@@ -56,6 +56,7 @@ public partial class App : Application
             .AddTransient<HomePageViewModel>()
             .AddTransient<EditorPageViewModel>()
             .AddTransient<SettingsPageViewModel>()
+            .AddTransient<GlossaryPageViewModel>()
             .BuildServiceProvider();
         Services = _services;
     }

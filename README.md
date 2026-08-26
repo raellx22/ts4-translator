@@ -29,9 +29,9 @@ Implementado e testado até agora (121 testes automatizados, todos passando):
   contra o provider configurado; edição manual da tradução é salva com histórico; "Exportar" gera um
   package traduzido e só reporta sucesso depois de reabrir o arquivo e validar cada string (round-trip
   real, seção 28 do brief).
-- **Glossário**: termos globais ou por projeto (nomes próprios, marcas — nunca traduzir, ou sempre
-  traduzir de um jeito específico), aplicados automaticamente durante a tradução. CRUD hoje só via
-  serviço (`IGlossaryService`) — ainda sem tela própria na UI.
+- **Glossário**: termos globais (nomes próprios, marcas — nunca traduzir, ou sempre traduzir de um
+  jeito específico), aplicados automaticamente durante a tradução. Tela própria para adicionar/remover
+  termos globais; termos por projeto existem no serviço mas ainda sem UI dedicada.
 - **Configurações**: cadastra endpoint/modelo/API key de um provider compatível com OpenAI, com botão
   "Testar conexão". A API key é criptografada via DPAPI do Windows, nunca em texto puro.
 - Fluxo completo confirmado rodando o app instalado como MSIX, com um `.package` sintético — ver

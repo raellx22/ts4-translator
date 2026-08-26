@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<Page
+    x:Class="TS4Translator.App.Pages.GlossaryPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:local="using:TS4Translator.App.Pages"
+    xmlns:glossary="using:TS4Translator.Core.Glossary"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    x:Name="Root"
+    mc:Ignorable="d">
+
+    <Grid Padding="24,16,24,16" RowSpacing="12" MaxWidth="800" HorizontalAlignment="Left">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <TextBlock Style="{StaticResource TitleTextBlockStyle}" Text="Glossário" />
+
+        <TextBlock
+            Grid.Row="1"
+            Opacity="0.7"
+            Text="Termos globais aplicados automaticamente a qualquer tradução, em qualquer projeto - nomes próprios, marcas, ou termos que devem sempre virar (ou nunca virar) uma tradução específica."
+            TextWrapping="Wrap" />
+
+        <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Bottom">
+            <TextBox Width="220" Header="Original" Text="{x:Bind ViewModel.NewOriginal, Mode=TwoWay}" />
+            <TextBox Width="220" Header="Tradução" Text="{x:Bind ViewModel.NewTranslation, Mode=TwoWay}" />
+            <CheckBox Content="Nunca traduzir" IsChecked="{x:Bind ViewModel.NewNeverTranslate, Mode=TwoWay}" />
+            <CheckBox Content="Diferenciar maiúsculas" IsChecked="{x:Bind ViewModel.NewCaseSensitive, Mode=TwoWay}" />
+            <Button Command="{x:Bind ViewModel.AddTermCommand}" Content="Adicionar" />
+            <ProgressRing
+                Width="20"
+                Height="20"
+                IsActive="{x:Bind ViewModel.IsBusy, Mode=OneWay}" />
+        </StackPanel>
+
+        <TextBlock
+            Grid.Row="3"
+            Text="{x:Bind ViewModel.StatusText, Mode=OneWay}"
+            TextWrapping="Wrap" />
+
+        <ListView Grid.Row="4" ItemsSource="{x:Bind ViewModel.Terms}">
+            <ListView.ItemTemplate>
+                <DataTemplate x:DataType="glossary:GlossaryTerm">
+                    <Grid Padding="0,8,0,8" ColumnSpacing="16">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="140" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0" Text="{x:Bind Original}" TextWrapping="Wrap" />
+                        <TextBlock Grid.Column="1" Text="{x:Bind Translation}" TextWrapping="Wrap" />
+                        <TextBlock
+                            Grid.Column="2"
+                            FontSize="12"
+                            Opacity="0.7"
+                            Text="{x:Bind NeverTranslate}" />
+                        <Button
+                            Grid.Column="3"
+                            Click="RemoveTermButton_Click"
+                            Content="Remover"
+                            Tag="{x:Bind}" />
+                    </Grid>
+                </DataTemplate>
+            </ListView.ItemTemplate>
+        </ListView>
+    </Grid>
+</Page>

@@ -487,3 +487,46 @@ precisaria de um outro mecanismo).
 `glossaryTerms` (`SupportsGlossary: true`) ou o ignora (`false`) — não há comportamento padrão
 implícito. UI ainda não tem uma tela de gerenciamento de glossário (CRUD só existe via `IGlossaryService`/testes
 de integração) — é o próximo item natural de UI a fazer.
+
+---
+
+## DEC-013 — Tela de Glossário: só escopo global por enquanto; bug real de binding encontrado e corrigido ao clicar de verdade
+
+**Contexto:** Seguindo o item "próximo" deixado pela DEC-012, foi adicionada `GlossaryPage`/`GlossaryPageViewModel`
+(nova entrada de navegação "Glossário" em `MainWindow.xaml`), a primeira UI para `IGlossaryService`.
+
+**Decisão de escopo:** A página gerencia apenas termos **globais** (`AddTermAsync(..., projectId: null)`,
+`GetTermsAsync(projectId: null)`) — a forma mais comum de uso (nomes próprios, marcas que valem para
+qualquer mod). Termos por projeto continuam possíveis via `IGlossaryService` (o parâmetro existe), mas
+sem UI dedicada ainda; adicionar isso exigiria a página saber em qual projeto o usuário está, o que
+significa passá-la como parâmetro de navegação a partir do Editor — não fazer isso agora seria
+sub-escopar a tarefa, mas fazer teria dobrado o tamanho da mudança para um caso de uso secundário.
+
+**Bug real encontrado ao rodar o app de verdade (não hipotético):** a primeira versão do botão "Remover"
+de cada linha usava `Command="{Binding ElementName=Root, Path=ViewModel.DeleteTermCommand}"` (Binding
+clássico, não `x:Bind`, para alcançar o ViewModel da página a partir de dentro do `DataTemplate` do
+`ListView`, cujo `x:DataType` é `GlossaryTerm`, não a página). Ao testar de verdade — rodar o app via
+`dotnet run`, navegar até Glossário via UI Automation (`SelectionItemPattern`), adicionar um termo,
+clicar "Remover" via `InvokePattern` — o clique não fazia nada: o `ListItem` do termo continuava lá,
+sem nenhuma mensagem de erro. `ElementName` dentro de um `DataTemplate` de `ListView` em WinUI 3 não
+resolveu o elemento `Root` de fora do template de forma confiável (mesmo com `x:Name="Root"` na `Page`).
+
+**Corrigido:** trocado para um `Click` no code-behind (`GlossaryPage.xaml.cs`), lendo o item pelo
+`Tag="{x:Bind}"` do próprio botão (`sender is FrameworkElement { Tag: GlossaryTerm term }`) e chamando
+`ViewModel.DeleteTermCommand.ExecuteAsync(term)` — o mesmo padrão que `EditorPage.xaml.cs` já usa para o
+`LostFocus` da tradução. Reverificado depois da correção: adicionar termo → aparece na lista → navegar
+Home→Glossário (força `LoadAsync` de novo, prova que persistiu no SQLite, não só em memória) → termo
+ainda lá → clicar "Remover" → mensagem "Termo removido" aparece e o item some → navegar Home→Glossário
+de novo → item continua ausente (prova que o `DELETE` chegou no banco, não só na lista em memória).
+
+**Motivo para registrar isto:** é a segunda vez nesta sessão (a primeira foi o `AsyncRelayCommand`
+engolindo exceção, DEC-010) que um bug só apareceu ao clicar de verdade, não ao compilar. Reforça que
+`Binding`/`ElementName` clássico atravessando a fronteira de um `DataTemplate` de lista, em WinUI 3, não
+é confiável — preferir sempre `Tag="{x:Bind}"` + evento de code-behind para esse padrão específico
+(item de uma lista precisando invocar um comando do ViewModel da página), como já era feito em
+`EditorPage`.
+
+**Consequências:** Qualquer botão futuro dentro de um `ItemTemplate` de `ListView`/`GridView` que precise
+chamar um comando do ViewModel da página (não do item) deve usar `Tag="{x:Bind}"` + `Click` no
+code-behind, não `Binding ElementName=...Command`. Verificado rodando o app de verdade (não só
+compilado) — ver método em `docs/HANDOFF.md` sobre como fazer isso com UI Automation via PowerShell.

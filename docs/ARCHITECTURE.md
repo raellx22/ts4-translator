@@ -176,6 +176,11 @@ uma vez antes de ativar a janela. `App.Services` (um service locator estático �
 - **Settings** (`Pages/SettingsPage.xaml` + `ViewModels/SettingsPageViewModel.cs`) — formulário para
   configurar o provider OpenAI-compatible ativo (nome/endpoint/modelo/API key) via
   `IProviderConfigurationService`, com botão "Testar conexão" que chama o provider de verdade.
+- **Glossário** (`Pages/GlossaryPage.xaml` + `ViewModels/GlossaryPageViewModel.cs`) — adicionar/listar/
+  remover termos **globais** do glossário via `IGlossaryService` (termos por projeto ainda não têm UI —
+  DEC-013). O botão "Remover" de cada linha usa `Tag="{x:Bind}"` + `Click` no code-behind, não
+  `Binding ElementName=...Command` — essa segunda forma não resolveu de forma confiável dentro do
+  `ItemTemplate` de uma `ListView` (bug real encontrado rodando o app, corrigido — ver DEC-013).
 - **About** — ainda o placeholder do template, sem lógica.
 
 **Executado e clicado de verdade, fluxo completo confirmado** (DEC-010) — Mica, tema, navegação, e a

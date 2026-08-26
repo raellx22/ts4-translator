@@ -59,7 +59,8 @@ o conjunto de itens, não o primeiro que funcionar.
 - [x] Glossário (seção 23) — `IGlossaryService`/`EfGlossaryService`, termos globais ou por projeto,
   `NeverTranslate`, propagado por `ITranslationOrchestrator`/`ITranslationProvider` e filtrado por
   batch (só termos relevantes ao lote são enviados). `OpenAICompatibleProvider` inclui o glossário no
-  prompt. Ver DEC-012. Falta apenas a tela de UI para gerenciar termos (CRUD só via serviço/testes).
+  prompt. Ver DEC-012. `GlossaryPage` cobre o escopo global (DEC-013); termos por projeto ainda não
+  têm UI dedicada.
 - [ ] Retry/backoff/rate-limit/pause/resume/checkpoint (seção 11, resto) — não iniciado; depende de
   `TranslationJob` existir como entidade persistida (seção 35), o que também não existe ainda.
 - [ ] Translation Profiles (seção 22) — não iniciado; o orquestrador hoje não aceita nenhum prompt/estilo
@@ -166,8 +167,9 @@ real nesta sessão (sem chave disponível). Antes de expor isso como "preset Riv
    pipeline foi verificado com o fallback "sem provider" e com HTTP falso em teste, mas o caminho
    HTTP real de ponta a ponta dentro do app (`SettingsPage` → salvar config → `EditorPage` → "Traduzir
    pendentes" → resposta real chegando) nunca rodou. Ver `docs/HANDOFF.md`.
-2. Tela de UI para gerenciar o Glossário (`IGlossaryService` já existe e está integrado ao pipeline —
-   DEC-012 — mas não há tela para adicionar/editar/remover termos; hoje só é testável via serviço).
+2. UI de glossário por projeto (`GlossaryPage` — DEC-013 — cobre só o escopo global hoje; termos
+   específicos de um projeto exigiriam passar o `projectId` como parâmetro de navegação, igual ao
+   Editor).
 3. Preset "NVIDIA NIM"/Riva Translate em `SettingsPage` (ver Fase 5) e `ProviderConfiguration` com
    suporte a múltiplos perfis salvos, não só um endpoint ativo.
 4. Translation Profiles (seção 22) — prompt/estilo customizado por projeto, wired em

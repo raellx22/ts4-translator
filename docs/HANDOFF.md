@@ -19,12 +19,14 @@ Ver `docs/STATUS.md` para o snapshot exato (atualizado junto com este arquivo). 
 Sims4 Core, Translation Core (TokenProtector/TranslationValidator/BatchBuilder/TranslationOrchestrator),
 Translation Memory exact-match, Project System, extração/persistência de strings
 (`IProjectStringService`), configuração de provider com API key segura via DPAPI
-(`IProviderConfigurationService`/`ISecretStore`), as três telas de produto (`HomePage`, `EditorPage`,
-`SettingsPage`), e — nesta rodada mais recente (DEC-012) — edição manual persistente com histórico,
-drag-and-drop de `.package` na Home com diff de reimportação, e Glossário integrado ao pipeline de
-tradução — tudo pronto e testado (121 testes). **A única peça do caminho principal ainda não exercitada
-com dados reais é a chamada HTTP de tradução em si** (nunca rodou contra um LM Studio ou NVIDIA NIM de
-verdade, só contra HTTP falso em teste e contra o fallback "sem provider configurado" no app real).
+(`IProviderConfigurationService`/`ISecretStore`), as quatro telas de produto (`HomePage`, `EditorPage`,
+`SettingsPage`, `GlossaryPage`), e — nesta rodada mais recente (DEC-012/DEC-013) — edição manual
+persistente com histórico, drag-and-drop de `.package` na Home com diff de reimportação, e Glossário
+(serviço + UI de escopo global) integrado ao pipeline de tradução — tudo pronto e testado (121 testes
+automatizados + `GlossaryPage` verificada rodando o app de verdade). **A única peça do caminho principal
+ainda não exercitada com dados reais é a chamada HTTP de tradução em si** (nunca rodou contra um LM
+Studio ou NVIDIA NIM de verdade, só contra HTTP falso em teste e contra o fallback "sem provider
+configurado" no app real).
 
 ## What has already been implemented
 
@@ -58,18 +60,18 @@ API key da NVIDIA NIM):
 4. Se algo falhar, o `StatusText` do Editor já mostra tipo+mensagem da exceção (`EditorPageViewModel.TranslateAsync`)
    — comece por aí antes de instrumentar mais.
 
-Depois de confirmar isso, o próximo item real de código é uma tela de UI para gerenciar o Glossário —
-`IGlossaryService` (`AddTermAsync`/`GetTermsAsync`/`DeleteTermAsync`) já existe e já está integrado ao
-pipeline de tradução (DEC-012), mas não há nenhuma página que o exponha; hoje um termo só pode ser
-criado chamando o serviço diretamente (ou em teste). Seguir o mesmo padrão de `SettingsPage` (ViewModel
-resolvido via `App.Services`, `ObservableCollection` para a lista, comandos para adicionar/remover).
+Depois de confirmar isso, o próximo item real de código é estender `GlossaryPage` (DEC-013) para
+termos por projeto, não só globais — hoje ela só chama `IGlossaryService` com `projectId: null`. Isso
+exigiria navegar até lá a partir do Editor passando `project.Id` como parâmetro (mesmo padrão de
+`Frame.Navigate(typeof(EditorPage), project.Id)` já usado), e a página teria que aceitar um `Guid?`
+opcional em `OnNavigatedTo`.
 
 Depois disso, seguir a lista "Próximas tarefas concretas" no fim de `docs/ROADMAP.md`.
 
 ## Important files
 
 - `docs/DECISIONS.md` — leia antes de mudar qualquer versão de pacote ou formato de arquivo; a
-  maioria das escolhas não óbvias já foi justificada ali (DEC-001 a DEC-012).
+  maioria das escolhas não óbvias já foi justificada ali (DEC-001 a DEC-013).
 - `docs/BUILD.md` — como compilar, testar, rodar, e (importante) como empacotar/instalar um MSIX
   local para testar qualquer fluxo que use `FileOpenPicker` ou outra API mediada por broker do
   Windows. `dotnet run` sozinho **não** funciona para esses casos (DEC-010) — não gaste tempo
@@ -116,6 +118,10 @@ Todas em `docs/DECISIONS.md`, mas as mais fáceis de "corrigir" por engano:
   — um campo que edita e não salva é pior do que não ter o campo (DEC-011; já resolvido em DEC-012).
 - **Não** fazer o `TranslationOrchestrator` enviar o glossário inteiro a cada chamada de provider — só
   os termos cujo `GlossaryTerm.AppearsIn(text)` bate com o batch específico (DEC-012, seção 23 do brief).
+- **Não** usar `Binding ElementName=...` para um botão dentro de um `ItemTemplate` de `ListView` chamar
+  um comando do ViewModel da página — não resolve de forma confiável em WinUI 3 (DEC-013, descoberto
+  rodando o app de verdade). Usar `Tag="{x:Bind}"` + `Click` no code-behind, como `GlossaryPage`/
+  `EditorPage` já fazem.
 
 ## Known bugs
 

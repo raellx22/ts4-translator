@@ -61,14 +61,18 @@ pronta e verificada. Ver `docs/ROADMAP.md` para o detalhamento completo por fase
   origem mudou é marcada `NeedsReview` em vez de descartada. Ver DEC-012.
 - Glossário (`IGlossaryService`/`EfGlossaryService`) integrado ao pipeline de tradução: termos globais
   ou por projeto, `NeverTranslate`, filtrados por batch (só os relevantes ao texto daquele lote são
-  enviados ao provider) e incluídos no prompt do `OpenAICompatibleProvider`. Ainda sem tela de UI para
-  gerenciar termos (CRUD só via serviço/testes). Ver DEC-012.
+  enviados ao provider) e incluídos no prompt do `OpenAICompatibleProvider`. Ver DEC-012.
+- `GlossaryPage`/`GlossaryPageViewModel` (App) — tela para adicionar/listar/remover termos globais do
+  glossário, nova entrada "Glossário" na navegação. Verificada rodando o app de verdade via UI
+  Automation (adicionar → persiste após reload → remover → persiste a remoção após reload); um bug
+  real de binding no botão "Remover" foi encontrado e corrigido nesse processo. Termos por projeto
+  ainda não têm UI (só a global). Ver DEC-013.
 - `AppDataPaths` (Infrastructure) resolvendo `%LOCALAPPDATA%\TS4Translator\{Data,Logs,Cache,Models}`.
 - Composition root em `App.xaml.cs` com todos os serviços registrados (`AddSims4Services`,
   `AddTranslationServices`, `AddPersistenceServices`, `AddInfrastructureServices`,
   `AddProviderServices`), migration aplicada no `OnLaunched`.
 - Shell WinUI (NavigationView, Mica, título estendido) a partir do template `winui-navview`.
-- Toda decisão relevante registrada em `docs/DECISIONS.md` (DEC-001 a DEC-012).
+- Toda decisão relevante registrada em `docs/DECISIONS.md` (DEC-001 a DEC-013).
 
 ## In progress
 
@@ -108,10 +112,11 @@ Nenhum. 121 testes automatizados passando (`dotnet test TS4Translator.sln --filt
 `TS4Translator.App` não tem testes automatizados de UI (não há framework de UI test configurado), mas
 o fluxo completo (importar → extrair → editor → exportar com round-trip) foi verificado manualmente
 com sucesso, rodando o app de verdade — ver DEC-011. As features desta rodada (edição manual/histórico,
-drag-and-drop, diff de reimportação, glossário — DEC-012) foram cobertas por teste automatizado, mas
-**não** re-verificadas rodando o app instalado, por instrução explícita do usuário: ele vai avaliar e
-testar tudo pessoalmente no ambiente real depois desta conclusão, e qualquer problema encontrado entra
-numa rodada de correção separada.
+drag-and-drop, diff de reimportação, glossário — DEC-012) foram cobertas por teste automatizado; a
+tela de Glossário (DEC-013) também foi verificada rodando o app de verdade. As demais telas novas
+(edição manual no Editor, drag-and-drop na Home) **não** foram re-verificadas rodando o app desta vez,
+por instrução explícita do usuário: ele vai avaliar e testar tudo pessoalmente no ambiente real depois
+desta conclusão, e qualquer problema encontrado entra numa rodada de correção separada.
 
 ## Commands to build
 
@@ -128,6 +133,6 @@ para desenvolvimento normal; empacotar como MSIX e instalar para testar picker d
 
 Ver "Próximas tarefas concretas" no final de `docs/ROADMAP.md`. Em ordem:
 1. Testar a tradução com um provider real (LM Studio ou NVIDIA NIM) — ainda pendente, ver DEC-011.
-2. Tela de UI para gerenciar termos do Glossário (CRUD hoje só existe via `IGlossaryService`).
+2. UI de glossário por projeto (hoje só o escopo global tem tela — DEC-013).
 3. Preset NVIDIA NIM em Configurações, Translation Profiles, fuzzy matching em Translation Memory.
 4. Reorganizar `SettingsPage` em abas reais (seção 41).
