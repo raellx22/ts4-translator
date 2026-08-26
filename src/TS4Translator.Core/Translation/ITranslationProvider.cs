@@ -21,10 +21,16 @@ public interface ITranslationProvider
     /// glossary). A provider whose <see cref="ProviderCapabilities.SupportsGlossary"/> is false is
     /// free to ignore this.
     /// </param>
+    /// <param name="customInstructions">
+    /// Free-text style/tone instructions from the project's Translation Profile (brief section 22),
+    /// e.g. "keep a playful tone" or "use informal você, not tu". A provider whose
+    /// <see cref="ProviderCapabilities.SupportsCustomPrompt"/> is false is free to ignore this.
+    /// </param>
     Task<IReadOnlyList<TranslationResultItem>> TranslateBatchAsync(
         IReadOnlyList<TranslationRequestItem> items,
         CultureInfo sourceLocale,
         CultureInfo targetLocale,
         IReadOnlyList<GlossaryTerm>? glossaryTerms = null,
+        string? customInstructions = null,
         CancellationToken cancellationToken = default);
 }

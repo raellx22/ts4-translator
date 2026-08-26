@@ -3,6 +3,7 @@ using System.Globalization;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using TS4Translator.App.Services;
+using TS4Translator.Core.Glossary;
 using TS4Translator.Core.Packages;
 using TS4Translator.Core.Projects;
 using TS4Translator.Core.Translation;
@@ -19,6 +20,7 @@ public sealed partial class EditorPageViewModel(
     IProjectStringService projectStringService,
     ITranslationOrchestrator translationOrchestrator,
     ITranslationProviderFactory providerFactory,
+    IGlossaryService glossaryService,
     IPackageService packageService,
     IStringTableService stringTableService,
     IPathPickerService pathPicker) : ObservableObject
@@ -37,6 +39,10 @@ public sealed partial class EditorPageViewModel(
 
     [ObservableProperty]
     public partial string SelectedFilter { get; set; } = AllFilter;
+
+    /// <summary>Free-text style/tone instructions for this project's translations (brief section 22).</summary>
+    [ObservableProperty]
+    public partial string CustomInstructions { get; set; } = string.Empty;
 
     private const string AllFilter = "Todas";
 
@@ -89,6 +95,7 @@ public sealed partial class EditorPageViewModel(
         }
 
         ProjectName = _project.Name;
+        CustomInstructions = _project.CustomInstructions ?? string.Empty;
         StatusText = $"{_project.SourceLocale.Name} → {_project.TargetLocale.Name}";
 
         var entries = await projectStringService.GetStringsAsync(projectId);
@@ -111,6 +118,25 @@ public sealed partial class EditorPageViewModel(
         catch (Exception exception)
         {
             StatusText = $"Falha ao salvar edição ({exception.GetType().Name}): {exception.Message}";
+        }
+    }
+
+    [RelayCommand]
+    private async Task SaveCustomInstructionsAsync()
+    {
+        if (_project is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await projectService.UpdateCustomInstructionsAsync(_project.Id, CustomInstructions);
+            StatusText = "Instruções de tradução salvas.";
+        }
+        catch (Exception exception)
+        {
+            StatusText = $"Falha ao salvar instruções ({exception.GetType().Name}): {exception.Message}";
         }
     }
 
@@ -147,7 +173,9 @@ public sealed partial class EditorPageViewModel(
                 .Select(e => new TranslationSourceItem(e.Id.ToString(CultureInfo.InvariantCulture), e.OriginalText))
                 .ToList();
 
-            var outcomes = await translationOrchestrator.TranslateAsync(items, provider, _project.SourceLocale, _project.TargetLocale);
+            var glossaryTerms = await glossaryService.GetTermsAsync(_project.Id);
+            var outcomes = await translationOrchestrator.TranslateAsync(
+                items, provider, _project.SourceLocale, _project.TargetLocale, glossaryTerms, _project.CustomInstructions);
 
             var succeeded = 0;
             var needsReview = 0;

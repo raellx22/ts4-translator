@@ -70,12 +70,19 @@ pronta e verificada. Ver `docs/ROADMAP.md` para o detalhamento completo por fase
 - Preset "NVIDIA NIM" em Configurações — preenche endpoint/model conhecidos com um clique, sem afirmar
   que a tradução com esse modelo já foi validada (ainda não foi, ver Fase 5 do ROADMAP). Verificado
   rodando o app de verdade. Ver DEC-014.
+- Translation Profiles (seção 22, escopo: instruções livres por projeto, não biblioteca de presets
+  nomeados) — `TranslationProject.CustomInstructions`, editável na Editor, propagado ao
+  `TranslationOrchestrator`/provider igual ao glossário. Corrigido no processo um gap real: o botão
+  "Traduzir pendentes" nunca buscava os termos do glossário para repassar ao orquestrador, apesar de
+  toda a integração de glossário (DEC-012) estar pronta e testada em todas as camadas — agora
+  `EditorPageViewModel.TranslateAsync` chama `IGlossaryService.GetTermsAsync` antes de traduzir. Ver
+  DEC-015.
 - `AppDataPaths` (Infrastructure) resolvendo `%LOCALAPPDATA%\TS4Translator\{Data,Logs,Cache,Models}`.
 - Composition root em `App.xaml.cs` com todos os serviços registrados (`AddSims4Services`,
   `AddTranslationServices`, `AddPersistenceServices`, `AddInfrastructureServices`,
   `AddProviderServices`), migration aplicada no `OnLaunched`.
 - Shell WinUI (NavigationView, Mica, título estendido) a partir do template `winui-navview`.
-- Toda decisão relevante registrada em `docs/DECISIONS.md` (DEC-001 a DEC-014).
+- Toda decisão relevante registrada em `docs/DECISIONS.md` (DEC-001 a DEC-015).
 
 ## In progress
 
@@ -111,7 +118,7 @@ externa** (não são bloqueios de código, são coisas que só um teste com infr
 
 ## Tests currently failing
 
-Nenhum. 121 testes automatizados passando (`dotnet test TS4Translator.sln --filter "FullyQualifiedName!~TS4Translator.App"`).
+Nenhum. 129 testes automatizados passando (`dotnet test TS4Translator.sln --filter "FullyQualifiedName!~TS4Translator.App"`).
 `TS4Translator.App` não tem testes automatizados de UI (não há framework de UI test configurado), mas
 o fluxo completo (importar → extrair → editor → exportar com round-trip) foi verificado manualmente
 com sucesso, rodando o app de verdade — ver DEC-011. As features desta rodada (edição manual/histórico,
@@ -137,5 +144,5 @@ para desenvolvimento normal; empacotar como MSIX e instalar para testar picker d
 Ver "Próximas tarefas concretas" no final de `docs/ROADMAP.md`. Em ordem:
 1. Testar a tradução com um provider real (LM Studio ou NVIDIA NIM) — ainda pendente, ver DEC-011.
 2. UI de glossário por projeto (hoje só o escopo global tem tela — DEC-013).
-3. Preset NVIDIA NIM em Configurações, Translation Profiles, fuzzy matching em Translation Memory.
+3. Fuzzy matching em Translation Memory e no diff de reimportação.
 4. Reorganizar `SettingsPage` em abas reais (seção 41).

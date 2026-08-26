@@ -17,5 +17,7 @@ internal sealed class ProjectRecord
 
     public DateTimeOffset UpdatedAtUtc { get; set; }
 
+    public string? CustomInstructions { get; set; }
+
     public List<ProjectSourceFileRecord> SourceFiles { get; set; } = [];
 }

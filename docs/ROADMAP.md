@@ -61,10 +61,12 @@ o conjunto de itens, não o primeiro que funcionar.
   batch (só termos relevantes ao lote são enviados). `OpenAICompatibleProvider` inclui o glossário no
   prompt. Ver DEC-012. `GlossaryPage` cobre o escopo global (DEC-013); termos por projeto ainda não
   têm UI dedicada.
+- [x] Translation Profiles (seção 22, escopo: instruções livres por projeto, não uma biblioteca de
+  presets nomeados) — `TranslationProject.CustomInstructions`, editável na Editor, propagado ao
+  orquestrador/provider igual ao glossário. `TranslationMemoryEntry.ProfileName` continua `null` (não
+  há um nome de perfil reutilizável, só texto livre por projeto) — ver DEC-015 para o porquê do escopo.
 - [ ] Retry/backoff/rate-limit/pause/resume/checkpoint (seção 11, resto) — não iniciado; depende de
   `TranslationJob` existir como entidade persistida (seção 35), o que também não existe ainda.
-- [ ] Translation Profiles (seção 22) — não iniciado; o orquestrador hoje não aceita nenhum prompt/estilo
-  customizado, e `TranslationMemoryEntry.ProfileName` fica `null` em toda tradução nova.
 - [ ] `ITranslationJobService`/estados de job (seção 35) — não iniciado.
 
 ## FASE 4 — Argos — **não iniciada**
@@ -171,17 +173,15 @@ real nesta sessão (sem chave disponível). Antes de expor isso como "preset Riv
 2. UI de glossário por projeto (`GlossaryPage` — DEC-013 — cobre só o escopo global hoje; termos
    específicos de um projeto exigiriam passar o `projectId` como parâmetro de navegação, igual ao
    Editor).
-3. Preset "NVIDIA NIM"/Riva Translate em `SettingsPage` (ver Fase 5) e `ProviderConfiguration` com
-   suporte a múltiplos perfis salvos, não só um endpoint ativo.
-4. Translation Profiles (seção 22) — prompt/estilo customizado por projeto, wired em
-   `ITranslationOrchestrator`/`ITranslationProvider` (mesma forma que o glossário foi integrado).
-5. Fuzzy matching em Translation Memory e no diff de reimportação (seção 25/26) — hoje ambos são só
+3. `ProviderConfiguration` com suporte a múltiplos perfis salvos (LM Studio + NVIDIA NIM ao mesmo
+   tempo, por exemplo), não só um endpoint ativo por vez.
+4. Fuzzy matching em Translation Memory e no diff de reimportação (seção 25/26) — hoje ambos são só
    por hash exato.
-6. `AddHttpClient`/`IHttpClientFactory` em `TS4Translator.Infrastructure` — hoje `HttpClient` é um
+5. `AddHttpClient`/`IHttpClientFactory` em `TS4Translator.Infrastructure` — hoje `HttpClient` é um
    singleton simples registrado direto no `App`; não crítico, mas o padrão correto para um app que vai
    ganhar mais providers HTTP.
-7. Entidade `TranslationJob` (seção 35) — hoje "Traduzir pendentes" roda tudo de uma vez, sem
+6. Entidade `TranslationJob` (seção 35) — hoje "Traduzir pendentes" roda tudo de uma vez, sem
    checkpoint/retomada; para mods grandes (milhares de strings) isso vai precisar de progresso
    persistido, não só uma chamada síncrona bloqueante.
-8. `SettingsPage` reorganizada em abas reais (General/Translation/Providers/Argos/NVIDIA NIM/Models/Appearance/Advanced,
+7. `SettingsPage` reorganizada em abas reais (General/Translation/Providers/Argos/NVIDIA NIM/Models/Appearance/Advanced,
    seção 41) e seletor de tema claro/escuro/sistema explícito.

@@ -23,4 +23,7 @@ public interface IProjectService
     Task<TranslationProject?> GetAsync(Guid id, CancellationToken cancellationToken = default);
 
     Task DeleteAsync(Guid id, CancellationToken cancellationToken = default);
+
+    /// <summary>Sets or clears the project's custom translation instructions (brief section 22).</summary>
+    Task UpdateCustomInstructionsAsync(Guid id, string? customInstructions, CancellationToken cancellationToken = default);
 }

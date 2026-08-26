@@ -37,6 +37,7 @@ public sealed class OpenAICompatibleProvider(HttpClient httpClient, OpenAICompat
         CultureInfo sourceLocale,
         CultureInfo targetLocale,
         IReadOnlyList<GlossaryTerm>? glossaryTerms = null,
+        string? customInstructions = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(items);
@@ -49,7 +50,7 @@ public sealed class OpenAICompatibleProvider(HttpClient httpClient, OpenAICompat
             options.Model,
             options.Temperature,
             [
-                new ChatMessage("system", BuildSystemPrompt(sourceLocale, targetLocale, glossaryTerms)),
+                new ChatMessage("system", BuildSystemPrompt(sourceLocale, targetLocale, glossaryTerms, customInstructions)),
                 new ChatMessage("user", JsonSerializer.Serialize(items.Select(i => new PromptRequestItem(i.Id, i.ProtectedText)))),
             ]);
 
@@ -73,7 +74,7 @@ public sealed class OpenAICompatibleProvider(HttpClient httpClient, OpenAICompat
             .ToList();
     }
 
-    private static string BuildSystemPrompt(CultureInfo sourceLocale, CultureInfo targetLocale, IReadOnlyList<GlossaryTerm>? glossaryTerms)
+    private static string BuildSystemPrompt(CultureInfo sourceLocale, CultureInfo targetLocale, IReadOnlyList<GlossaryTerm>? glossaryTerms, string? customInstructions)
     {
         var prompt = new StringBuilder($"""
             You are a translation engine translating video game UI text from {sourceLocale.EnglishName} to {targetLocale.EnglishName}.
@@ -93,6 +94,13 @@ public sealed class OpenAICompatibleProvider(HttpClient httpClient, OpenAICompat
                     ? $"- \"{term.Original}\" must NEVER be translated; keep it exactly as-is."
                     : $"- \"{term.Original}\" must be translated as \"{term.Translation}\".");
             }
+        }
+
+        if (!string.IsNullOrWhiteSpace(customInstructions))
+        {
+            prompt.AppendLine();
+            prompt.AppendLine("Additional style/tone instructions from the project's translator:");
+            prompt.AppendLine(customInstructions);
         }
 
         return prompt.ToString();

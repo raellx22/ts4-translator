@@ -24,6 +24,7 @@ public sealed class TranslationOrchestrator(
         CultureInfo sourceLocale,
         CultureInfo targetLocale,
         IReadOnlyList<GlossaryTerm>? glossaryTerms = null,
+        string? customInstructions = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(items);
@@ -49,7 +50,7 @@ public sealed class TranslationOrchestrator(
 
         foreach (var batch in batchBuilder.Build(itemsNeedingTranslation))
         {
-            await TranslateBatchAsync(batch, provider, sourceLocale, targetLocale, glossaryTerms, outcomesById, cancellationToken).ConfigureAwait(false);
+            await TranslateBatchAsync(batch, provider, sourceLocale, targetLocale, glossaryTerms, customInstructions, outcomesById, cancellationToken).ConfigureAwait(false);
         }
 
         return items.Select(item => outcomesById[item.Id]).ToList();
@@ -61,6 +62,7 @@ public sealed class TranslationOrchestrator(
         CultureInfo sourceLocale,
         CultureInfo targetLocale,
         IReadOnlyList<GlossaryTerm>? glossaryTerms,
+        string? customInstructions,
         Dictionary<string, TranslationOutcome> outcomesById,
         CancellationToken cancellationToken)
     {
@@ -73,7 +75,7 @@ public sealed class TranslationOrchestrator(
             ? glossaryTerms.Where(term => batch.Any(item => term.AppearsIn(item.Text))).ToList()
             : null;
 
-        var results = await provider.TranslateBatchAsync(requestItems, sourceLocale, targetLocale, relevantTerms, cancellationToken).ConfigureAwait(false);
+        var results = await provider.TranslateBatchAsync(requestItems, sourceLocale, targetLocale, relevantTerms, customInstructions, cancellationToken).ConfigureAwait(false);
         var resultCountsById = results
             .GroupBy(r => r.Id, StringComparer.Ordinal)
             .ToDictionary(g => g.Key, g => g.ToList(), StringComparer.Ordinal);

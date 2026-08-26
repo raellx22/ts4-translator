@@ -72,8 +72,11 @@ Implementações que não dependem de nenhum SDK de terceiros nem de I/O:
   bate com algum item daquele batch específico, antes de repassar ao provider — nunca o glossário
   inteiro de uma vez. Ver DEC-012.
 
-Perfis de tradução (seção 22) ainda não existem — `TranslationOrchestrator` não aceita nenhum
-prompt/estilo customizado hoje, e todo `TranslationMemoryEntry` novo grava `ProfileName: null`.
+Translation Profiles (seção 22) existem no escopo de "instruções livres por projeto", não uma
+biblioteca de presets nomeados: `TranslateAsync` aceita um `customInstructions` opcional
+(`TranslationProject.CustomInstructions`, editável na `EditorPage`), repassado a cada batch sem
+filtragem (diferente do glossário, não depende do conteúdo do batch). `TranslationMemoryEntry.ProfileName`
+continua `null` — não há um nome de perfil reutilizável para gravar. Ver DEC-015.
 
 ### TS4Translator.Sims4
 
@@ -166,7 +169,8 @@ uma vez antes de ativar a janela. `App.Services` (um service locator estático �
 - **Editor** (`Pages/EditorPage.xaml` + `ViewModels/EditorPageViewModel.cs`) — lista as strings de um
   projeto (`ListView` virtualizada, original + tradução editável + status por linha), com filtro por
   status e busca por texto sobre uma lista mestra em memória; "Traduzir pendentes" roda
-  `ITranslationOrchestrator` (com o glossário aplicável, se houver) contra o provider ativo
+  `ITranslationOrchestrator` (buscando o glossário aplicável via `IGlossaryService` e as instruções de
+  estilo do projeto - DEC-015 - antes de cada chamada) contra o provider ativo
   (`ITranslationProviderFactory`); editar a tradução manualmente salva no `LostFocus`
   (`UpdateTranslationAsync(..., ManuallyEdited, ...)`, gravando a versão anterior em
   `ProjectStringRevision` — DEC-012); "Exportar" agrupa por STBL de origem, troca o locale via
@@ -175,7 +179,8 @@ uma vez antes de ativar a janela. `App.Services` (um service locator estático �
   real, seção 28).
 - **Settings** (`Pages/SettingsPage.xaml` + `ViewModels/SettingsPageViewModel.cs`) — formulário para
   configurar o provider OpenAI-compatible ativo (nome/endpoint/modelo/API key) via
-  `IProviderConfigurationService`, com botão "Testar conexão" que chama o provider de verdade.
+  `IProviderConfigurationService`, com botão "Testar conexão" que chama o provider de verdade, e um
+  botão "Usar preset NVIDIA NIM" que só preenche endpoint/model conhecidos (DEC-014).
 - **Glossário** (`Pages/GlossaryPage.xaml` + `ViewModels/GlossaryPageViewModel.cs`) — adicionar/listar/
   remover termos **globais** do glossário via `IGlossaryService` (termos por projeto ainda não têm UI —
   DEC-013). O botão "Remover" de cada linha usa `Tag="{x:Bind}"` + `Click` no code-behind, não

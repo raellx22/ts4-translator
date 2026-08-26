@@ -558,3 +558,54 @@ quando um segundo preset (ex. um servidor OpenAI-compatible comum) fizer sentido
 **Consequências:** Quando o formato de prompt do Riva Translate for validado com uma API key real
 (ver Fase 5 do ROADMAP), atualizar o texto do preset/documentação para refletir isso — hoje o preset é
 só conveniência de digitação, não uma integração validada ponta a ponta.
+
+---
+
+## DEC-015 — Translation Profiles (seção 22): instruções livres por projeto, não uma biblioteca de presets nomeados; e um gap real do glossário corrigido no processo
+
+**Contexto:** A seção 22 do brief pede "Translation Profiles: presets de estilo + instruções
+customizadas plugadas no prompt". Implementar uma biblioteca completa de presets nomeados reutilizáveis
+entre projetos (CRUD de perfis, seleção de qual perfil um projeto usa, etc.) seria essencialmente
+duplicar o esforço já feito para o Glossário (nova entidade, serviço, migration, tela) para um conceito
+que ainda não tem um segundo caso de uso concreto puxando por essa flexibilidade.
+
+**Decisão de escopo:** Implementar a parte que entrega valor real imediatamente — um campo de texto
+livre `TranslationProject.CustomInstructions` (ex.: "mantenha um tom informal e brincalhão"),
+persistido por projeto, editável na `EditorPage`, e propagado ao pipeline de tradução exatamente como
+o glossário: `ITranslationProvider.TranslateBatchAsync`/`ITranslationOrchestrator.TranslateAsync`
+ganham um parâmetro opcional `customInstructions` (depois de `glossaryTerms`, antes do
+`CancellationToken`) repassado a cada batch sem filtragem — diferente do glossário, instruções de
+estilo não dependem do conteúdo de um batch específico, então não há nada para filtrar por lote.
+`OpenAICompatibleProvider.BuildSystemPrompt` acrescenta uma seção "Additional style/tone instructions"
+quando presente. Isto **não** é uma biblioteca de perfis nomeados reutilizável entre projetos — é
+instruções de um projeto, para aquele projeto. Documentar isso honestamente em vez de inflar o
+`TranslationMemoryEntry.ProfileName` (que continua `null`) para fingir suporte a perfis nomeados que
+não existem.
+
+- Migration `AddProjectCustomInstructions` adiciona a coluna `CustomInstructions` (nullable) a
+  `ProjectRecord`. `IProjectService.UpdateCustomInstructionsAsync` trata string vazia/só espaço como
+  "limpar" (grava `null`), igual ao padrão já usado em `SettingsPageViewModel` para a API key.
+
+**Gap real encontrado e corrigido no processo:** ao editar `EditorPageViewModel.TranslateAsync` para
+passar `customInstructions`, ficou evidente que a chamada a `translationOrchestrator.TranslateAsync`
+**nunca passava `glossaryTerms`** — a integração de glossário da DEC-012 foi construída e testada em
+todas as camadas (`Core`/`Persistence`/`Providers`/`Translation`), mas o único ponto de chamada real da
+UI (o botão "Traduzir pendentes") nunca buscava os termos via `IGlossaryService` para repassar ao
+orquestrador. Ou seja: o glossário funcionava perfeitamente em teste, mas **nunca era de fato aplicado
+ao clicar "Traduzir pendentes" no app real** até agora. Corrigido injetando `IGlossaryService` em
+`EditorPageViewModel` e chamando `glossaryService.GetTermsAsync(_project.Id)` antes de
+`TranslateAsync`. Este é o tipo de lacuna que só aparece ao seguir o caminho de chamada ponta a ponta,
+não ao olhar cada camada isoladamente — vale a pena, ao adicionar um novo parâmetro de pipeline no
+futuro, grep por todos os call sites de `TranslateAsync`/`TranslateBatchAsync`, não só os que o
+compilador força a atualizar (um parâmetro opcional não força nada).
+
+**Testes adicionados:** 3 em `EfProjectServiceTests` (round-trip, limpar com string vazia, id
+desconhecido não lança), 2 em `TranslationOrchestratorTests` (repassado a cada batch, `null` quando
+omitido), 2 em `OpenAICompatibleProviderTests` (aparece no prompt quando presente, ausente quando não).
+Total: 121 → 129 testes.
+
+**Consequências:** Se um segundo caso de uso real por uma biblioteca de perfis nomeados aparecer
+(compartilhar o mesmo estilo entre vários projetos, por exemplo), promover `CustomInstructions` para
+uma entidade `TranslationProfile` própria nesse momento — não antecipadamente. Qualquer parâmetro
+opcional futuro adicionado a `ITranslationOrchestrator.TranslateAsync` deve ter todo call site real
+(não só os testes) auditado manualmente, pelo motivo acima.

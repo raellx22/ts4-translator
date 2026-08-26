@@ -84,6 +84,21 @@ public sealed class EfProjectService(IDbContextFactory<TranslatorDbContext> dbCo
         }
     }
 
+    public async Task UpdateCustomInstructionsAsync(Guid id, string? customInstructions, CancellationToken cancellationToken = default)
+    {
+        await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+
+        var record = await dbContext.Projects.FirstOrDefaultAsync(p => p.Id == id, cancellationToken).ConfigureAwait(false);
+        if (record is null)
+        {
+            return;
+        }
+
+        record.CustomInstructions = string.IsNullOrWhiteSpace(customInstructions) ? null : customInstructions;
+        record.UpdatedAtUtc = DateTimeOffset.UtcNow;
+        await dbContext.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+    }
+
     private static TranslationProject ToProject(ProjectRecord record) => new(
         record.Id,
         record.Name,
@@ -91,5 +106,6 @@ public sealed class EfProjectService(IDbContextFactory<TranslatorDbContext> dbCo
         CultureInfo.GetCultureInfo(record.SourceLocale),
         CultureInfo.GetCultureInfo(record.TargetLocale),
         record.CreatedAtUtc,
-        record.UpdatedAtUtc);
+        record.UpdatedAtUtc,
+        record.CustomInstructions);
 }
