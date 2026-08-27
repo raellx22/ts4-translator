@@ -2,7 +2,7 @@
 
 Leia isto antes de qualquer outra coisa se você é uma nova sessão/agente retomando este projeto.
 Depois leia `README.md`, `docs/STATUS.md`, `docs/ROADMAP.md`, `docs/ARCHITECTURE.md`, `docs/DECISIONS.md`,
-`docs/BUILD.md`, nessa ordem (e `docs/ARGOS.md` se for mexer com o provider offline). Não reconstrua a arquitetura do zero — ela existe, compila, tem 121
+`docs/BUILD.md`, nessa ordem (e `docs/ARGOS.md` se for mexer com o provider offline). Não reconstrua a arquitetura do zero — ela existe, compila, tem 147
 testes automatizados passando, e **o caminho prático completo (importar → extrair → editor →
 exportar com validação) foi verificado de ponta a ponta rodando o app instalado de verdade.**
 
@@ -25,11 +25,14 @@ persistente com histórico, drag-and-drop de `.package` na Home com diff de reim
 (serviço + UI de escopo global), preset NVIDIA NIM em Configurações, Translation Profiles (instruções
 de estilo livres por projeto), e fuzzy matching em Translation Memory (Levenshtein, reaproveita ≥97%
 similar sem chamar o provider, sempre marcado para revisão) — tudo pronto e testado (147 testes
-automatizados + `GlossaryPage`/preset NVIDIA NIM verificados rodando o app de verdade). **O usuário já
-testou a tradução contra um provider real** (fora desta sessão de desenvolvimento) e encontrou um bug
-real — `ArgumentNullException` quando o provider respondia `"translation": null` para um item,
-derrubando o batch inteiro. Corrigido (DEC-017), com testes de regressão. O usuário continua testando
-ativamente; qualquer novo problema relatado deve virar uma correção pontual do mesmo jeito.
+automatizados + `GlossaryPage`/preset NVIDIA NIM/barra de progresso verificados rodando o app de
+verdade). **O usuário já testou a tradução contra um provider real (NVIDIA NIM)** fora desta sessão de
+desenvolvimento e encontrou dois problemas reais: `ArgumentNullException` quando o provider respondia
+`"translation": null` para um item (corrigido, DEC-017), e falta de feedback de progresso + salvamento
+só ao final numa tradução de ~25 mil strings, o que significava perder tudo numa interrupção no meio do
+caminho (corrigido, DEC-018 — tradução agora acontece em blocos de 100 com persistência por bloco,
+barra de progresso real, e um botão de cancelar seguro). O usuário continua testando ativamente;
+qualquer novo problema relatado deve virar uma correção pontual do mesmo jeito.
 
 **Importante:** ao adicionar `customInstructions` (DEC-015), foi descoberto que o glossário (DEC-012)
 nunca chegou a ser de fato usado pelo app real — `EditorPageViewModel.TranslateAsync` nunca buscava os
@@ -92,7 +95,7 @@ Depois disso, seguir a lista "Próximas tarefas concretas" no fim de `docs/ROADM
 ## Important files
 
 - `docs/DECISIONS.md` — leia antes de mudar qualquer versão de pacote ou formato de arquivo; a
-  maioria das escolhas não óbvias já foi justificada ali (DEC-001 a DEC-017).
+  maioria das escolhas não óbvias já foi justificada ali (DEC-001 a DEC-018).
 - `docs/BUILD.md` — como compilar, testar, rodar, e (importante) como empacotar/instalar um MSIX
   local para testar qualquer fluxo que use `FileOpenPicker` ou outra API mediada por broker do
   Windows. `dotnet run` sozinho **não** funciona para esses casos (DEC-010) — não gaste tempo
@@ -149,9 +152,9 @@ Todas em `docs/DECISIONS.md`, mas as mais fáceis de "corrigir" por engano:
 Nenhum bug conhecido no código existente. Bugs reais encontrados em sessões anteriores já foram
 corrigidos e commitados (exceção engolida pelo `AsyncRelayCommand`; o "bug" do picker era um problema
 de processo de teste, não de código — ver DEC-010; `ArgumentNullException` quando o provider retornava
-`"translation": null` — ver DEC-017, primeiro bug real reportado pelo próprio usuário testando fora
-desta sessão). Ver "Known issues" em `docs/STATUS.md` para riscos documentados que não são bugs
-confirmados.
+`"translation": null` — ver DEC-017; tradução de mods grandes sem feedback de progresso e sem
+salvamento incremental — ver DEC-018 — ambos reportados pelo próprio usuário testando fora desta
+sessão). Ver "Known issues" em `docs/STATUS.md` para riscos documentados que não são bugs confirmados.
 
 ## Tests currently failing
 

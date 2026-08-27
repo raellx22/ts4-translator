@@ -705,3 +705,59 @@ Total: 144 → 147 testes.
 deve tratar campos "obrigatórios" como potencialmente nulos no tipo de desserialização (`string?`, não
 `string`), e filtrar antes de construir `TranslationResultItem` — declarar um campo como não-nulo não o
 torna não-nulo de fato quando a fonte é uma resposta de rede fora do controle do app.
+
+---
+
+## DEC-018 — Feedback real de progresso ao traduzir: chunking com checkpoint no ViewModel, não no orquestrador; cancelamento seguro
+
+**Contexto:** Testando a tradução de um mod com ~25 mil strings via NVIDIA NIM, o usuário reportou que
+não havia nenhum jeito de saber se o app estava de fato traduzindo ou travado — só um `ProgressRing`
+indeterminado e um texto de status que não mudava até o fim. Investigação revelou um problema mais
+sério por trás da queixa de UX: `EditorPageViewModel.TranslateAsync` chamava
+`translationOrchestrator.TranslateAsync` **uma única vez com todas as strings pendentes**, e só
+persistia qualquer resultado no banco (`UpdateTranslationAsync`) depois que a chamada inteira
+retornasse. Ou seja, para um lote de 25 mil strings — que a ~100 itens por chamada HTTP (limite padrão
+do `BatchBuilder`) significa ~250 chamadas sequenciais ao provider — **nada era salvo até o fim**: uma
+falha, um fechamento do app, ou uma queda de conexão a qualquer momento no meio do caminho perderia
+100% do trabalho já traduzido, não só o que faltava.
+
+**Decisão:**
+- `EditorPageViewModel.TranslateAsync` divide `pending` em blocos de `TranslationChunkSize = 100`
+  (mesmo valor do limite padrão de item do `BatchBuilder`, então um bloco tipicamente corresponde a uma
+  única chamada HTTP) via `IEnumerable<T>.Chunk()`, chamando `ITranslationOrchestrator.TranslateAsync`
+  **uma vez por bloco**, e persistindo (`UpdateTranslationAsync`) o resultado de cada bloco antes de
+  seguir para o próximo. Isso é implementado inteiramente no ViewModel, não em
+  `ITranslationOrchestrator` — a interface do orquestrador não muda, porque persistência é
+  responsabilidade da camada de app/projeto, não do pipeline de tradução em si (mesmo raciocínio já
+  aplicado ao glossário/instruções customizadas nas DEC-012/DEC-015).
+- Duas novas propriedades observáveis, `ProgressCurrent`/`ProgressTotal`, atualizadas a cada bloco
+  concluído, alimentam um `ProgressBar` real (não mais só o `ProgressRing` indeterminado) na
+  `EditorPage`, junto com o texto de status mostrando contagem corrente de sucesso/revisão/falha em
+  tempo real — não só ao final.
+- Como o checkpoint por bloco já existe, cancelamento se torna seguro "de graça": um botão "Cancelar
+  tradução" (visível só durante `IsTranslating`) cancela um `CancellationTokenSource` próprio do
+  método; o loop verifica `cancellationToken.ThrowIfCancellationRequested()` no início de cada bloco, e
+  o token é repassado à chamada do orquestrador e a `UpdateTranslationAsync` também. Cancelar no meio
+  de um lote de 25 mil perde, no pior caso, só o bloco de até 100 strings em andamento — nunca o
+  trabalho já persistido.
+
+**Verificado rodando o app de verdade** (não só compilado): montado um servidor HTTP local fake
+imitando o contrato `chat/completions` (com latência artificial de 800ms-2.5s por chamada, para dar
+tempo de observar), importado um `.package` sintético com 500 strings, e confirmado via UI Automation
+que — durante a tradução — a `ProgressBar` mostra `Value`/`Maximum` reais (ex.: `0/500` enquanto a
+primeira chamada HTTP está em voo) e o botão "Cancelar tradução" aparece/desaparece corretamente.
+**Achado colateral, não um bug**: como as strings sintéticas de teste eram quase idênticas entre si
+(mesma frase-molde, variando só um número), o fuzzy matching (DEC-016) reaproveitou a maior parte dos
+blocos 2 em diante contra o que já tinha sido salvo do bloco 1 — confirma que a interação entre
+progresso incremental e fuzzy matching funciona corretamente em conjunto (cada bloco só chama o
+provider para o que realmente precisa), mas também é um lembrete de que mods com strings numeradas
+quase idênticas (ex. "Nível 1", "Nível 2", ...) vão gerar bastante reaproveitamento fuzzy — sempre
+marcado para revisão, nunca aplicado silenciosamente, então é seguro mas vale conferir esses casos.
+
+**Alternativas:** Expor um `IProgress<T>` como parâmetro de `ITranslationOrchestrator.TranslateAsync` —
+rejeitada porque resolveria só o progresso, não o problema mais sério de persistência tardia; o
+chunking no ViewModel resolve os dois de uma vez sem tocar num contrato já usado por 60+ testes.
+
+**Consequências:** Qualquer fluxo futuro que também dispare tradução em massa (ex.: uma ação em lote na
+Home) deve seguir o mesmo padrão de chunking + persistência incremental, não voltar a chamar o
+orquestrador uma única vez para milhares de itens.

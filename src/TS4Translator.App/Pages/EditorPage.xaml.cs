@@ -33,4 +33,13 @@ public sealed partial class EditorPage : Page
             _ = ViewModel.SaveManualEditAsync(row);
         }
     }
+
+    // x:Bind generates an instance call (this.Method(...)) for an unqualified function reference in
+    // XAML regardless of whether the method could be static - CA1822 disagrees, but making these
+    // static breaks the generated MarkupCompilePass2 code (CS0176).
+#pragma warning disable CA1822
+    public Visibility BoolToVisibility(bool value) => value ? Visibility.Visible : Visibility.Collapsed;
+
+    public bool Not(bool value) => !value;
+#pragma warning restore CA1822
 }

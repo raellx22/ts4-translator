@@ -23,7 +23,7 @@ public sealed partial class EditorPageViewModel(
     IGlossaryService glossaryService,
     IPackageService packageService,
     IStringTableService stringTableService,
-    IPathPickerService pathPicker) : ObservableObject
+    IPathPickerService pathPicker) : ObservableObject, IDisposable
 {
     [ObservableProperty]
     public partial bool IsBusy { get; set; }
@@ -44,10 +44,30 @@ public sealed partial class EditorPageViewModel(
     [ObservableProperty]
     public partial string CustomInstructions { get; set; } = string.Empty;
 
+    [ObservableProperty]
+    public partial bool IsTranslating { get; set; }
+
+    [ObservableProperty]
+    public partial int ProgressCurrent { get; set; }
+
+    [ObservableProperty]
+    public partial int ProgressTotal { get; set; }
+
     private const string AllFilter = "Todas";
+
+    /// <summary>
+    /// How many pending strings to translate (and persist) before checkpointing. Chosen to line up
+    /// with <see cref="BatchBuilder"/>'s default item cap, so one chunk is typically one HTTP round
+    /// trip to the provider - large enough to not add meaningful overhead, small enough that a mod
+    /// with thousands of strings shows real, frequent progress instead of one silent multi-minute wait
+    /// (a real gap reported by the user testing against NVIDIA NIM), and that cancelling or a crash
+    /// mid-run only loses the current chunk, not the whole job.
+    /// </summary>
+    private const int TranslationChunkSize = 100;
 
     private TranslationProject? _project;
     private readonly List<StringRowViewModel> _allRows = [];
+    private CancellationTokenSource? _translateCts;
 
     public IReadOnlyList<string> FilterOptions { get; } = [AllFilter, "Pendentes", "Traduzidas", "Revisar", "Editadas manualmente"];
 
@@ -148,9 +168,17 @@ public sealed partial class EditorPageViewModel(
             return;
         }
 
+        _translateCts = new CancellationTokenSource();
+        var cancellationToken = _translateCts.Token;
+
+        var succeeded = 0;
+        var needsReview = 0;
+        var failed = 0;
+
         try
         {
             IsBusy = true;
+            IsTranslating = true;
             StatusText = "Verificando provider configurado...";
 
             var provider = await providerFactory.CreateActiveProviderAsync();
@@ -167,50 +195,67 @@ public sealed partial class EditorPageViewModel(
                 return;
             }
 
-            StatusText = $"Traduzindo {pending.Count} string(s) via {provider.Name}...";
-
-            var items = pending
-                .Select(e => new TranslationSourceItem(e.Id.ToString(CultureInfo.InvariantCulture), e.OriginalText))
-                .ToList();
+            ProgressTotal = pending.Count;
+            ProgressCurrent = 0;
 
             var glossaryTerms = await glossaryService.GetTermsAsync(_project.Id);
-            var outcomes = await translationOrchestrator.TranslateAsync(
-                items, provider, _project.SourceLocale, _project.TargetLocale, glossaryTerms, _project.CustomInstructions);
 
-            var succeeded = 0;
-            var needsReview = 0;
-            var failed = 0;
-
-            foreach (var outcome in outcomes)
+            // Translated (and persisted) in chunks, not all 25 thousand strings in a single call -
+            // otherwise nothing is saved and no progress is visible until the entire job finishes,
+            // which for a large mod can be many minutes of the UI looking identical to "frozen" (a
+            // real gap the user hit testing against NVIDIA NIM). Chunking here, not inside
+            // ITranslationOrchestrator, keeps the orchestrator's contract untouched - persistence is
+            // this ViewModel's concern, not the translation pipeline's.
+            foreach (var chunk in pending.Chunk(TranslationChunkSize))
             {
-                var stringId = int.Parse(outcome.Id, CultureInfo.InvariantCulture);
+                cancellationToken.ThrowIfCancellationRequested();
 
-                if (outcome.TranslatedText is null)
+                StatusText = $"Traduzindo via {provider.Name}... {ProgressCurrent}/{ProgressTotal} ({succeeded} traduzida(s), {needsReview} revisar, {failed} sem resposta)";
+
+                var chunkItems = chunk
+                    .Select(e => new TranslationSourceItem(e.Id.ToString(CultureInfo.InvariantCulture), e.OriginalText))
+                    .ToList();
+
+                var outcomes = await translationOrchestrator.TranslateAsync(
+                    chunkItems, provider, _project.SourceLocale, _project.TargetLocale, glossaryTerms, _project.CustomInstructions, cancellationToken);
+
+                foreach (var outcome in outcomes)
                 {
-                    failed++;
-                    continue;
+                    var stringId = int.Parse(outcome.Id, CultureInfo.InvariantCulture);
+
+                    if (outcome.TranslatedText is null)
+                    {
+                        failed++;
+                        continue;
+                    }
+
+                    var status = outcome.Success ? ProjectStringStatus.Translated : ProjectStringStatus.NeedsReview;
+                    var issueSummary = outcome.Issues.Count > 0 ? outcome.Issues[0].Message : null;
+
+                    await projectStringService.UpdateTranslationAsync(stringId, outcome.TranslatedText, status, issueSummary, cancellationToken);
+
+                    var row = _allRows.FirstOrDefault(r => r.Id == stringId);
+                    row?.ApplyResult(outcome.TranslatedText, status, issueSummary);
+
+                    if (outcome.Success)
+                    {
+                        succeeded++;
+                    }
+                    else
+                    {
+                        needsReview++;
+                    }
                 }
 
-                var status = outcome.Success ? ProjectStringStatus.Translated : ProjectStringStatus.NeedsReview;
-                var issueSummary = outcome.Issues.Count > 0 ? outcome.Issues[0].Message : null;
-
-                await projectStringService.UpdateTranslationAsync(stringId, outcome.TranslatedText, status, issueSummary);
-
-                var row = _allRows.FirstOrDefault(r => r.Id == stringId);
-                row?.ApplyResult(outcome.TranslatedText, status, issueSummary);
-
-                if (outcome.Success)
-                {
-                    succeeded++;
-                }
-                else
-                {
-                    needsReview++;
-                }
+                ProgressCurrent += chunk.Length;
+                ApplyFilter();
             }
 
-            ApplyFilter();
             StatusText = $"Tradução concluída: {succeeded} traduzida(s), {needsReview} para revisar, {failed} sem resposta do provider.";
+        }
+        catch (OperationCanceledException)
+        {
+            StatusText = $"Tradução cancelada em {ProgressCurrent}/{ProgressTotal} - o que já foi traduzido está salvo ({succeeded} traduzida(s), {needsReview} revisar, {failed} sem resposta).";
         }
         catch (Exception exception)
         {
@@ -219,8 +264,16 @@ public sealed partial class EditorPageViewModel(
         finally
         {
             IsBusy = false;
+            IsTranslating = false;
+            _translateCts?.Dispose();
+            _translateCts = null;
         }
     }
+
+    [RelayCommand]
+    private void CancelTranslate() => _translateCts?.Cancel();
+
+    public void Dispose() => _translateCts?.Dispose();
 
     [RelayCommand]
     private async Task ExportAsync()

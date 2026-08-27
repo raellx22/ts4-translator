@@ -10,9 +10,11 @@ exportar um package de tradução separado — sem jamais alterar o mod original
 **O caminho prático completo já funciona de ponta a ponta**, verificado rodando o app instalado de
 verdade: importar um `.package` → extrair cada string → traduzir as pendentes (com um provider
 compatível com OpenAI configurado) → exportar um package traduzido com validação de round-trip real.
-A única peça ainda não testada com infraestrutura real é a chamada HTTP de tradução em si (falta
-testar contra um LM Studio ou NVIDIA NIM de verdade). Ver [`docs/STATUS.md`](docs/STATUS.md) para o
-estado exato e [`docs/HANDOFF.md`](docs/HANDOFF.md) para retomar o trabalho em uma nova sessão.
+A chamada HTTP de tradução em si já foi testada pelo usuário contra a NVIDIA NIM de verdade, o que
+revelou e corrigiu dois problemas reais: uma resposta com `"translation": null` derrubando o lote
+inteiro, e falta de feedback de progresso/salvamento incremental em traduções grandes (ver
+[`docs/DECISIONS.md`](docs/DECISIONS.md) DEC-017/DEC-018). Ver [`docs/STATUS.md`](docs/STATUS.md) para
+o estado exato e [`docs/HANDOFF.md`](docs/HANDOFF.md) para retomar o trabalho em uma nova sessão.
 
 Implementado e testado até agora (147 testes automatizados, todos passando):
 
@@ -26,10 +28,10 @@ Implementado e testado até agora (147 testes automatizados, todos passando):
   mod já processado mostra quantas strings são novas/alteradas/reaproveitadas/removidas.
 - **Editor**: lista as strings de um projeto com filtro por status e busca de texto; instruções de
   estilo/tom livres por projeto (Translation Profiles, seção 22); "Traduzir pendentes" roda o pipeline
-  de tradução completo (aplicando o glossário e as instruções do projeto) contra o provider
-  configurado; edição manual da tradução é salva com histórico; "Exportar" gera um package traduzido e
-  só reporta sucesso depois de reabrir o arquivo e validar cada string (round-trip real, seção 28 do
-  brief).
+  de tradução completo (aplicando o glossário e as instruções do projeto) em blocos de 100 strings,
+  cada um salvo antes do próximo, com barra de progresso real e botão de cancelar seguro; edição
+  manual da tradução é salva com histórico; "Exportar" gera um package traduzido e só reporta sucesso
+  depois de reabrir o arquivo e validar cada string (round-trip real, seção 28 do brief).
 - **Glossário**: termos globais (nomes próprios, marcas — nunca traduzir, ou sempre traduzir de um
   jeito específico), aplicados automaticamente durante a tradução. Tela própria para adicionar/remover
   termos globais; termos por projeto existem no serviço mas ainda sem UI dedicada.

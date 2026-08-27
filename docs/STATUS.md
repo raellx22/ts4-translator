@@ -10,13 +10,20 @@ Editor → traduzir as pendentes (via um provider compatível com OpenAI configu
 exportar um package traduzido com validação de round-trip real**. Ver DEC-011 para o relato completo
 da verificação.
 
-A chamada HTTP de tradução em si já foi exercitada pelo usuário contra um provider real (fora desta
-sessão) — e encontrou um bug real de verdade: `ArgumentNullException` quando o provider respondia
-`"translation": null` para um item, derrubando a tradução do batch inteiro. Corrigido (DEC-017): a
-resposta agora é filtrada na origem e o orquestrador tem uma defesa própria contra qualquer
-`ITranslationProvider` que devolva uma tradução nula. Continua sem confirmação de que o restante do
-fluxo (traduções não-nulas de verdade, formatação, qualidade) funciona corretamente ponta a ponta com
-esse provider — o usuário está testando ativamente.
+A chamada HTTP de tradução em si já foi exercitada pelo usuário contra um provider real (NVIDIA NIM,
+fora desta sessão de desenvolvimento) e encontrou dois problemas reais:
+1. `ArgumentNullException` quando o provider respondia `"translation": null` para um item, derrubando a
+   tradução do batch inteiro. Corrigido (DEC-017): a resposta agora é filtrada na origem e o
+   orquestrador tem uma defesa própria contra qualquer `ITranslationProvider` que devolva uma tradução
+   nula.
+2. Nenhum feedback de progresso real durante uma tradução de mod grande (~25 mil strings) — só um
+   spinner indeterminado, e (mais sério) nada era salvo até a tradução inteira terminar, então qualquer
+   interrupção no meio perdia 100% do trabalho já feito. Corrigido (DEC-018): tradução agora acontece
+   em blocos de 100 strings, cada um persistido antes do próximo, com barra de progresso real e botão
+   de cancelar (que preserva o que já foi traduzido).
+
+Continua sem confirmação de que o restante do fluxo (qualidade das traduções, formatação) funciona
+corretamente ponta a ponta com esse provider — o usuário está testando ativamente.
 
 Fora do caminho principal: Fase 0/1/2 essencialmente concluídas; Fase 3 (Translation Core) com o
 pipeline inteiro pronto; Fase 6 com o primeiro provider real (`OpenAICompatibleProvider`); Fase 7
@@ -83,12 +90,17 @@ pronta e verificada. Ver `docs/ROADMAP.md` para o detalhamento completo por fase
 - Fuzzy matching em Translation Memory (seção 26/63) — `StringSimilarity` (Levenshtein) +
   `ITranslationMemory.FindSimilarAsync`; o orquestrador reaproveita uma entrada ≥97% similar em vez de
   chamar o provider, sempre marcando o resultado para revisão (`FuzzyMatchReused`). Ver DEC-016.
+- Correção de robustez do provider (`"translation": null` não derruba mais o batch inteiro — DEC-017).
+- Barra de progresso real + cancelamento seguro ao traduzir — `EditorPageViewModel.TranslateAsync` agora
+  processa e persiste em blocos de 100 strings (não tudo de uma vez), com `ProgressBar`/contagem
+  ao vivo e um botão "Cancelar tradução" que preserva o que já foi traduzido. Verificado rodando o app
+  de verdade com um servidor HTTP local fake e 500 strings sintéticas. Ver DEC-018.
 - `AppDataPaths` (Infrastructure) resolvendo `%LOCALAPPDATA%\TS4Translator\{Data,Logs,Cache,Models}`.
 - Composition root em `App.xaml.cs` com todos os serviços registrados (`AddSims4Services`,
   `AddTranslationServices`, `AddPersistenceServices`, `AddInfrastructureServices`,
   `AddProviderServices`), migration aplicada no `OnLaunched`.
 - Shell WinUI (NavigationView, Mica, título estendido) a partir do template `winui-navview`.
-- Toda decisão relevante registrada em `docs/DECISIONS.md` (DEC-001 a DEC-017).
+- Toda decisão relevante registrada em `docs/DECISIONS.md` (DEC-001 a DEC-018).
 
 ## In progress
 
@@ -102,7 +114,7 @@ externa** (não são bloqueios de código, são coisas que só um teste com infr
 
 1. Confirmação de que a tradução funciona corretamente (não só sem crash) contra um provider real, com
    texto não-nulo — o usuário está testando ativamente; qualquer novo problema encontrado entra numa
-   correção pontual como a DEC-017.
+   correção pontual como a DEC-017/DEC-018.
 2. Formato exato do prompt esperado por `nvidia/riva-translate-4b-instruct-v2` — duas fontes
    discordam (playground ao vivo vs. NGC catalog). Precisa de uma API key NVIDIA real para testar.
 3. Nenhuma receita testada de empacotar Argos Translate sem exigir Python do usuário — ver

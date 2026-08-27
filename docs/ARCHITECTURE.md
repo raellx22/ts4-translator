@@ -176,7 +176,10 @@ uma vez antes de ativar a janela. `App.Services` (um service locator estático �
   status e busca por texto sobre uma lista mestra em memória; "Traduzir pendentes" roda
   `ITranslationOrchestrator` (buscando o glossário aplicável via `IGlossaryService` e as instruções de
   estilo do projeto - DEC-015 - antes de cada chamada) contra o provider ativo
-  (`ITranslationProviderFactory`); editar a tradução manualmente salva no `LostFocus`
+  (`ITranslationProviderFactory`); processa as strings pendentes em blocos de 100
+  (`EditorPageViewModel.TranslationChunkSize`), persistindo cada bloco antes do próximo - uma tradução
+  de milhares de strings mostra progresso real (`ProgressBar`) e pode ser cancelada a qualquer momento
+  sem perder o que já foi salvo (DEC-018); editar a tradução manualmente salva no `LostFocus`
   (`UpdateTranslationAsync(..., ManuallyEdited, ...)`, gravando a versão anterior em
   `ProjectStringRevision` — DEC-012); "Exportar" agrupa por STBL de origem, troca o locale via
   `IStringTableService.WithLocale`, escreve com `IPackageService.WriteStringTablesAsync`, e só reporta
