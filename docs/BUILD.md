@@ -47,8 +47,7 @@ Import-PfxCertificate -FilePath ts4dev.pfx -CertStoreLocation "Cert:\LocalMachin
 $msix = "src\TS4Translator.App\AppPackages\TS4Translator.App_1.0.0.0_x64_Test\TS4Translator.App_1.0.0.0_x64.msix"
 & "C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64\signtool.exe" sign /fd SHA256 /f ts4dev.pfx /p ts4dev $msix
 
-# 4. Instalar (remova qualquer registro "solto" antigo primeiro, senão dá erro 0x80073CFB)
-Get-AppxPackage -Name "60A02515-8E6A-4123-8A54-E9CB7C1B7A72*" | ForEach-Object { Remove-AppxPackage -Package $_.PackageFullName }
+# 4. Instalar
 Add-AppxPackage -Path $msix
 
 # 5. Rodar o app instalado
@@ -56,7 +55,19 @@ $pkg = Get-AppxPackage -Name "60A02515-8E6A-4123-8A54-E9CB7C1B7A72*"
 Start-Process "shell:AppsFolder\$($pkg.PackageFamilyName)!App"
 ```
 
-Depois de terminar de testar, para voltar ao ciclo normal de `dotnet run`:
+## ⚠️ NUNCA rode `Remove-AppxPackage` antes de reinstalar uma versão nova para testar
+
+**`Remove-AppxPackage` apaga a pasta de dados do app inteira** (`%LOCALAPPDATA%\Packages\<PackageFamilyName>\LocalCache\Local\TS4Translator\`) — banco SQLite (todos os projetos, translation memory, glossário) e o arquivo de API key criptografado via DPAPI. Isso já causou perda de dados real (a configuração de provider do usuário, incluindo a API key da NVIDIA, foi apagada dessa forma durante o desenvolvimento).
+
+**O procedimento correto para atualizar o pacote instalado com uma build nova, preservando os dados:**
+
+1. Incremente o quarto componente da versão em `src/TS4Translator.App/Package.appxmanifest` (`Version="1.0.X.0"`) — o Windows só faz upgrade in-place (`Add-AppxPackage` sem `Remove-AppxPackage` antes) quando a versão do pacote novo é maior que a instalada; a mesma versão é rejeitada ou exige remover primeiro.
+2. Gere e assine o MSIX normalmente (passos 1-3 acima).
+3. Rode só `Add-AppxPackage -Path $msix` — **sem** `Remove-AppxPackage` antes. Isso faz um upgrade in-place e preserva `LocalCache` inteira. Verificado empiricamente: uma configuração de provider salva sobreviveu a um upgrade de `1.0.1.0` para `1.0.2.0` feito dessa forma.
+
+`Remove-AppxPackage` só é necessário na transição única de um registro "solto" (dev-loop, via `dotnet run`) para o primeiro pacote assinado instalado (erro `0x80073CFB` sem isso) — depois desse primeiro `Add-AppxPackage`, nunca mais remova para atualizar, só incremente a versão.
+
+Para voltar ao ciclo normal de `dotnet run` depois de terminar de testar (isso também apaga os dados do pacote instalado — normal e esperado nesse caso, já que o objetivo é sair do modo empacotado):
 
 ```powershell
 Get-AppxPackage -Name "60A02515-8E6A-4123-8A54-E9CB7C1B7A72*" | ForEach-Object { Remove-AppxPackage -Package $_.PackageFullName }

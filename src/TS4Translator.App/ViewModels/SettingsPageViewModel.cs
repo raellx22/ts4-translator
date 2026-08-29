@@ -7,18 +7,33 @@ using TS4Translator.Core.Translation;
 namespace TS4Translator.App.ViewModels;
 
 /// <summary>
-/// Backs the Settings page's translation provider configuration (brief section 41). Only the
-/// OpenAI-compatible provider (LM Studio, NVIDIA NIM, ...) is configurable today.
+/// Backs the Settings page's translation provider configuration (brief section 41). Three provider
+/// kinds are configurable: OpenAI-compatible (LM Studio, NVIDIA NIM, or any other server speaking that
+/// protocol), DeepL, and Google Gemini. Only one configuration is active at a time - switching
+/// <see cref="SelectedProviderKindLabel"/> and saving replaces whichever was active before.
 /// </summary>
 public sealed partial class SettingsPageViewModel(
     IProviderConfigurationService configurationService,
     ITranslationProviderFactory providerFactory) : ObservableObject
 {
-    [ObservableProperty]
-    public partial string Name { get; set; } = "LM Studio local";
+    public const string OpenAICompatibleLabel = "OpenAI-compatible (LM Studio, NVIDIA NIM, ...)";
+    public const string DeepLLabel = "DeepL";
+    public const string GoogleGeminiLabel = "Google Gemini";
+
+    public IReadOnlyList<string> ProviderKindOptions { get; } = [OpenAICompatibleLabel, DeepLLabel, GoogleGeminiLabel];
 
     [ObservableProperty]
-    public partial string Endpoint { get; set; } = "http://localhost:1234/v1";
+    public partial string SelectedProviderKindLabel { get; set; } = OpenAICompatibleLabel;
+
+    [ObservableProperty]
+    public partial string Name { get; set; } = string.Empty;
+
+    // Starts empty (not pre-filled with a default) so that OnSelectedProviderKindLabelChanged's
+    // "only fill in a default when the field is still empty" rule actually fires the first time a
+    // fresh install's user picks a provider kind - PlaceholderText below carries the LM Studio hint
+    // in the meantime.
+    [ObservableProperty]
+    public partial string Endpoint { get; set; } = string.Empty;
 
     [ObservableProperty]
     public partial string Model { get; set; } = string.Empty;
@@ -35,6 +50,42 @@ public sealed partial class SettingsPageViewModel(
     [ObservableProperty]
     public partial string StatusText { get; set; } = string.Empty;
 
+    /// <summary>Whether the current selection uses a model id at all - DeepL does not.</summary>
+    public bool ShowsModelField => SelectedProviderKindLabel != DeepLLabel;
+
+    /// <summary>
+    /// Every well-known default endpoint this page ever auto-fills (below, and the NVIDIA preset).
+    /// Used to tell "still whatever a default put here" apart from "the user typed their own value" -
+    /// switching the provider kind dropdown should keep auto-filling a sensible default across
+    /// several kinds while the user is just exploring, but must stop the moment they've actually typed
+    /// something real, and a plain "is it empty" check alone can't tell those two cases apart once a
+    /// first default has already been filled in.
+    /// </summary>
+    private static readonly HashSet<string> KnownDefaultEndpoints = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "http://localhost:1234/v1",
+        "https://integrate.api.nvidia.com/v1",
+        "https://api-free.deepl.com",
+        "https://generativelanguage.googleapis.com",
+    };
+
+    partial void OnSelectedProviderKindLabelChanged(string value)
+    {
+        OnPropertyChanged(nameof(ShowsModelField));
+
+        if (!string.IsNullOrWhiteSpace(Endpoint) && !KnownDefaultEndpoints.Contains(Endpoint))
+        {
+            return;
+        }
+
+        (Endpoint, Model) = value switch
+        {
+            DeepLLabel => ("https://api-free.deepl.com", string.Empty),
+            GoogleGeminiLabel => ("https://generativelanguage.googleapis.com", "gemini-2.0-flash"),
+            _ => ("http://localhost:1234/v1", Model),
+        };
+    }
+
     /// <summary>
     /// Fills endpoint/model for NVIDIA NIM's OpenAI-compatible chat-completions endpoint (brief
     /// section 5/17). Does not fill the API key (the user's own secret) or save automatically - the
@@ -46,6 +97,7 @@ public sealed partial class SettingsPageViewModel(
     [RelayCommand]
     private void ApplyNvidiaNimPreset()
     {
+        SelectedProviderKindLabel = OpenAICompatibleLabel;
         Name = "NVIDIA NIM (Riva Translate)";
         Endpoint = "https://integrate.api.nvidia.com/v1";
         Model = "nvidia/riva-translate-4b-instruct-v2";
@@ -62,9 +114,10 @@ public sealed partial class SettingsPageViewModel(
             return;
         }
 
+        SelectedProviderKindLabel = ToLabel(config.Kind);
         Name = config.Name;
         Endpoint = config.Endpoint;
-        Model = config.Model;
+        Model = config.Model ?? string.Empty;
         HasStoredApiKey = config.HasApiKey;
         StatusText = HasStoredApiKey ? "Configuração carregada (API key armazenada de forma segura)." : "Configuração carregada.";
     }
@@ -76,9 +129,12 @@ public sealed partial class SettingsPageViewModel(
         {
             IsBusy = true;
 
-            if (string.IsNullOrWhiteSpace(Endpoint) || string.IsNullOrWhiteSpace(Model))
+            var kind = ToKind(SelectedProviderKindLabel);
+            var modelRequired = kind != ProviderKind.DeepL;
+
+            if (string.IsNullOrWhiteSpace(Endpoint) || (modelRequired && string.IsNullOrWhiteSpace(Model)))
             {
-                StatusText = "Endpoint e Model são obrigatórios.";
+                StatusText = modelRequired ? "Endpoint e Model são obrigatórios." : "Endpoint é obrigatório.";
                 return;
             }
 
@@ -86,8 +142,9 @@ public sealed partial class SettingsPageViewModel(
             // field is never pre-filled with the real key (it's a secret), so an empty box after
             // load just means the user didn't type a new one.
             var apiKeyToSave = string.IsNullOrEmpty(ApiKey) ? null : ApiKey;
+            var modelToSave = modelRequired ? Model : null;
 
-            await configurationService.SaveAsync(Name, Endpoint, Model, temperature: 0.0, apiKeyToSave);
+            await configurationService.SaveAsync(kind, Name, Endpoint, modelToSave, temperature: 0.0, apiKeyToSave);
             HasStoredApiKey = HasStoredApiKey || !string.IsNullOrEmpty(ApiKey);
             ApiKey = string.Empty;
             StatusText = "Configuração salva.";
@@ -137,4 +194,18 @@ public sealed partial class SettingsPageViewModel(
             IsBusy = false;
         }
     }
+
+    private static string ToLabel(ProviderKind kind) => kind switch
+    {
+        ProviderKind.DeepL => DeepLLabel,
+        ProviderKind.GoogleGemini => GoogleGeminiLabel,
+        _ => OpenAICompatibleLabel,
+    };
+
+    private static ProviderKind ToKind(string label) => label switch
+    {
+        DeepLLabel => ProviderKind.DeepL,
+        GoogleGeminiLabel => ProviderKind.GoogleGemini,
+        _ => ProviderKind.OpenAICompatible,
+    };
 }

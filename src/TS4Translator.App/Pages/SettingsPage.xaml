@@ -23,14 +23,22 @@
 
         <TextBlock
             Grid.Row="1"
-            Text="Provider de tradução (compatível com OpenAI - LM Studio, NVIDIA NIM, etc.)"
+            Text="Provider de tradução"
             TextWrapping="Wrap" />
 
         <StackPanel Grid.Row="2" Spacing="8">
+            <ComboBox
+                Header="Tipo de provider"
+                ItemsSource="{x:Bind ViewModel.ProviderKindOptions}"
+                SelectedItem="{x:Bind ViewModel.SelectedProviderKindLabel, Mode=TwoWay}" />
             <TextBox Header="Nome" Text="{x:Bind ViewModel.Name, Mode=TwoWay}" />
             <TextBox Header="Endpoint" PlaceholderText="http://localhost:1234/v1" Text="{x:Bind ViewModel.Endpoint, Mode=TwoWay}" />
-            <TextBox Header="Modelo" PlaceholderText="nome do modelo carregado" Text="{x:Bind ViewModel.Model, Mode=TwoWay}" />
-            <PasswordBox Header="API key (opcional para servidores locais)" Password="{x:Bind ViewModel.ApiKey, Mode=TwoWay}" />
+            <TextBox
+                Header="Modelo"
+                PlaceholderText="nome do modelo"
+                Text="{x:Bind ViewModel.Model, Mode=TwoWay}"
+                Visibility="{x:Bind BoolToVisibility(ViewModel.ShowsModelField), Mode=OneWay}" />
+            <PasswordBox Header="API key" Password="{x:Bind ViewModel.ApiKey, Mode=TwoWay}" />
             <TextBlock
                 FontSize="12"
                 Opacity="0.7"

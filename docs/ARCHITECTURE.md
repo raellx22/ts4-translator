@@ -110,13 +110,26 @@ saída já existente não é sobrescrita).
   `BuildSystemPrompt` acrescenta uma seção listando cada termo (`NeverTranslate` vira "nunca traduzir";
   os demais viram "deve ser traduzido como X") — ver DEC-012. 15 testes com um `HttpMessageHandler`
   falso (nenhum servidor real é necessário nem contatado — seção 44).
-- `OpenAICompatible.OpenAICompatibleProviderFactory : ITranslationProviderFactory` — constrói o
-  provider ativo a partir do que está salvo em `IProviderConfigurationService`; a UI (`EditorPage`,
-  `SettingsPage`) só conhece essa fábrica, nunca `OpenAICompatibleProvider` diretamente.
-- Ainda faltam: Argos Translate (Fase 4, bloqueado em prototipagem de empacotamento — ver ROADMAP),
-  NVIDIA NIM com preset Riva Translate (Fase 5 — reutiliza `OpenAICompatibleProvider` por baixo, já que
-  o endpoint é compatível com OpenAI; falta só a validação do formato de prompt real com uma API key),
-  DeepL, Google, OpenAI, Gemini, Claude (Fase 6). Cada um isolado o suficiente para uma falha ou
+- `DeepL.DeepLProvider : ITranslationProvider` — API dedicada de tradução (não um chat model), então
+  `SupportsGlossary`/`SupportsCustomPrompt` são `false` honestamente (sem system prompt para injetar
+  isso — o glossário nativo da própria DeepL e `tag_handling=xml` para proteção de token mais robusta
+  ficam como melhoria futura, não implementados). DeepL correlaciona resultado por **posição no
+  array**, não por um id — reconciliado por posição dentro do provider (zip por índice), para que o
+  resto do app (`TranslationOrchestrator`) só veja resultados com `Id` explícito. 12 testes com HTTP
+  falso.
+- `GoogleGemini.GoogleGeminiProvider : ITranslationProvider` — mesma estratégia de
+  "manda array JSON, pede array JSON de volta" do `OpenAICompatibleProvider` (Gemini também é um
+  modelo generativo), envelope `generateContent`/`systemInstruction` e auth via header
+  `x-goog-api-key`. A lógica de prompt/parsing foi duplicada de `OpenAICompatibleProvider`
+  deliberadamente (só o segundo provider que precisa dela — ver DEC-019 para o porquê de não
+  extrair um helper compartilhado ainda). 13 testes com HTTP falso.
+- `ConfiguredProviderFactory : ITranslationProviderFactory` — substitui a antiga
+  `OpenAICompatibleProviderFactory`; único lugar que mapeia `ProviderKind` (`OpenAICompatible`/`DeepL`/
+  `GoogleGemini`) para a classe concreta certa a partir do que está salvo em
+  `IProviderConfigurationService`. A UI (`EditorPage`, `SettingsPage`) só conhece essa fábrica, nunca
+  um provider concreto diretamente. Ver DEC-019.
+- Ainda faltam: Argos Translate (Fase 4, bloqueado em prototipagem de empacotamento — ver
+  `docs/ARGOS.md`), OpenAI dedicado, Claude (Fase 6). Cada um isolado o suficiente para uma falha ou
   mudança de API de um não afetar os outros nem o core do app (seção 18).
 
 ### TS4Translator.Persistence
@@ -127,8 +140,10 @@ fuzzy por similaridade de Levenshtein via `FindSimilarAsync` — a "killer featu
 DEC-016), `Project` (nome, arquivos `.package` importados, par de locales,
 timestamps — seção 33), `ProjectString` (cada string extraída, ligada ao `Project` e à `StblKey`/
 `KeyHash` de origem — upsert por hash preserva traduções ao reimportar a mesma versão de um mod,
-seção 25), `ProviderConfiguration` (endpoint/modelo/temperatura do provider ativo; a API key em si
-não mora aqui — ver `Infrastructure`), `ProjectStringRevision` (texto anterior de uma tradução
+seção 25), `ProviderConfiguration` (`Kind`/endpoint/modelo opcional/temperatura do provider ativo — só
+uma configuração ativa por vez, de qual `ProviderKind` o usuário escolheu; a API key em si não mora
+aqui — ver `Infrastructure` — e é namespaced por `Kind` no `ISecretStore`, então trocar de tipo nunca
+vaza nem apaga a key de um tipo diferente, DEC-019), `ProjectStringRevision` (texto anterior de uma tradução
 sobrescrita, gravado por `EfProjectStringService.UpdateTranslationAsync` antes de qualquer overwrite —
 não na primeira tradução de uma string, seção 31), e `GlossaryTerm` (global quando `ProjectId == null`,
 específico de projeto quando não — DEC-012). `TranslatorDbContext` é resolvido via
@@ -185,10 +200,13 @@ uma vez antes de ativar a janela. `App.Services` (um service locator estático �
   `IStringTableService.WithLocale`, escreve com `IPackageService.WriteStringTablesAsync`, e só reporta
   sucesso depois de reabrir o arquivo e comparar cada string com o que deveria estar lá (round-trip
   real, seção 28).
-- **Settings** (`Pages/SettingsPage.xaml` + `ViewModels/SettingsPageViewModel.cs`) — formulário para
-  configurar o provider OpenAI-compatible ativo (nome/endpoint/modelo/API key) via
-  `IProviderConfigurationService`, com botão "Testar conexão" que chama o provider de verdade, e um
-  botão "Usar preset NVIDIA NIM" que só preenche endpoint/model conhecidos (DEC-014).
+- **Settings** (`Pages/SettingsPage.xaml` + `ViewModels/SettingsPageViewModel.cs`) — `ComboBox` de tipo
+  de provider (OpenAI-compatible/DeepL/Google Gemini), formulário para configurar o ativo
+  (nome/endpoint/modelo opcional/API key) via `IProviderConfigurationService`, campo "Modelo" escondido
+  quando o tipo não usa esse conceito (`ShowsModelField`, DeepL), auto-preenchimento de endpoint/modelo
+  padrão ao trocar de tipo só quando o campo atual está vazio ou ainda é um valor padrão conhecido
+  (nunca sobrescreve algo que o usuário digitou — DEC-019), botão "Testar conexão" que chama o provider
+  de verdade, e um botão "Usar preset NVIDIA NIM" que só preenche endpoint/model conhecidos (DEC-014).
 - **Glossário** (`Pages/GlossaryPage.xaml` + `ViewModels/GlossaryPageViewModel.cs`) — adicionar/listar/
   remover termos **globais** do glossário via `IGlossaryService` (termos por projeto ainda não têm UI —
   DEC-013). O botão "Remover" de cada linha usa `Tag="{x:Bind}"` + `Click` no code-behind, não

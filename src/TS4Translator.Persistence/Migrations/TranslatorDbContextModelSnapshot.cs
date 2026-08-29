@@ -178,8 +178,11 @@ namespace TS4Translator.Persistence.Migrations
                     b.Property<bool>("HasApiKey")
                         .HasColumnType("INTEGER");
 
-                    b.Property<string>("Model")
+                    b.Property<string>("Kind")
                         .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Model")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("Name")

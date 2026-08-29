@@ -54,5 +54,11 @@ public sealed class TranslatorDbContext(DbContextOptions<TranslatorDbContext> op
                 .IsRequired(false)
                 .OnDelete(DeleteBehavior.Cascade);
         });
+
+        // Stored as the enum's name ("DeepL", not 1) so the column stays readable and stable even if
+        // ProviderKind's members are ever reordered.
+        modelBuilder.Entity<ProviderConfigurationRecord>()
+            .Property(r => r.Kind)
+            .HasConversion<string>();
     }
 }

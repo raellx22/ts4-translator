@@ -761,3 +761,133 @@ chunking no ViewModel resolve os dois de uma vez sem tocar num contrato já usad
 **Consequências:** Qualquer fluxo futuro que também dispare tradução em massa (ex.: uma ação em lote na
 Home) deve seguir o mesmo padrão de chunking + persistência incremental, não voltar a chamar o
 orquestrador uma única vez para milhares de itens.
+
+---
+
+## DEC-019 — Providers DeepL e Google Gemini; `ProviderConfiguration` ganha `Kind` para suportar múltiplos tipos de provider
+
+**Contexto:** O usuário notou que a tela de Configurações só tinha um formulário (o provider
+OpenAI-compatible, usado para NVIDIA NIM/LM Studio) e perguntou pelos outros providers listados no
+brief original (seção 18: DeepL, Google, OpenAI dedicado, Claude). Investigação confirmou: só
+`OpenAICompatibleProvider` existia no código — os demais nunca tinham sido implementados (documentado
+honestamente no ROADMAP como "não iniciados", mas não visível olhando só a UI). Pedido do usuário:
+implementar DeepL e Google Gemini.
+
+**Decisão — mudança de arquitetura, não só duas classes novas:** o app só suportava configurar **um**
+tipo de provider (`ProviderConfiguration` não tinha noção de "tipo"). Para suportar múltiplos tipos:
+
+- `ProviderKind` (enum: `OpenAICompatible`, `DeepL`, `GoogleGemini`) — novo em `Core/Providers/`.
+  `ProviderConfiguration.Kind` e `.Model` (agora `string?`, já que DeepL não tem conceito de modelo).
+  `IProviderConfigurationService.SaveAsync` ganha um parâmetro `kind`. Migration `AddProviderKind`
+  adiciona a coluna (default `"OpenAICompatible"` para linhas existentes — o único tipo que já existia
+  antes desta mudança) e torna `Model` nullable.
+- **API key namespaced por `Kind`**, não uma chave fixa (`$"provider:{kind}"` em vez de
+  `"provider:openai-compatible"` fixo): trocar de tipo e salvar sem uma key nova (deixando em branco,
+  "não mexer") não deve nem vazar a key de um tipo diferente nem apagá-la — cada tipo mantém seu
+  próprio slot no `ISecretStore`, mesmo só existindo uma configuração ativa por vez.
+  `EfProviderConfigurationService.GetApiKey()` (síncrono por design de interface) passou a fazer uma
+  leitura própria do banco para saber o `Kind` atual antes de resolver o nome do secret.
+- **Bug real pego pelo próprio teste que escrevi para essa mudança**: `HasApiKey` inicialmente só era
+  atualizado dentro do `if (apiKey is not null)` — trocar de `Kind` passando `apiKey: null` (semântica
+  "não mexer na key deste save") deixava `HasApiKey` com o valor *do tipo anterior*, então uma
+  configuração DeepL recém-criada aparecia como "tem API key" mesmo nunca tendo recebido uma. Corrigido
+  recalculando `HasApiKey` a partir do `ISecretStore` a cada `SaveAsync`, nunca herdando o valor antigo
+  do registro.
+- `DeepLProvider` (`Providers/DeepL/`) — API dedicada de tradução, não um chat model:
+  `SupportsGlossary`/`SupportsCustomPrompt` reportados como `false` honestamente (DeepL não tem
+  conceito de prompt de sistema para injetar isso; o recurso de glossário nativo da própria DeepL e o
+  `tag_handling=xml` para proteção de token mais robusta ficam documentados como melhoria futura, não
+  implementados). DeepL correlaciona resultado por **posição no array**, não por um id que a chamada
+  controla — reconciliado internamente no provider (zip por índice) para que
+  `TranslationOrchestrator` continue só vendo resultados com `Id` explícito, nunca precisando confiar
+  em posição.
+- `GoogleGeminiProvider` (`Providers/GoogleGemini/`) — mesma estratégia de
+  `OpenAICompatibleProvider` ("manda um array JSON, pede um array JSON de volta", com o mesmo scanner
+  de recuperação de JSON truncado), porque Gemini também é um modelo generativo, só com envelope de
+  request/response e cabeçalho de auth diferentes (`x-goog-api-key`, e um campo `systemInstruction`
+  dedicado em vez de uma mensagem de sistema dentro de `messages`). A lógica de prompt/parsing foi
+  **duplicada** de `OpenAICompatibleProvider` deliberadamente, não extraída para um helper
+  compartilhado — é só o segundo provider que precisa dela; extrair uma abstração comum é razoável se
+  um terceiro provider precisar do mesmo padrão, não antes ("regra de três").
+- `ConfiguredProviderFactory` (`Providers/`) substitui `OpenAICompatibleProviderFactory` como a
+  implementação registrada de `ITranslationProviderFactory` — único lugar que sabe mapear `ProviderKind`
+  para a classe concreta certa.
+- `SettingsPageViewModel`/`SettingsPage.xaml` ganham um `ComboBox` de "Tipo de provider", campo
+  "Modelo" escondido quando o tipo é DeepL, e auto-preenchimento de endpoint/modelo padrão ao trocar de
+  tipo — mas só quando o valor atual do campo Endpoint é vazio **ou já é um dos valores padrão
+  conhecidos** (`KnownDefaultEndpoints`), nunca quando o usuário digitou algo próprio. Essa checagem
+  por "é um padrão conhecido" (não só "está vazio") foi necessária porque um "só preenche se vazio"
+  simples quebra ao explorar mais de um tipo em sequência: o primeiro preenchimento já deixa o campo
+  não-vazio, impedindo o preenchimento do segundo tipo. Verificado rodando o app de verdade via UI
+  Automation: alternar entre os três tipos preenche o endpoint certo a cada troca; um valor customizado
+  sobrevive à troca de tipo sem ser sobrescrito; salvar e recarregar a página preserva `Kind`
+  corretamente.
+
+**Testes adicionados:** 12 em `DeepLProviderTests` (reconciliação por posição, mapeamento de idioma
+EN-US/EN-GB/PT-BR/PT-PT, header de auth, capabilities honestas), 13 em `GoogleGeminiProviderTests`
+(mesma bateria de `OpenAICompatibleProviderTests` adaptada: JSON truncado, markdown fences, tradução
+nula, glossário no `systemInstruction`), 4 em `ConfiguredProviderFactoryTests` (uma por `ProviderKind`
++ ausência de configuração), 3 novos em `ProviderConfigurationTests` (round-trip com `Model: null`,
+troca de tipo não vaza key do tipo anterior, voltar a um tipo já configurado restaura a key dele).
+Total: 147 → 182 testes.
+
+**Consequências:** Um quarto provider (OpenAI dedicado, Claude, ...) segue o mesmo molde: nova entrada
+em `ProviderKind`, nova classe em `Providers/`, um `case` a mais em `ConfiguredProviderFactory`, uma
+entrada a mais em `SettingsPageViewModel.ProviderKindOptions`. UI de glossário/perfis por tipo de
+provider continua um único formulário genérico — não há telas dedicadas por tipo, só campos
+condicionais (`ShowsModelField`); se um quarto tipo precisar de um campo que os outros não têm, esse
+padrão pode não escalar bem e vale reconsiderar.
+
+---
+
+## DEC-020 — Incidente real de perda de dados: `Remove-AppxPackage` antes de reinstalar apagava a pasta de dados do app inteira; corrigido incrementando a versão do pacote a cada redeploy
+
+**Contexto:** Depois de reinstalar o MSIX para testar a mudança de `ProviderKind` (DEC-019), a tela de
+Configurações voltou a mostrar "Nenhum provider configurado ainda" — a configuração real da NVIDIA NIM
+do usuário (endpoint, modelo, e a API key) tinha desaparecido. Investigação direta no banco (consulta
+SQL contra `LocalCache\Local\TS4Translator\Data\ts4translator.db` do pacote instalado) confirmou:
+tabela `ProviderConfigurations` vazia, e a pasta `Secrets/` (onde `DpapiSecretStore` grava a API key
+criptografada) nem existia mais.
+
+**Causa raiz confirmada:** o procedimento de reinstalação usado repetidamente ao longo desta sessão
+(`Get-AppxPackage ... | Remove-AppxPackage` seguido de `Add-AppxPackage -Path $msix`, documentado em
+`docs/BUILD.md` desde a DEC-010) **apaga a pasta de dados do pacote inteira**
+(`%LOCALAPPDATA%\Packages\<PackageFamilyName>\LocalCache\Local\...`) — banco SQLite e segredos DPAPI
+inclusos. Isso é comportamento padrão e documentado do AppX/MSIX: remover um pacote remove os dados
+por usuário associados a ele, não é um bug do Windows nem deste app. O erro foi meu: apliquei
+"remover antes de instalar" (necessário *uma única vez*, na transição do registro "solto" via
+`dotnet run` para o primeiro pacote assinado — ver DEC-010, onde o `Remove-AppxPackage` era necessário
+para limpar o registro de dev-loop antes de instalar o pacote de verdade) como se fosse o procedimento
+padrão para *toda* atualização de pacote já assinado, quando na verdade cada reinstalação subsequente
+com esse padrão apagava os dados de novo, silenciosamente, sem nenhum aviso.
+
+**Por que ninguém percebeu antes:** entre uma reinstalação e outra, várias verificações desta sessão só
+reabriram o app já instalado (`Stop-Process`/`Start-Process`, sem `Remove-AppxPackage`) — dados
+persistiam normalmente nesses casos, mascarando o problema. Só ficou visível porque o usuário estava
+usando o app de verdade, entre sessões, com uma configuração real que valia a pena perceber a falta.
+
+**Decisão:**
+- `Package.appxmanifest`'s `Identity/@Version` deixa de ficar fixo em `1.0.0.0` — incrementado
+  (`1.0.1.0`, `1.0.2.0`, ...) a cada rebuild que será reinstalado para teste. O Windows só permite
+  `Add-AppxPackage` fazer um **upgrade in-place** (preservando `LocalCache`) quando a versão nova é
+  maior que a instalada — com a mesma versão, teria que remover primeiro (voltando ao problema).
+- `docs/BUILD.md` reescrito: `Remove-AppxPackage` antes de reinstalar **nunca mais**, exceto na
+  transição única solto→assinado. O procedimento de redeploy agora é só incrementar a versão + `Add-AppxPackage`
+  direto, sem remover.
+- **Verificado empiricamente antes de confiar na correção**: salvei uma configuração
+  marcadora (`MARKER-PERSISTENCE-TEST`) na versão `1.0.1.0`, fiz rebuild para `1.0.2.0`, reinstalei só
+  com `Add-AppxPackage` (sem remover), e confirmei via UI Automation que o marcador sobreviveu ao
+  upgrade. Só depois disso o procedimento novo foi documentado como confiável.
+
+**Dado perdido, sem como recuperar:** a configuração real de NVIDIA NIM do usuário (endpoint, modelo,
+API key) precisou ser reconfigurada manualmente por ele depois deste incidente. Não havia como
+recuperar a API key especificamente — DPAPI decifra usando uma chave derivada do perfil do usuário do
+Windows, mas o arquivo cifrado em si tinha sido apagado junto com a pasta de dados; sem o arquivo,
+não há o que decifrar.
+
+**Consequências:** Toda sessão futura que precisar reinstalar o MSIX para testar uma mudança de código
+deve seguir exatamente o procedimento revisado em `docs/BUILD.md` (incrementar versão, nunca remover
+antes de instalar). Isso vale tanto para dados de teste (sintéticos, descartáveis) quanto — com muito
+mais cuidado — para qualquer configuração real que o usuário tenha inserido no app instalado; a partir
+de agora, presumir que **qualquer** dado no pacote instalado pode ser real e irrecuperável, não só
+dados de teste desta sessão.

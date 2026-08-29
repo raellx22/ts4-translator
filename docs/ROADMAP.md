@@ -94,15 +94,25 @@ real nesta sessão (sem chave disponível). Antes de expor isso como "preset Riv
    (DEC-014). Preenche os campos, não salva sozinho, e não afirma que o formato de prompt foi validado
    — os itens 1 e 2 acima continuam pendentes de uma API key real.
 
-## FASE 6 — Providers adicionais — **`OpenAICompatibleProvider` concluído; os demais não iniciados**
+## FASE 6 — Providers adicionais — **três providers reais (OpenAI-compatible/DeepL/Gemini); OpenAI dedicado e Claude não iniciados**
 
 - [x] `OpenAICompatibleProvider` (seção 17) — `TS4Translator.Providers/OpenAICompatible/`. Um
   `POST /chat/completions` por batch, recuperação controlada de JSON truncado/malformado (seção 46),
-  9 testes com HTTP falso. Serve tanto LM Studio local quanto (em teoria, não validado) NVIDIA NIM,
-  já que ambos falam o mesmo protocolo.
+  15 testes com HTTP falso. Serve tanto LM Studio local quanto NVIDIA NIM, já que ambos falam o mesmo
+  protocolo (validado de verdade contra NVIDIA NIM pelo usuário, fora desta sessão — ver DEC-017/018).
+- [x] `DeepLProvider` (seção 18) — `TS4Translator.Providers/DeepL/`. API dedicada de tradução (não um
+  chat model), reconcilia resultado por posição no array (não por id), sem suporte a glossário/prompt
+  customizado (DeepL não tem esse conceito nativo — glossário próprio da DeepL e `tag_handling=xml`
+  ficam como melhoria futura). 12 testes com HTTP falso. **Nunca testado contra a API real.**
+- [x] `GoogleGeminiProvider` (seção 18) — `TS4Translator.Providers/GoogleGemini/`. Mesma estratégia de
+  prompt+recuperação de JSON do `OpenAICompatibleProvider`, envelope `generateContent` do Gemini.
+  13 testes com HTTP falso. **Nunca testado contra a API real.**
+- [x] `ProviderKind`/`ConfiguredProviderFactory` (DEC-019) — Configurações tem um seletor de tipo de
+  provider (não mais um único formulário fixo), cada tipo com sua própria API key namespaced no
+  `ISecretStore`. Ver DEC-019 para o design completo.
 - [ ] Detecção automática de modelos via `GET /v1/models` (seção 17) — não iniciado, não bloqueia o
   provider funcionar com um model id digitado manualmente.
-- [ ] DeepL, Google, OpenAI (API dedicada, não via endpoint compatível), Gemini, Claude — não iniciados.
+- [ ] OpenAI (API dedicada, não via endpoint compatível), Claude — não iniciados.
 
 ## FASE 7 — Translation Memory — **exact match concluído, fuzzy não iniciado**
 
@@ -174,23 +184,24 @@ real nesta sessão (sem chave disponível). Antes de expor isso como "preset Riv
 
 ## Próximas tarefas concretas (em ordem sugerida)
 
-1. **Testar a tradução com um provider real** (LM Studio local ou NVIDIA NIM com API key) — todo o
-   pipeline foi verificado com o fallback "sem provider" e com HTTP falso em teste, mas o caminho
-   HTTP real de ponta a ponta dentro do app (`SettingsPage` → salvar config → `EditorPage` → "Traduzir
-   pendentes" → resposta real chegando) nunca rodou. Ver `docs/HANDOFF.md`.
-2. UI de glossário por projeto (`GlossaryPage` — DEC-013 — cobre só o escopo global hoje; termos
+1. **Usuário reconfigura o provider** (config perdida no incidente da DEC-020) e retoma o teste real
+   contra NVIDIA NIM de onde parou.
+2. **Testar `DeepLProvider`/`GoogleGeminiProvider` contra as APIs reais** (DEC-019) — implementados e
+   testados com HTTP falso, mas nenhum dos dois nunca rodou contra o servidor de verdade.
+3. UI de glossário por projeto (`GlossaryPage` — DEC-013 — cobre só o escopo global hoje; termos
    específicos de um projeto exigiriam passar o `projectId` como parâmetro de navegação, igual ao
    Editor).
-3. `ProviderConfiguration` com suporte a múltiplos perfis salvos (LM Studio + NVIDIA NIM ao mesmo
-   tempo, por exemplo), não só um endpoint ativo por vez.
-4. UI de "sugestões de fuzzy match" navegável no Editor (a API já existe com limiar permissivo de 85% —
+4. `ProviderConfiguration` com suporte a múltiplos perfis salvos simultâneos (um NVIDIA NIM e um DeepL
+   configurados ao mesmo tempo, por exemplo, trocando qual está ativo), não só uma configuração ativa
+   por vez (hoje trocar de `ProviderKind` substitui a anterior).
+5. UI de "sugestões de fuzzy match" navegável no Editor (a API já existe com limiar permissivo de 85% —
    DEC-016 — só falta a tela; hoje o único consumo automático é o limiar conservador de 97% do
    orquestrador).
-5. `AddHttpClient`/`IHttpClientFactory` em `TS4Translator.Infrastructure` — hoje `HttpClient` é um
-   singleton simples registrado direto no `App`; não crítico, mas o padrão correto para um app que vai
-   ganhar mais providers HTTP.
-6. Entidade `TranslationJob` (seção 35) — hoje "Traduzir pendentes" roda tudo de uma vez, sem
-   checkpoint/retomada; para mods grandes (milhares de strings) isso vai precisar de progresso
-   persistido, não só uma chamada síncrona bloqueante.
-7. `SettingsPage` reorganizada em abas reais (General/Translation/Providers/Argos/NVIDIA NIM/Models/Appearance/Advanced,
+6. `AddHttpClient`/`IHttpClientFactory` em `TS4Translator.Infrastructure` — hoje `HttpClient` é um
+   singleton simples registrado direto no `App`; não crítico, mas o padrão correto para um app que já
+   tem três providers HTTP.
+7. Entidade `TranslationJob` persistida (seção 35) — "Traduzir pendentes" já processa em blocos de 100
+   com persistência incremental e cancelamento (DEC-018), mas o progresso não sobrevive a um fechamento
+   do app (não há "retomar de onde parou" entre sessões, só dentro da mesma execução).
+8. `SettingsPage` reorganizada em abas reais (General/Translation/Providers/Argos/NVIDIA NIM/Models/Appearance/Advanced,
    seção 41) e seletor de tema claro/escuro/sistema explícito.

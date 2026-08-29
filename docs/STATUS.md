@@ -1,6 +1,6 @@
 # Status
 
-Última atualização: 2026-08-26.
+Última atualização: 2026-08-28.
 
 ## Current phase
 
@@ -23,12 +23,20 @@ fora desta sessão de desenvolvimento) e encontrou dois problemas reais:
    de cancelar (que preserva o que já foi traduzido).
 
 Continua sem confirmação de que o restante do fluxo (qualidade das traduções, formatação) funciona
-corretamente ponta a ponta com esse provider — o usuário está testando ativamente.
+corretamente ponta a ponta com esse provider.
+
+**Importante:** a configuração de provider do usuário (endpoint, modelo e API key da NVIDIA NIM) foi
+**perdida** num incidente real durante esta sessão — reinstalar o pacote MSIX (`Remove-AppxPackage` +
+`Add-AppxPackage`) apaga a pasta de dados do app inteira, banco e segredos DPAPI inclusos. Corrigido o
+procedimento de redeploy (DEC-020, `docs/BUILD.md`) para nunca mais remover antes de reinstalar, mas a
+configuração antiga não tinha como ser recuperada — o usuário precisa configurar o provider de novo em
+Configurações.
 
 Fora do caminho principal: Fase 0/1/2 essencialmente concluídas; Fase 3 (Translation Core) com o
-pipeline inteiro pronto; Fase 6 com o primeiro provider real (`OpenAICompatibleProvider`); Fase 7
-(Translation Memory) com exact-match pronto; Fase 9 (Editor) e Fase 11 (Export) com a primeira versão
-pronta e verificada. Ver `docs/ROADMAP.md` para o detalhamento completo por fase.
+pipeline inteiro pronto; Fase 6 com três providers reais (`OpenAICompatibleProvider`, `DeepLProvider`,
+`GoogleGeminiProvider`); Fase 7 (Translation Memory) com exact-match pronto; Fase 9 (Editor) e Fase 11
+(Export) com a primeira versão pronta e verificada. Ver `docs/ROADMAP.md` para o detalhamento completo
+por fase.
 
 ## Completed
 
@@ -51,10 +59,14 @@ pronta e verificada. Ver `docs/ROADMAP.md` para o detalhamento completo por fase
 - `DpapiSecretStore`/`ISecretStore` (Infrastructure) — API key de provider criptografada via DPAPI do
   Windows, nunca em texto puro nem no SQLite (seção 19). 6 testes com criptografia real, em diretório
   isolado.
-- `OpenAICompatibleProvider`/`OpenAICompatibleProviderFactory` (Providers) — provider real
-  (LM Studio, NVIDIA NIM, qualquer endpoint compatível com OpenAI), construído a partir da
-  configuração salva pelo usuário. 11 testes contra um `HttpMessageHandler` falso — **nunca exercitado
-  contra um servidor real**.
+- `OpenAICompatibleProvider`, `DeepLProvider`, `GoogleGeminiProvider` (Providers) — três providers
+  reais, construídos por `ConfiguredProviderFactory` a partir de qual `ProviderKind` o usuário escolheu
+  em Configurações (ComboBox de tipo, campo "Modelo" escondido quando não se aplica — DeepL não tem
+  esse conceito). `OpenAICompatibleProvider` serve LM Studio/NVIDIA NIM/qualquer endpoint compatível;
+  `DeepLProvider` reconcilia resultado por posição no array (não tem id como OpenAI-compatible/Gemini);
+  `GoogleGeminiProvider` usa a mesma estratégia de prompt+recuperação de JSON do OpenAI-compatible.
+  36 testes contra `HttpMessageHandler` falso — **nenhum dos três nunca foi exercitado contra um
+  servidor real além do OpenAI-compatible (ver "Blocked" abaixo)**. Ver DEC-019.
 - `HomePage`, `EditorPage`, `SettingsPage` (App) — as três telas de produto reais. Fluxo completo
   (importar → extrair → traduzir/exportar) confirmado rodando o app instalado como MSIX, com um
   `.package` sintético: 4 strings extraídas e persistidas, editor mostrando todas com status,
@@ -100,7 +112,7 @@ pronta e verificada. Ver `docs/ROADMAP.md` para o detalhamento completo por fase
   `AddTranslationServices`, `AddPersistenceServices`, `AddInfrastructureServices`,
   `AddProviderServices`), migration aplicada no `OnLaunched`.
 - Shell WinUI (NavigationView, Mica, título estendido) a partir do template `winui-navview`.
-- Toda decisão relevante registrada em `docs/DECISIONS.md` (DEC-001 a DEC-018).
+- Toda decisão relevante registrada em `docs/DECISIONS.md` (DEC-001 a DEC-020).
 
 ## In progress
 
@@ -113,19 +125,28 @@ Nada bloqueado por motivo interno ao app. Três itens têm **incerteza de fato p
 externa** (não são bloqueios de código, são coisas que só um teste com infraestrutura real resolve):
 
 1. Confirmação de que a tradução funciona corretamente (não só sem crash) contra um provider real, com
-   texto não-nulo — o usuário está testando ativamente; qualquer novo problema encontrado entra numa
-   correção pontual como a DEC-017/DEC-018.
-2. Formato exato do prompt esperado por `nvidia/riva-translate-4b-instruct-v2` — duas fontes
+   texto não-nulo — o usuário vai precisar reconfigurar o provider primeiro (config perdida, ver
+   DEC-020) antes de retomar esse teste; qualquer novo problema encontrado entra numa correção pontual
+   como a DEC-017/DEC-018.
+2. `DeepLProvider`/`GoogleGeminiProvider` nunca rodaram contra a API real de nenhum dos dois — só
+   testados com HTTP falso (DEC-019). Precisam de uma API key de cada para validar de fato.
+3. Formato exato do prompt esperado por `nvidia/riva-translate-4b-instruct-v2` — duas fontes
    discordam (playground ao vivo vs. NGC catalog). Precisa de uma API key NVIDIA real para testar.
-3. Nenhuma receita testada de empacotar Argos Translate sem exigir Python do usuário — ver
+4. Nenhuma receita testada de empacotar Argos Translate sem exigir Python do usuário — ver
    `docs/ARGOS.md` para o design e os passos que faltam.
 
 ## Known issues
 
-- `OpenAICompatibleProvider` nunca foi exercitado contra um servidor real — só contra
-  `HttpMessageHandler` falso em teste. O formato de requisição/resposta segue o contrato padrão de
-  chat-completions da OpenAI, mas particularidades de um servidor real (timeouts, encoding chunked,
-  headers não padrão) não foram verificadas.
+- Nenhum dos três providers (`OpenAICompatibleProvider`, `DeepLProvider`, `GoogleGeminiProvider`) foi
+  exercitado contra um servidor real dentro desta sessão de desenvolvimento — só contra
+  `HttpMessageHandler` falso em teste. O usuário testou `OpenAICompatibleProvider` contra NVIDIA NIM
+  fora desta sessão (achou e ajudou a corrigir bugs reais — DEC-017/DEC-018), mas essa configuração foi
+  perdida no incidente da DEC-020 e precisa ser refeita antes de continuar esse teste.
+- **Reinstalar o pacote MSIX com `Remove-AppxPackage` antes de `Add-AppxPackage` apaga todos os dados
+  do app** (banco SQLite, segredos DPAPI) — já causou perda de dados real de uma configuração de
+  provider do usuário (DEC-020). Procedimento corrigido em `docs/BUILD.md`: incrementar a versão em
+  `Package.appxmanifest` e usar só `Add-AppxPackage` (upgrade in-place, sem remover) para qualquer
+  redeploy depois da instalação inicial.
 - CA1707 (underscore em identificadores) suprimido em `tests/` (DEC-003) — intencional.
 - CA1861 suprimido em todo o projeto `TS4Translator.Persistence` (DEC-007) por causa do código gerado
   pelo `dotnet ef migrations add` — intencional.
@@ -136,7 +157,7 @@ externa** (não são bloqueios de código, são coisas que só um teste com infr
 
 ## Tests currently failing
 
-Nenhum. 147 testes automatizados passando (`dotnet test TS4Translator.sln --filter "FullyQualifiedName!~TS4Translator.App"`).
+Nenhum. 182 testes automatizados passando (`dotnet test TS4Translator.sln --filter "FullyQualifiedName!~TS4Translator.App"`).
 `TS4Translator.Core.Tests` finalmente tem testes reais (`StringSimilarityTests`) — estava vazio (só
 scaffolding do template) desde o início do projeto.
 `TS4Translator.App` não tem testes automatizados de UI (não há framework de UI test configurado), mas
@@ -162,8 +183,9 @@ para desenvolvimento normal; empacotar como MSIX e instalar para testar picker d
 ## Next milestones
 
 Ver "Próximas tarefas concretas" no final de `docs/ROADMAP.md`. Em ordem:
-1. Testar a tradução com um provider real (LM Studio ou NVIDIA NIM) — ainda pendente, ver DEC-011.
-2. UI de glossário por projeto (hoje só o escopo global tem tela — DEC-013).
-3. UI de "sugestões de fuzzy match" navegável no Editor (a API já existe com limiar mais permissivo,
+1. Usuário reconfigura o provider (config perdida, DEC-020) e retoma o teste de tradução real.
+2. Testar `DeepLProvider`/`GoogleGeminiProvider` contra as APIs reais deles.
+3. UI de glossário por projeto (hoje só o escopo global tem tela — DEC-013).
+4. UI de "sugestões de fuzzy match" navegável no Editor (a API já existe com limiar mais permissivo,
    0.85 — DEC-016 — só falta a tela).
-4. `TranslationJob`/progresso para lotes grandes, `SettingsPage` em abas reais (seção 41).
+5. `TranslationJob`/progresso para lotes grandes, `SettingsPage` em abas reais (seção 41).

@@ -13,10 +13,12 @@ compatível com OpenAI configurado) → exportar um package traduzido com valida
 A chamada HTTP de tradução em si já foi testada pelo usuário contra a NVIDIA NIM de verdade, o que
 revelou e corrigiu dois problemas reais: uma resposta com `"translation": null` derrubando o lote
 inteiro, e falta de feedback de progresso/salvamento incremental em traduções grandes (ver
-[`docs/DECISIONS.md`](docs/DECISIONS.md) DEC-017/DEC-018). Ver [`docs/STATUS.md`](docs/STATUS.md) para
-o estado exato e [`docs/HANDOFF.md`](docs/HANDOFF.md) para retomar o trabalho em uma nova sessão.
+[`docs/DECISIONS.md`](docs/DECISIONS.md) DEC-017/DEC-018). Um incidente de desenvolvimento apagou essa
+configuração depois (DEC-020, já corrigido para não repetir) — o usuário precisa reconfigurar o
+provider antes de continuar. Ver [`docs/STATUS.md`](docs/STATUS.md) para o estado exato e
+[`docs/HANDOFF.md`](docs/HANDOFF.md) para retomar o trabalho em uma nova sessão.
 
-Implementado e testado até agora (147 testes automatizados, todos passando):
+Implementado e testado até agora (182 testes automatizados, todos passando):
 
 - Solução .NET 10 / WinUI 3 completa (`TS4Translator.sln`), com App, seis bibliotecas de camada e
   cinco projetos de teste, compilando limpo em x64.
@@ -35,8 +37,9 @@ Implementado e testado até agora (147 testes automatizados, todos passando):
 - **Glossário**: termos globais (nomes próprios, marcas — nunca traduzir, ou sempre traduzir de um
   jeito específico), aplicados automaticamente durante a tradução. Tela própria para adicionar/remover
   termos globais; termos por projeto existem no serviço mas ainda sem UI dedicada.
-- **Configurações**: cadastra endpoint/modelo/API key de um provider compatível com OpenAI, com botão
-  "Testar conexão". A API key é criptografada via DPAPI do Windows, nunca em texto puro.
+- **Configurações**: seletor de tipo de provider (OpenAI-compatible, DeepL, ou Google Gemini), cada um
+  com sua própria API key criptografada via DPAPI do Windows (nunca em texto puro), campo "Modelo"
+  escondido quando não se aplica (DeepL), botão "Testar conexão".
 - Fluxo completo confirmado rodando o app instalado como MSIX, com um `.package` sintético — ver
   DEC-011 e [`docs/BUILD.md`](docs/BUILD.md) para como testar isso você mesmo.
 - `TokenProtector`: protege tokens `{0.SimFirstName}`/`{M0.He}`/`{F0.She}`, tags de markup e quebras
@@ -50,14 +53,15 @@ Implementado e testado até agora (147 testes automatizados, todos passando):
 - `Sims4PackageService`/`SmartSimStringTableService`: leitura/escrita real de STBL via
   `LlamaLogic.Packages` (inclusive múltiplas STBLs num único package de saída), locale (incluindo
   PT-BR) via `SmartSimUtilities`, nunca sobrescrevendo o package original. 13 testes.
-- `OpenAICompatibleProvider`: provider real (LM Studio, NVIDIA NIM e qualquer endpoint compatível com
-  OpenAI), com recuperação controlada de JSON truncado/malformado. 11 testes contra um HTTP falso,
-  nenhuma chamada de rede real ainda.
+- `OpenAICompatibleProvider`, `DeepLProvider`, `GoogleGeminiProvider`: três providers reais
+  selecionáveis em Configurações (`ProviderKind`/`ConfiguredProviderFactory`), cada um com recuperação
+  controlada de JSON truncado/malformado onde aplicável. 40 testes contra HTTP falso — `DeepLProvider`/
+  `GoogleGeminiProvider` nunca rodaram contra a API real de nenhum dos dois.
 
-Ainda não implementado: Argos Translate (offline), NVIDIA NIM validado com API key real, UI de
-glossário por projeto (só o escopo global tem tela), fuzzy matching (mod update engine/translation
-memory), biblioteca de perfis de tradução nomeados/reutilizáveis, empacotamento MSIX de distribuição.
-Ver [`docs/ROADMAP.md`](docs/ROADMAP.md).
+Ainda não implementado: Argos Translate (offline), DeepL/Gemini validados com API key real, OpenAI
+dedicado e Claude como providers, UI de glossário por projeto (só o escopo global tem tela), fuzzy
+matching navegável no Editor (a API já existe, só falta a tela), biblioteca de perfis de tradução
+nomeados/reutilizáveis, empacotamento MSIX de distribuição. Ver [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
 ## Por que este stack
 
@@ -84,7 +88,7 @@ src/
   TS4Translator.Core/            contratos (interfaces) e modelos de domínio, sem dependências externas
   TS4Translator.Sims4/           DBPF/STBL via LlamaLogic.Packages, atrás de IPackageService/IStringTableService
   TS4Translator.Translation/     TokenProtector, TranslationValidator, BatchBuilder, orquestração
-  TS4Translator.Providers/       implementações de ITranslationProvider (Argos, NVIDIA NIM, OpenAI-compatible, ...)
+  TS4Translator.Providers/       implementações de ITranslationProvider (OpenAI-compatible, DeepL, Google Gemini, Argos futuramente)
   TS4Translator.Persistence/     SQLite: projetos, translation memory, glossário, jobs
   TS4Translator.Infrastructure/  logging, credenciais (Windows Credential Manager/DPAPI), HTTP
 tests/
