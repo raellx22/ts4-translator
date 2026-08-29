@@ -87,9 +87,11 @@ de continuar testando a tradução real. Depois disso:
 3. Se algo falhar, o `StatusText` do Editor já mostra tipo+mensagem da exceção (`EditorPageViewModel.TranslateAsync`)
    — comece por aí antes de instrumentar mais.
 
-`DeepLProvider`/`GoogleGeminiProvider` nunca rodaram contra a API real de nenhum dos dois — só
-testados com HTTP falso (DEC-019). Validar isso é o próximo item de verificação prática mais valioso,
-já que o código deles nunca foi exercitado fora de teste.
+`DeepLProvider` nunca rodou contra a API real — só testado com HTTP falso (DEC-019). Precisa de uma API
+key para validar de fato. `GoogleGeminiProvider` já foi validado contra a API real com a chave do
+usuário (DEC-021) — mas só depois de corrigir o model id padrão (`gemini-2.0-flash`), que a Google
+tinha descontinuado em 2026-06-01; o padrão atual é `gemini-2.5-flash`, mas Google renomeia/descontinua
+modelos com frequência, então isso pode ficar obsoleto de novo.
 
 Depois de confirmar isso, o próximo item real de código é estender `GlossaryPage` (DEC-013) para
 termos por projeto, não só globais — hoje ela só chama `IGlossaryService` com `projectId: null`. Isso
@@ -102,7 +104,7 @@ Depois disso, seguir a lista "Próximas tarefas concretas" no fim de `docs/ROADM
 ## Important files
 
 - `docs/DECISIONS.md` — leia antes de mudar qualquer versão de pacote ou formato de arquivo; a
-  maioria das escolhas não óbvias já foi justificada ali (DEC-001 a DEC-020).
+  maioria das escolhas não óbvias já foi justificada ali (DEC-001 a DEC-021).
 - `docs/BUILD.md` — como compilar, testar, rodar, e (importante) como empacotar/instalar um MSIX
   local para testar qualquer fluxo que use `FileOpenPicker` ou outra API mediada por broker do
   Windows. `dotnet run` sozinho **não** funciona para esses casos (DEC-010) — não gaste tempo

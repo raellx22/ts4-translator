@@ -891,3 +891,44 @@ antes de instalar). Isso vale tanto para dados de teste (sintéticos, descartáv
 mais cuidado — para qualquer configuração real que o usuário tenha inserido no app instalado; a partir
 de agora, presumir que **qualquer** dado no pacote instalado pode ser real e irrecuperável, não só
 dados de teste desta sessão.
+
+---
+
+## DEC-021 — Modelo padrão do Gemini (`gemini-2.0-flash`) estava obsoleto: Google descontinuou em 1º de junho de 2026
+
+**Contexto:** O usuário reconfigurou o provider Google Gemini com a própria API key (depois do
+incidente da DEC-020) e recebeu `Falha na conexão (HttpRequestException): Response status code does
+not indicate success: 404 (Not Found)` ao clicar "Testar conexão". Pesquisa (`WebSearch`) confirmou:
+`gemini-2.0-flash` — o modelo que `SettingsPageViewModel`/`ConfiguredProviderFactory` usavam como
+padrão (DEC-019) — foi **descontinuado pelo Google em 2026-06-01**, meses antes desta sessão
+(2026-08-28). Não era um bug na construção da URL/request do `GoogleGeminiProvider` (confirmado
+correto: `v1beta/models/{model}:generateContent`, header `x-goog-api-key`) — o endpoint respondia
+normalmente, só não reconhecia mais aquele id de modelo específico.
+
+**Decisão:**
+- Trocado o padrão para `gemini-2.5-flash` em `SettingsPageViewModel.OnSelectedProviderKindLabelChanged`
+  e no fallback de `ConfiguredProviderFactory` (usado quando `configuration.Model` é `null`).
+- `GoogleGeminiProviderOptions.Model` ganhou um comentário XML explícito avisando que a Google
+  descontinua/renomeia ids de modelo Gemini com alguma frequência, e que um 404 em "Testar conexão" é
+  a primeira coisa a suspeitar do id de modelo configurado, não da forma da requisição.
+- `SettingsPageViewModel.TestConnectionAsync` ganhou um `catch` específico para
+  `HttpRequestException` com `StatusCode == 404`, com uma mensagem que já aponta para o campo Modelo em
+  vez do texto genérico de exceção — o único jeito de o usuário (ou uma sessão futura) diagnosticar isso
+  rápido sem precisar ler código-fonte.
+- **Verificado com a API key real do usuário** (não só um teste automatizado): depois da correção,
+  "Testar conexão" retornou `Conexão OK. Resposta de teste: "Olá."` — primeira confirmação real de que
+  `GoogleGeminiProvider` funciona ponta a ponta contra a API do Google, não só contra HTTP falso.
+
+**Por que isso não foi pego antes:** o valor `"gemini-2.0-flash"` foi escolhido de memória (o
+conhecimento deste modelo tem corte em janeiro de 2026, antes da descontinuação), sem verificação viva
+contra a documentação atual da Google no momento da DEC-019 — só testado contra HTTP falso, que não
+tem como detectar um model id real e obsoleto. É exatamente o tipo de "detalhe que muda com o tempo,
+fora do controle do código" que já motivou avisos parecidos em DEC-006 (não confiar cegamente em doc de
+terceiro) e DEC-014 (presets não afirmam qualidade validada) — a diferença aqui é que nem doc de
+terceiro foi consultada, foi só memória.
+
+**Consequências:** Qualquer id de modelo hardcoded como "padrão sensato" neste app (Gemini, e no futuro
+qualquer outro provider baseado em modelo) é candidato a ficar obsoleto sem aviso — o app não tem
+detecção automática de modelos disponíveis ainda (`GET /v1beta/models`/`GET /v1/models`, item já listado
+no ROADMAP Fase 6). Até isso existir, checar o id de modelo configurado deveria ser o primeiro passo
+diante de qualquer 404 em "Testar conexão", antes de suspeitar do código.

@@ -184,10 +184,10 @@ real nesta sessão (sem chave disponível). Antes de expor isso como "preset Riv
 
 ## Próximas tarefas concretas (em ordem sugerida)
 
-1. **Usuário reconfigura o provider** (config perdida no incidente da DEC-020) e retoma o teste real
-   contra NVIDIA NIM de onde parou.
-2. **Testar `DeepLProvider`/`GoogleGeminiProvider` contra as APIs reais** (DEC-019) — implementados e
-   testados com HTTP falso, mas nenhum dos dois nunca rodou contra o servidor de verdade.
+1. **Reconfigurar o provider NVIDIA NIM** (config perdida no incidente da DEC-020) e retomar o teste
+   real de tradução de onde parou. `GoogleGeminiProvider` já foi validado contra a API real (DEC-021).
+2. **Testar `DeepLProvider` contra a API real** (DEC-019) — implementado e testado com HTTP falso, mas
+   nunca rodou contra o servidor de verdade.
 3. UI de glossário por projeto (`GlossaryPage` — DEC-013 — cobre só o escopo global hoje; termos
    específicos de um projeto exigiriam passar o `projectId` como parâmetro de navegação, igual ao
    Editor).

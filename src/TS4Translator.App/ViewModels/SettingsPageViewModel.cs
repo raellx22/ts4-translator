@@ -81,7 +81,7 @@ public sealed partial class SettingsPageViewModel(
         (Endpoint, Model) = value switch
         {
             DeepLLabel => ("https://api-free.deepl.com", string.Empty),
-            GoogleGeminiLabel => ("https://generativelanguage.googleapis.com", "gemini-2.0-flash"),
+            GoogleGeminiLabel => ("https://generativelanguage.googleapis.com", "gemini-2.5-flash"),
             _ => ("http://localhost:1234/v1", Model),
         };
     }
@@ -184,6 +184,14 @@ public sealed partial class SettingsPageViewModel(
             StatusText = results.Count > 0
                 ? $"Conexão OK. Resposta de teste: \"{results[0].TranslatedProtectedText}\""
                 : "O servidor respondeu, mas sem nenhum resultado utilizável. Verifique o modelo configurado.";
+        }
+        catch (HttpRequestException exception) when (exception.StatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            // The single most common cause seen in practice: providers rename/retire model ids over
+            // time (e.g. Google retired "gemini-2.0-flash" in June 2026), and this app's hardcoded
+            // default can go stale between updates. A wrong endpoint typo would usually surface as a
+            // DNS/connection failure instead, not a clean 404 from a server that did respond.
+            StatusText = $"Falha na conexão (404 Not Found): {exception.Message}\nO endpoint respondeu, mas não encontrou o modelo \"{Model}\" - confira se esse id ainda existe (providers costumam descontinuar modelos com o tempo) e corrija o campo Modelo.";
         }
         catch (Exception exception)
         {

@@ -28,7 +28,7 @@ public class GoogleGeminiProviderTests
     {
         var handler = new FakeHttpMessageHandler(statusCode, responseBody);
         var httpClient = new HttpClient(handler);
-        var provider = new GoogleGeminiProvider(httpClient, new GoogleGeminiProviderOptions("https://generativelanguage.googleapis.com", "gemini-2.0-flash", apiKey));
+        var provider = new GoogleGeminiProvider(httpClient, new GoogleGeminiProviderOptions("https://generativelanguage.googleapis.com", "gemini-2.5-flash", apiKey));
         return (provider, handler);
     }
 
@@ -163,6 +163,6 @@ public class GoogleGeminiProviderTests
     {
         var (sut, _) = CreateSut(HttpStatusCode.OK, GenerateContentEnvelope("[]"));
 
-        Assert.Contains("gemini-2.0-flash", sut.Name);
+        Assert.Contains("gemini-2.5-flash", sut.Name);
     }
 }

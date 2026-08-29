@@ -112,7 +112,7 @@ por fase.
   `AddTranslationServices`, `AddPersistenceServices`, `AddInfrastructureServices`,
   `AddProviderServices`), migration aplicada no `OnLaunched`.
 - Shell WinUI (NavigationView, Mica, título estendido) a partir do template `winui-navview`.
-- Toda decisão relevante registrada em `docs/DECISIONS.md` (DEC-001 a DEC-020).
+- Toda decisão relevante registrada em `docs/DECISIONS.md` (DEC-001 a DEC-021).
 
 ## In progress
 
@@ -128,8 +128,10 @@ externa** (não são bloqueios de código, são coisas que só um teste com infr
    texto não-nulo — o usuário vai precisar reconfigurar o provider primeiro (config perdida, ver
    DEC-020) antes de retomar esse teste; qualquer novo problema encontrado entra numa correção pontual
    como a DEC-017/DEC-018.
-2. `DeepLProvider`/`GoogleGeminiProvider` nunca rodaram contra a API real de nenhum dos dois — só
-   testados com HTTP falso (DEC-019). Precisam de uma API key de cada para validar de fato.
+2. `DeepLProvider` nunca rodou contra a API real — só testado com HTTP falso (DEC-019). Precisa de uma
+   API key para validar de fato. `GoogleGeminiProvider` **já foi validado contra a API real** com a
+   chave do usuário (DEC-021, depois de corrigir o model id padrão que estava obsoleto) — "Testar
+   conexão" retornou "Conexão OK." de verdade.
 3. Formato exato do prompt esperado por `nvidia/riva-translate-4b-instruct-v2` — duas fontes
    discordam (playground ao vivo vs. NGC catalog). Precisa de uma API key NVIDIA real para testar.
 4. Nenhuma receita testada de empacotar Argos Translate sem exigir Python do usuário — ver
@@ -137,11 +139,12 @@ externa** (não são bloqueios de código, são coisas que só um teste com infr
 
 ## Known issues
 
-- Nenhum dos três providers (`OpenAICompatibleProvider`, `DeepLProvider`, `GoogleGeminiProvider`) foi
-  exercitado contra um servidor real dentro desta sessão de desenvolvimento — só contra
-  `HttpMessageHandler` falso em teste. O usuário testou `OpenAICompatibleProvider` contra NVIDIA NIM
-  fora desta sessão (achou e ajudou a corrigir bugs reais — DEC-017/DEC-018), mas essa configuração foi
-  perdida no incidente da DEC-020 e precisa ser refeita antes de continuar esse teste.
+- `DeepLProvider` nunca foi exercitado contra um servidor real, só contra `HttpMessageHandler` falso em
+  teste. `OpenAICompatibleProvider` foi validado pelo usuário contra NVIDIA NIM fora desta sessão
+  (achou e ajudou a corrigir bugs reais — DEC-017/DEC-018), mas essa configuração foi perdida no
+  incidente da DEC-020 e precisa ser refeita para continuar testando. `GoogleGeminiProvider` **já foi
+  validado contra a API real** com a chave do usuário (DEC-021) depois de corrigir o model id padrão
+  que tinha sido descontinuado pelo Google.
 - **Reinstalar o pacote MSIX com `Remove-AppxPackage` antes de `Add-AppxPackage` apaga todos os dados
   do app** (banco SQLite, segredos DPAPI) — já causou perda de dados real de uma configuração de
   provider do usuário (DEC-020). Procedimento corrigido em `docs/BUILD.md`: incrementar a versão em
@@ -183,8 +186,9 @@ para desenvolvimento normal; empacotar como MSIX e instalar para testar picker d
 ## Next milestones
 
 Ver "Próximas tarefas concretas" no final de `docs/ROADMAP.md`. Em ordem:
-1. Usuário reconfigura o provider (config perdida, DEC-020) e retoma o teste de tradução real.
-2. Testar `DeepLProvider`/`GoogleGeminiProvider` contra as APIs reais deles.
+1. Usuário reconfigura o provider NVIDIA NIM (config perdida, DEC-020) e retoma o teste de tradução
+   real. `GoogleGeminiProvider` já foi validado contra a API real (DEC-021).
+2. Testar `DeepLProvider` contra a API real dele.
 3. UI de glossário por projeto (hoje só o escopo global tem tela — DEC-013).
 4. UI de "sugestões de fuzzy match" navegável no Editor (a API já existe com limiar mais permissivo,
    0.85 — DEC-016 — só falta a tela).

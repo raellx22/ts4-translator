@@ -30,7 +30,7 @@ public sealed class ConfiguredProviderFactory(IProviderConfigurationService conf
             ProviderKind.DeepL => new DeepLProvider(
                 httpClient, new DeepLProviderOptions(configuration.Endpoint, apiKey)),
             ProviderKind.GoogleGemini => new GoogleGeminiProvider(
-                httpClient, new GoogleGeminiProviderOptions(configuration.Endpoint, configuration.Model ?? "gemini-2.0-flash", apiKey)),
+                httpClient, new GoogleGeminiProviderOptions(configuration.Endpoint, configuration.Model ?? "gemini-2.5-flash", apiKey)),
             _ => throw new NotSupportedException($"Unknown provider kind: {configuration.Kind}."),
         };
     }

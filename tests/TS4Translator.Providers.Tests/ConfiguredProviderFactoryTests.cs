@@ -51,13 +51,13 @@ public class ConfiguredProviderFactoryTests
     [Fact]
     public async Task CreateActiveProviderAsync_GoogleGeminiConfiguration_ReturnsProviderWithMatchingModel()
     {
-        var config = new ProviderConfiguration(1, ProviderKind.GoogleGemini, "Gemini", "https://generativelanguage.googleapis.com", "gemini-2.0-flash", 0.0, HasApiKey: true);
+        var config = new ProviderConfiguration(1, ProviderKind.GoogleGemini, "Gemini", "https://generativelanguage.googleapis.com", "gemini-2.5-flash", 0.0, HasApiKey: true);
         var factory = new ConfiguredProviderFactory(new FakeProviderConfigurationService(config, "fake-key"), new HttpClient());
 
         var provider = await factory.CreateActiveProviderAsync();
 
         Assert.NotNull(provider);
-        Assert.Contains("gemini-2.0-flash", provider.Name);
+        Assert.Contains("gemini-2.5-flash", provider.Name);
     }
 
     [Fact]
