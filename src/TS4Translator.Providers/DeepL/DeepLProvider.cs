@@ -4,6 +4,7 @@ using System.Net.Http.Json;
 using System.Text.Json.Serialization;
 using TS4Translator.Core.Glossary;
 using TS4Translator.Core.Translation;
+using TS4Translator.Providers.Resilience;
 
 namespace TS4Translator.Providers.DeepL;
 
@@ -14,8 +15,10 @@ namespace TS4Translator.Providers.DeepL;
 /// than pretending to honor them). DeepL's own glossary feature (a separate resource uploaded via its
 /// own API) and its <c>tag_handling=xml</c> option for better token protection are real DeepL features
 /// this provider does not use yet - a reasonable follow-up once basic translation is proven working.
+/// A transient failure (503, 429, timeout, ...) is retried with backoff via <see cref="HttpRetry"/>
+/// before giving up (brief section 11).
 /// </summary>
-public sealed class DeepLProvider(HttpClient httpClient, DeepLProviderOptions options) : ITranslationProvider
+public sealed class DeepLProvider(HttpClient httpClient, DeepLProviderOptions options, int maxRetries = 3) : ITranslationProvider
 {
     public string Name => "deepl";
 
@@ -42,16 +45,22 @@ public sealed class DeepLProvider(HttpClient httpClient, DeepLProviderOptions op
             ToDeepLSourceLang(sourceLocale),
             ToDeepLTargetLang(targetLocale));
 
-        using var request = new HttpRequestMessage(HttpMethod.Post, $"{options.Endpoint.TrimEnd('/')}/v2/translate")
-        {
-            Content = JsonContent.Create(requestBody),
-        };
-        if (!string.IsNullOrEmpty(options.ApiKey))
-        {
-            request.Headers.Authorization = new AuthenticationHeaderValue("DeepL-Auth-Key", options.ApiKey);
-        }
+        using var response = await HttpRetry.SendWithRetryAsync(
+            async ct =>
+            {
+                using var request = new HttpRequestMessage(HttpMethod.Post, $"{options.Endpoint.TrimEnd('/')}/v2/translate")
+                {
+                    Content = JsonContent.Create(requestBody),
+                };
+                if (!string.IsNullOrEmpty(options.ApiKey))
+                {
+                    request.Headers.Authorization = new AuthenticationHeaderValue("DeepL-Auth-Key", options.ApiKey);
+                }
 
-        using var response = await httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
+                return await httpClient.SendAsync(request, ct).ConfigureAwait(false);
+            },
+            cancellationToken,
+            maxRetries).ConfigureAwait(false);
         response.EnsureSuccessStatusCode();
 
         var body = await response.Content.ReadFromJsonAsync<DeepLResponse>(cancellationToken).ConfigureAwait(false);

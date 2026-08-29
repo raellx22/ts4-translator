@@ -24,11 +24,11 @@ public class GoogleGeminiProviderTests
         return JsonSerializer.Serialize(envelope);
     }
 
-    private static (GoogleGeminiProvider Provider, FakeHttpMessageHandler Handler) CreateSut(HttpStatusCode statusCode, string responseBody, string? apiKey = null)
+    private static (GoogleGeminiProvider Provider, FakeHttpMessageHandler Handler) CreateSut(HttpStatusCode statusCode, string responseBody, string? apiKey = null, int maxRetries = 3)
     {
         var handler = new FakeHttpMessageHandler(statusCode, responseBody);
         var httpClient = new HttpClient(handler);
-        var provider = new GoogleGeminiProvider(httpClient, new GoogleGeminiProviderOptions("https://generativelanguage.googleapis.com", "gemini-2.5-flash", apiKey));
+        var provider = new GoogleGeminiProvider(httpClient, new GoogleGeminiProviderOptions("https://generativelanguage.googleapis.com", "gemini-2.5-flash", apiKey), maxRetries);
         return (provider, handler);
     }
 
@@ -110,10 +110,29 @@ public class GoogleGeminiProviderTests
     [Fact]
     public async Task TranslateBatchAsync_ServerReturnsError_ThrowsHttpRequestException()
     {
-        var (sut, _) = CreateSut(HttpStatusCode.InternalServerError, "server error");
+        // maxRetries: 0 keeps this deterministic and fast - retry behavior itself is covered by
+        // HttpRetryTests and TranslateBatchAsync_TransientServerError_RetriesAndEventuallySucceeds below.
+        var (sut, _) = CreateSut(HttpStatusCode.InternalServerError, "server error", maxRetries: 0);
 
         await Assert.ThrowsAsync<HttpRequestException>(() =>
             sut.TranslateBatchAsync([new TranslationRequestItem("1", "Hello.")], English, PortugueseBrazil));
+    }
+
+    [Fact]
+    public async Task TranslateBatchAsync_TransientServerError_RetriesAndEventuallySucceeds()
+    {
+        var handler = new FakeHttpMessageHandler([
+            (HttpStatusCode.ServiceUnavailable, "overloaded"),
+            (HttpStatusCode.OK, GenerateContentEnvelope("""[{"id":"1","translation":"Olá."}]""")),
+        ]);
+        var httpClient = new HttpClient(handler);
+        var sut = new GoogleGeminiProvider(httpClient, new GoogleGeminiProviderOptions("https://generativelanguage.googleapis.com", "gemini-2.5-flash", null), maxRetries: 2);
+
+        var results = await sut.TranslateBatchAsync([new TranslationRequestItem("1", "Hello.")], English, PortugueseBrazil);
+
+        Assert.Equal(2, handler.CallCount);
+        var result = Assert.Single(results);
+        Assert.Equal("Olá.", result.TranslatedProtectedText);
     }
 
     [Fact]

@@ -18,7 +18,7 @@ configuração depois (DEC-020, já corrigido para não repetir) — o usuário 
 provider antes de continuar. Ver [`docs/STATUS.md`](docs/STATUS.md) para o estado exato e
 [`docs/HANDOFF.md`](docs/HANDOFF.md) para retomar o trabalho em uma nova sessão.
 
-Implementado e testado até agora (182 testes automatizados, todos passando):
+Implementado e testado até agora (202 testes automatizados, todos passando):
 
 - Solução .NET 10 / WinUI 3 completa (`TS4Translator.sln`), com App, seis bibliotecas de camada e
   cinco projetos de teste, compilando limpo em x64.

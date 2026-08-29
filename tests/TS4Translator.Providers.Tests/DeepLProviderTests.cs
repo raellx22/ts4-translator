@@ -19,11 +19,11 @@ public class DeepLProviderTests
         return JsonSerializer.Serialize(envelope);
     }
 
-    private static (DeepLProvider Provider, FakeHttpMessageHandler Handler) CreateSut(HttpStatusCode statusCode, string responseBody, string? apiKey = null)
+    private static (DeepLProvider Provider, FakeHttpMessageHandler Handler) CreateSut(HttpStatusCode statusCode, string responseBody, string? apiKey = null, int maxRetries = 3)
     {
         var handler = new FakeHttpMessageHandler(statusCode, responseBody);
         var httpClient = new HttpClient(handler);
-        var provider = new DeepLProvider(httpClient, new DeepLProviderOptions("https://api-free.deepl.com", apiKey));
+        var provider = new DeepLProvider(httpClient, new DeepLProviderOptions("https://api-free.deepl.com", apiKey), maxRetries);
         return (provider, handler);
     }
 
@@ -78,10 +78,28 @@ public class DeepLProviderTests
     [Fact]
     public async Task TranslateBatchAsync_ServerReturnsError_ThrowsHttpRequestException()
     {
+        // 403 is not a transient status - this is fast regardless of maxRetries (never retried).
         var (sut, _) = CreateSut(HttpStatusCode.Forbidden, "invalid key");
 
         await Assert.ThrowsAsync<HttpRequestException>(() =>
             sut.TranslateBatchAsync([new TranslationRequestItem("1", "Hello.")], English, PortugueseBrazil));
+    }
+
+    [Fact]
+    public async Task TranslateBatchAsync_TransientServerError_RetriesAndEventuallySucceeds()
+    {
+        var handler = new FakeHttpMessageHandler([
+            (HttpStatusCode.ServiceUnavailable, "overloaded"),
+            (HttpStatusCode.OK, TranslationsEnvelope("Olá.")),
+        ]);
+        var httpClient = new HttpClient(handler);
+        var sut = new DeepLProvider(httpClient, new DeepLProviderOptions("https://api-free.deepl.com", null), maxRetries: 2);
+
+        var results = await sut.TranslateBatchAsync([new TranslationRequestItem("1", "Hello.")], English, PortugueseBrazil);
+
+        Assert.Equal(2, handler.CallCount);
+        var result = Assert.Single(results);
+        Assert.Equal("Olá.", result.TranslatedProtectedText);
     }
 
     [Fact]

@@ -112,7 +112,7 @@ por fase.
   `AddTranslationServices`, `AddPersistenceServices`, `AddInfrastructureServices`,
   `AddProviderServices`), migration aplicada no `OnLaunched`.
 - Shell WinUI (NavigationView, Mica, título estendido) a partir do template `winui-navview`.
-- Toda decisão relevante registrada em `docs/DECISIONS.md` (DEC-001 a DEC-021).
+- Toda decisão relevante registrada em `docs/DECISIONS.md` (DEC-001 a DEC-022).
 
 ## In progress
 
@@ -160,7 +160,7 @@ externa** (não são bloqueios de código, são coisas que só um teste com infr
 
 ## Tests currently failing
 
-Nenhum. 182 testes automatizados passando (`dotnet test TS4Translator.sln --filter "FullyQualifiedName!~TS4Translator.App"`).
+Nenhum. 202 testes automatizados passando (`dotnet test TS4Translator.sln --filter "FullyQualifiedName!~TS4Translator.App"`).
 `TS4Translator.Core.Tests` finalmente tem testes reais (`StringSimilarityTests`) — estava vazio (só
 scaffolding do template) desde o início do projeto.
 `TS4Translator.App` não tem testes automatizados de UI (não há framework de UI test configurado), mas

@@ -24,11 +24,11 @@ public class OpenAICompatibleProviderTests
         return JsonSerializer.Serialize(envelope);
     }
 
-    private static (OpenAICompatibleProvider Provider, FakeHttpMessageHandler Handler) CreateSut(HttpStatusCode statusCode, string responseBody, string? apiKey = null)
+    private static (OpenAICompatibleProvider Provider, FakeHttpMessageHandler Handler) CreateSut(HttpStatusCode statusCode, string responseBody, string? apiKey = null, int maxRetries = 3)
     {
         var handler = new FakeHttpMessageHandler(statusCode, responseBody);
         var httpClient = new HttpClient(handler);
-        var provider = new OpenAICompatibleProvider(httpClient, new OpenAICompatibleProviderOptions("http://localhost:1234/v1", "test-model", apiKey));
+        var provider = new OpenAICompatibleProvider(httpClient, new OpenAICompatibleProviderOptions("http://localhost:1234/v1", "test-model", apiKey), maxRetries);
         return (provider, handler);
     }
 
@@ -150,10 +150,29 @@ public class OpenAICompatibleProviderTests
     [Fact]
     public async Task TranslateBatchAsync_ServerReturnsError_ThrowsHttpRequestException()
     {
-        var (sut, _) = CreateSut(HttpStatusCode.InternalServerError, "server error");
+        // maxRetries: 0 keeps this deterministic and fast - retry behavior itself is covered by
+        // HttpRetryTests and TranslateBatchAsync_TransientServerError_RetriesAndEventuallySucceeds below.
+        var (sut, _) = CreateSut(HttpStatusCode.InternalServerError, "server error", maxRetries: 0);
 
         await Assert.ThrowsAsync<HttpRequestException>(() =>
             sut.TranslateBatchAsync([new TranslationRequestItem("1", "Hello.")], English, PortugueseBrazil));
+    }
+
+    [Fact]
+    public async Task TranslateBatchAsync_TransientServerError_RetriesAndEventuallySucceeds()
+    {
+        var handler = new FakeHttpMessageHandler([
+            (HttpStatusCode.ServiceUnavailable, "overloaded"),
+            (HttpStatusCode.OK, ChatCompletionEnvelope("""[{"id":"1","translation":"Olá."}]""")),
+        ]);
+        var httpClient = new HttpClient(handler);
+        var sut = new OpenAICompatibleProvider(httpClient, new OpenAICompatibleProviderOptions("http://localhost:1234/v1", "test-model"), maxRetries: 2);
+
+        var results = await sut.TranslateBatchAsync([new TranslationRequestItem("1", "Hello.")], English, PortugueseBrazil);
+
+        Assert.Equal(2, handler.CallCount);
+        var result = Assert.Single(results);
+        Assert.Equal("Olá.", result.TranslatedProtectedText);
     }
 
     [Fact]

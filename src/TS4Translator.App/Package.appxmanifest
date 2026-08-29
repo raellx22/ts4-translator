@@ -11,7 +11,7 @@
   <Identity
     Name="60A02515-8E6A-4123-8A54-E9CB7C1B7A72"
     Publisher="CN=TS4Translator"
-    Version="1.0.5.0" />
+    Version="1.0.6.0" />
 
   <mp:PhoneIdentity PhoneProductId="60A02515-8E6A-4123-8A54-E9CB7C1B7A72" PhonePublisherId="00000000-0000-0000-0000-000000000000"/>
 

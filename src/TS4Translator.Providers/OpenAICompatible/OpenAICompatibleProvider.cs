@@ -6,6 +6,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using TS4Translator.Core.Glossary;
 using TS4Translator.Core.Translation;
+using TS4Translator.Providers.Resilience;
 
 namespace TS4Translator.Providers.OpenAICompatible;
 
@@ -21,8 +22,11 @@ namespace TS4Translator.Providers.OpenAICompatible;
 /// cleanly is kept, the rest is simply absent from the result list. The caller
 /// (<see cref="Translation.TranslationOrchestrator"/>, in the Translation project) already treats a
 /// missing id as a per-item failure rather than corrupting anything, so partial recovery here is safe.
+/// A transient failure (503, 429, timeout, ...) is retried with backoff via <see cref="HttpRetry"/>
+/// before giving up (brief section 11) - free-tier LLM endpoints return these under load routinely,
+/// independent of the caller's own quota.
 /// </remarks>
-public sealed class OpenAICompatibleProvider(HttpClient httpClient, OpenAICompatibleProviderOptions options) : ITranslationProvider
+public sealed class OpenAICompatibleProvider(HttpClient httpClient, OpenAICompatibleProviderOptions options, int maxRetries = 3) : ITranslationProvider
 {
     private static readonly JsonSerializerOptions RecoveryJsonOptions = new() { PropertyNameCaseInsensitive = true };
 
@@ -54,16 +58,22 @@ public sealed class OpenAICompatibleProvider(HttpClient httpClient, OpenAICompat
                 new ChatMessage("user", JsonSerializer.Serialize(items.Select(i => new PromptRequestItem(i.Id, i.ProtectedText)))),
             ]);
 
-        using var request = new HttpRequestMessage(HttpMethod.Post, $"{options.Endpoint.TrimEnd('/')}/chat/completions")
-        {
-            Content = JsonContent.Create(requestBody),
-        };
-        if (!string.IsNullOrEmpty(options.ApiKey))
-        {
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", options.ApiKey);
-        }
+        using var response = await HttpRetry.SendWithRetryAsync(
+            async ct =>
+            {
+                using var request = new HttpRequestMessage(HttpMethod.Post, $"{options.Endpoint.TrimEnd('/')}/chat/completions")
+                {
+                    Content = JsonContent.Create(requestBody),
+                };
+                if (!string.IsNullOrEmpty(options.ApiKey))
+                {
+                    request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", options.ApiKey);
+                }
 
-        using var response = await httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
+                return await httpClient.SendAsync(request, ct).ConfigureAwait(false);
+            },
+            cancellationToken,
+            maxRetries).ConfigureAwait(false);
         response.EnsureSuccessStatusCode();
 
         var completion = await response.Content.ReadFromJsonAsync<ChatCompletionResponse>(cancellationToken).ConfigureAwait(false);

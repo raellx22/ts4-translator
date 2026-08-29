@@ -65,8 +65,14 @@ o conjunto de itens, não o primeiro que funcionar.
   presets nomeados) — `TranslationProject.CustomInstructions`, editável na Editor, propagado ao
   orquestrador/provider igual ao glossário. `TranslationMemoryEntry.ProfileName` continua `null` (não
   há um nome de perfil reutilizável, só texto livre por projeto) — ver DEC-015 para o porquê do escopo.
-- [ ] Retry/backoff/rate-limit/pause/resume/checkpoint (seção 11, resto) — não iniciado; depende de
-  `TranslationJob` existir como entidade persistida (seção 35), o que também não existe ainda.
+- [x] Retry/backoff em falha transitória de rede (503/429/5xx/timeout) — `Providers/Resilience/HttpRetry.cs`,
+  usado pelos três providers. Confirmado necessário por uma falha real (503 do Gemini derrubando a
+  tradução inteira mesmo com cota de sobra). Ver DEC-022.
+- [ ] Rate-limit proativo/pause/resume/checkpoint entre sessões do app (resto da seção 11) — não
+  iniciado; depende de `TranslationJob` existir como entidade persistida (seção 35), o que também não
+  existe ainda. O que já existe (DEC-018/DEC-022): checkpoint DENTRO de uma execução (blocos de 100
+  persistidos incrementalmente) e retry automático de falha transitória — falta sobreviver a um
+  fechamento do app no meio do caminho.
 - [ ] `ITranslationJobService`/estados de job (seção 35) — não iniciado.
 
 ## FASE 4 — Argos — **não iniciada, deliberadamente (ver `docs/ARGOS.md`)**

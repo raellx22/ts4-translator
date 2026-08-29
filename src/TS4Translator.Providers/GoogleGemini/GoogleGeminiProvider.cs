@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using TS4Translator.Core.Glossary;
 using TS4Translator.Core.Translation;
+using TS4Translator.Providers.Resilience;
 
 namespace TS4Translator.Providers.GoogleGemini;
 
@@ -16,9 +17,12 @@ namespace TS4Translator.Providers.GoogleGemini;
 /// support glossary/custom instructions the same way. The prompt-building and truncated-JSON recovery
 /// logic below intentionally duplicates <c>OpenAICompatibleProvider</c>'s rather than sharing it: this
 /// is only the second provider that needs it, and extracting a shared helper is a reasonable follow-up
-/// if a third one ever needs the same logic, not before.
+/// if a third one ever needs the same logic, not before. A transient failure (503, 429, timeout, ...)
+/// is retried with backoff via <see cref="HttpRetry"/> before giving up (brief section 11) - the
+/// free-tier Gemini API returns 503 under Google-side load routinely, independent of the caller's own
+/// quota (confirmed by a real failure a user hit mid-translation).
 /// </summary>
-public sealed class GoogleGeminiProvider(HttpClient httpClient, GoogleGeminiProviderOptions options) : ITranslationProvider
+public sealed class GoogleGeminiProvider(HttpClient httpClient, GoogleGeminiProviderOptions options, int maxRetries = 3) : ITranslationProvider
 {
     private static readonly JsonSerializerOptions RecoveryJsonOptions = new() { PropertyNameCaseInsensitive = true };
 
@@ -47,16 +51,22 @@ public sealed class GoogleGeminiProvider(HttpClient httpClient, GoogleGeminiProv
             [new GeminiContent([new GeminiPart(JsonSerializer.Serialize(items.Select(i => new PromptRequestItem(i.Id, i.ProtectedText))))])]);
 
         var url = $"{options.Endpoint.TrimEnd('/')}/v1beta/models/{options.Model}:generateContent";
-        using var request = new HttpRequestMessage(HttpMethod.Post, url)
-        {
-            Content = JsonContent.Create(requestBody),
-        };
-        if (!string.IsNullOrEmpty(options.ApiKey))
-        {
-            request.Headers.Add("x-goog-api-key", options.ApiKey);
-        }
+        using var response = await HttpRetry.SendWithRetryAsync(
+            async ct =>
+            {
+                using var request = new HttpRequestMessage(HttpMethod.Post, url)
+                {
+                    Content = JsonContent.Create(requestBody),
+                };
+                if (!string.IsNullOrEmpty(options.ApiKey))
+                {
+                    request.Headers.Add("x-goog-api-key", options.ApiKey);
+                }
 
-        using var response = await httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
+                return await httpClient.SendAsync(request, ct).ConfigureAwait(false);
+            },
+            cancellationToken,
+            maxRetries).ConfigureAwait(false);
         response.EnsureSuccessStatusCode();
 
         var completion = await response.Content.ReadFromJsonAsync<GenerateContentResponse>(cancellationToken).ConfigureAwait(false);

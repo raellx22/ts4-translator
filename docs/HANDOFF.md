@@ -2,7 +2,7 @@
 
 Leia isto antes de qualquer outra coisa se você é uma nova sessão/agente retomando este projeto.
 Depois leia `README.md`, `docs/STATUS.md`, `docs/ROADMAP.md`, `docs/ARCHITECTURE.md`, `docs/DECISIONS.md`,
-`docs/BUILD.md`, nessa ordem (e `docs/ARGOS.md` se for mexer com o provider offline). Não reconstrua a arquitetura do zero — ela existe, compila, tem 182
+`docs/BUILD.md`, nessa ordem (e `docs/ARGOS.md` se for mexer com o provider offline). Não reconstrua a arquitetura do zero — ela existe, compila, tem 202
 testes automatizados passando, e **o caminho prático completo (importar → extrair → editor →
 exportar com validação) foi verificado de ponta a ponta rodando o app instalado de verdade.**
 
@@ -30,25 +30,28 @@ Sims4 Core, Translation Core (TokenProtector/TranslationValidator/BatchBuilder/T
 Translation Memory exact-match, Project System, extração/persistência de strings
 (`IProjectStringService`), configuração de provider com API key segura via DPAPI
 (`IProviderConfigurationService`/`ISecretStore`), as quatro telas de produto (`HomePage`, `EditorPage`,
-`SettingsPage`, `GlossaryPage`), e — nas rodadas mais recentes (DEC-012 a DEC-020) — edição manual
+`SettingsPage`, `GlossaryPage`), e — nas rodadas mais recentes (DEC-012 a DEC-022) — edição manual
 persistente com histórico, drag-and-drop de `.package` na Home com diff de reimportação, Glossário
 (serviço + UI de escopo global), preset NVIDIA NIM em Configurações, Translation Profiles (instruções
 de estilo livres por projeto), fuzzy matching em Translation Memory (Levenshtein, reaproveita ≥97%
 similar sem chamar o provider, sempre marcado para revisão), correção de robustez contra tradução nula
-(DEC-017), barra de progresso real + cancelamento seguro (DEC-018), e — a mais recente — **três
-providers reais** (`OpenAICompatibleProvider`, `DeepLProvider`, `GoogleGeminiProvider`) selecionáveis
-via um `ProviderKind` em Configurações (DEC-019) — tudo pronto e testado (182 testes automatizados +
-`GlossaryPage`/preset NVIDIA NIM/barra de progresso/seletor de tipo de provider verificados rodando o
-app de verdade).
+(DEC-017), barra de progresso real + cancelamento seguro (DEC-018), **três providers reais**
+(`OpenAICompatibleProvider`, `DeepLProvider`, `GoogleGeminiProvider`) selecionáveis via um
+`ProviderKind` em Configurações (DEC-019), correção do model id padrão do Gemini que tinha ficado
+obsoleto (DEC-021), e — a mais recente — **retry com backoff em falha transitória de provider**
+(503/429/5xx/timeout, DEC-022) — tudo pronto e testado (202 testes automatizados + `GlossaryPage`/
+preset NVIDIA NIM/barra de progresso/seletor de tipo de provider verificados rodando o app de verdade).
 
-**O usuário já testou a tradução contra um provider real (NVIDIA NIM)** fora desta sessão de
-desenvolvimento e encontrou dois problemas reais: `ArgumentNullException` quando o provider respondia
-`"translation": null` para um item (corrigido, DEC-017), e falta de feedback de progresso + salvamento
-só ao final numa tradução de ~25 mil strings (corrigido, DEC-018). Depois disso, um erro no processo de
-redeploy desta sessão (`Remove-AppxPackage` antes de reinstalar) apagou essa configuração — corrigido
-para não acontecer de novo (DEC-020), mas a configuração antiga não tinha como ser recuperada. O
-usuário continua testando ativamente; qualquer novo problema relatado deve virar uma correção pontual
-do mesmo jeito.
+**O usuário já testou a tradução contra provider real** (NVIDIA NIM e, depois, Google Gemini) fora
+desta sessão de desenvolvimento e encontrou vários problemas reais, todos corrigidos: `ArgumentNullException`
+quando o provider respondia `"translation": null` para um item (DEC-017); falta de feedback de
+progresso + salvamento só ao final numa tradução de ~25 mil strings (DEC-018); configuração de provider
+apagada por um erro do processo de redeploy desta sessão (`Remove-AppxPackage` antes de reinstalar —
+DEC-020, não recuperável, precisou reconfigurar); model id do Gemini (`gemini-2.0-flash`) descontinuado
+pelo Google (DEC-021); e `HttpRequestException: 503 Service Unavailable` derrubando a tradução inteira
+no meio de um mod real, mesmo com cota de sobra — corrigido com retry+backoff automático para falhas
+transitórias (DEC-022). O usuário continua testando ativamente; qualquer novo problema relatado deve
+virar uma correção pontual do mesmo jeito.
 
 **Importante:** ao adicionar `customInstructions` (DEC-015), foi descoberto que o glossário (DEC-012)
 nunca chegou a ser de fato usado pelo app real — `EditorPageViewModel.TranslateAsync` nunca buscava os
@@ -104,7 +107,7 @@ Depois disso, seguir a lista "Próximas tarefas concretas" no fim de `docs/ROADM
 ## Important files
 
 - `docs/DECISIONS.md` — leia antes de mudar qualquer versão de pacote ou formato de arquivo; a
-  maioria das escolhas não óbvias já foi justificada ali (DEC-001 a DEC-021).
+  maioria das escolhas não óbvias já foi justificada ali (DEC-001 a DEC-022).
 - `docs/BUILD.md` — como compilar, testar, rodar, e (importante) como empacotar/instalar um MSIX
   local para testar qualquer fluxo que use `FileOpenPicker` ou outra API mediada por broker do
   Windows. `dotnet run` sozinho **não** funciona para esses casos (DEC-010) — não gaste tempo
@@ -178,7 +181,7 @@ confirmados.
 
 ## Tests currently failing
 
-Nenhum. 182 testes automatizados passando.
+Nenhum. 202 testes automatizados passando.
 
 ## Commands to build / test / run
 

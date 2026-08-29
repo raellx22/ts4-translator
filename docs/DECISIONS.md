@@ -932,3 +932,65 @@ qualquer outro provider baseado em modelo) é candidato a ficar obsoleto sem avi
 detecção automática de modelos disponíveis ainda (`GET /v1beta/models`/`GET /v1/models`, item já listado
 no ROADMAP Fase 6). Até isso existir, checar o id de modelo configurado deveria ser o primeiro passo
 diante de qualquer 404 em "Testar conexão", antes de suspeitar do código.
+
+---
+
+## DEC-022 — Retry com backoff para falhas transitórias de provider (503/429/5xx/timeout) — seção 11 do brief, confirmada necessária por uma falha real
+
+**Contexto:** Traduzindo um mod real (`TURBODRIVER_WickedWhims_Tuning`) via Google Gemini, o usuário
+recebeu `Falha ao traduzir (HttpRequestException): Response status code does not indicate success: 503
+(Service Unavailable)` no meio da tradução — não uma vez, mas repetidamente ao tentar de novo. Ele
+conferiu o painel de limite de taxa do Google AI Studio e confirmou que tinha cota de sobra (RPM/TPM/RPD
+todos bem abaixo do limite). Ou seja: não era um problema de cota do usuário — é o comportamento
+conhecido e documentado do nível gratuito da API Gemini, que devolve `503` quando os servidores do
+próprio Google estão sob carga, independente da cota de quem chamou. O app hoje tratava **qualquer**
+exceção de `TranslateBatchAsync` como fatal, abortando a tradução inteira e exigindo que o usuário
+clicasse "Traduzir pendentes" de novo manualmente — o que, com um provider instável, podia significar
+vários reinícios manuais para um mod grande.
+
+**Decisão:**
+- `Providers/Resilience/HttpRetry.cs` (novo, projeto `TS4Translator.Providers`) — helper estático
+  `SendWithRetryAsync` que reenvia a chamada HTTP com backoff exponencial (300ms × 2^tentativa + jitter
+  de 0-250ms) quando a resposta é um status transitório (`408`, `429`, `500`, `502`, `503`, `504`) ou a
+  chamada lança `HttpRequestException`/`TaskCanceledException`/`TimeoutException` — nunca retenta um
+  `4xx` que não seja `408`/`429` (um request malformado ou uma chave inválida não vai ter sucesso numa
+  segunda tentativa). **Nunca** retenta se o `CancellationToken` do chamador já foi cancelado — o botão
+  "Cancelar tradução" (DEC-018) precisa continuar funcionando de verdade, não ser engolido como se fosse
+  só mais uma falha transitória para tentar de novo.
+- Cada tentativa constrói um `HttpRequestMessage` novo a partir de um delegate (`Func<CancellationToken,
+  Task<HttpResponseMessage>>`), nunca reenvia a mesma instância — `HttpClient` recusa reenviar um
+  `HttpRequestMessage` já enviado, então o helper exige que quem chama monte a requisição de dentro do
+  delegate, não fora dele.
+- Os três providers (`OpenAICompatibleProvider`, `DeepLProvider`, `GoogleGeminiProvider`) passaram a
+  envolver seu "montar requisição + enviar" existente numa chamada a `HttpRetry.SendWithRetryAsync`,
+  com um parâmetro `int maxRetries = 3` opcional no construtor (não altera nenhuma chamada existente).
+- Distinguir "timeout de `HttpClient`" de "usuário cancelou" foi a parte mais sutil: as duas coisas
+  lançam `TaskCanceledException` em .NET moderno, e só dá para diferenciar checando se o
+  `CancellationToken` do próprio chamador é que disparou (`cancellationToken.IsCancellationRequested`)
+  — se sim, nunca retenta; se não (é um timeout interno do `HttpClient`, não uma cancelação do usuário),
+  trata como falha transitória igual a qualquer outra.
+
+**Por que não foi extraído para `Microsoft.Extensions.Http.Resilience`/Polly:** o requisito real aqui é
+estreito ("tentar de novo algumas vezes com backoff em erro transitório"), e um pacote de resiliência
+completo (circuit breaker, rate limiter, etc.) traria superfície e configuração muito além do que é
+necessário — a mesma filosofia de "sem abstração antes de precisar" já aplicada em outras decisões
+desta sessão (DEC-019, por exemplo).
+
+**Testes adicionados:** `HttpRetryTests` (11 testes, delay injetado e instantâneo) cobre a política de
+retry isoladamente — quais status são transitórios, para de tentar depois de `maxRetries`, propaga
+`HttpRequestException` persistente, nunca retenta quando o token do chamador já foi cancelado, mas
+retenta um timeout que não é do chamador. Cada provider ganhou um teste de integração leve confirmando
+que a chamada `HttpRetry` está de fato conectada (503 seguido de sucesso, `maxRetries: 2`,
+`FakeHttpMessageHandler` estendido para devolver uma sequência de respostas em vez de uma só). Os três
+testes existentes "...ServerReturnsError_ThrowsHttpRequestException" passaram a usar `maxRetries: 0`
+explicitamente para continuarem rápidos e determinísticos — a política de retry em si já está coberta
+por `HttpRetryTests`. Total: 182 → 202 testes.
+
+**Consequências:** Uma falha realmente permanente (chave inválida, endpoint errado, modelo inexistente)
+ainda falha rápido — só status transitórios (5xx/408/429) e falhas de rede/timeout acionam retry.
+`SettingsPageViewModel.TestConnectionAsync` agora pode demorar mais para reportar falha contra um
+provider instável (até `maxRetries` tentativas com backoff antes de desistir) — já mostra "Testando
+conexão..." durante a espera, então isso é esperado, não um bug. O item "retry/backoff" do brief
+(seção 11) estava listado no ROADMAP como não iniciado; parte dele (retry por falha transitória de
+rede) está pronta agora — falta ainda checkpoint/pause/resume entre sessões do app
+(`TranslationJob` persistido, ainda não implementado).
