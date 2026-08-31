@@ -10,7 +10,7 @@ namespace TS4Translator.Translation;
 /// </summary>
 public sealed partial class TokenProtector : ITokenProtector
 {
-    [GeneratedRegex(@"(\{[^{}\r\n]*\}|</?[a-zA-Z][^<>\r\n]*/?>|\r\n|\n|\r)")]
+    [GeneratedRegex(@"(\{[^{}\r\n]*\}|</?[a-zA-Z][^<>\r\n]*/?>|https?://[^\s<>]+|@[a-zA-Z0-9_]+|\\r\\n|\\n|\\r|\r\n|\n|\r)")]
     private static partial Regex ExtractionPattern();
 
     [GeneratedRegex(@"__TS4_TOKEN_\d{4}__")]

@@ -47,6 +47,41 @@ public class OpenAICompatibleProviderTests
     }
 
     [Fact]
+    public async Task TranslateBatchAsync_LocalEndpoint_UsesStrictStructuredOutputAndParsesIdMap()
+    {
+        var assistantJson = """{"translations":{"1":"Olá.","2":"Tchau."}}""";
+        var (sut, handler) = CreateSut(HttpStatusCode.OK, ChatCompletionEnvelope(assistantJson));
+        var items = new[] { new TranslationRequestItem("1", "Hello."), new TranslationRequestItem("2", "Bye.") };
+
+        var results = await sut.TranslateBatchAsync(items, English, PortugueseBrazil);
+
+        Assert.Equal(2, results.Count);
+        Assert.Equal("Olá.", results.Single(r => r.Id == "1").TranslatedProtectedText);
+        Assert.Contains("\"response_format\"", handler.LastRequestBody);
+        Assert.Contains("\"additionalProperties\":false", handler.LastRequestBody);
+        Assert.Contains("\"required\":[\"1\",\"2\"]", handler.LastRequestBody);
+        Assert.Contains("\"max_tokens\":256", handler.LastRequestBody);
+        Assert.Contains("\"reasoning_effort\":\"none\"", handler.LastRequestBody);
+    }
+
+    [Fact]
+    public async Task TranslateBatchAsync_RemoteEndpoint_KeepsLegacyArrayContractForBroadCompatibility()
+    {
+        var handler = new FakeHttpMessageHandler(HttpStatusCode.OK, ChatCompletionEnvelope("""[{"id":"1","translation":"Olá."}]"""));
+        var provider = new OpenAICompatibleProvider(
+            new HttpClient(handler),
+            new OpenAICompatibleProviderOptions("https://example.test/v1", "test-model"));
+
+        var results = await provider.TranslateBatchAsync(
+            [new TranslationRequestItem("1", "Hello.")], English, PortugueseBrazil);
+
+        Assert.Single(results);
+        Assert.DoesNotContain("\"response_format\"", handler.LastRequestBody);
+        Assert.DoesNotContain("\"reasoning_effort\"", handler.LastRequestBody);
+        Assert.Contains("JSON array of objects", handler.LastRequestBody);
+    }
+
+    [Fact]
     public async Task TranslateBatchAsync_ResponseWrappedInMarkdownFences_StillParses()
     {
         var assistantContent = "```json\n[{\"id\":\"1\",\"translation\":\"Olá.\"}]\n```";
@@ -226,6 +261,8 @@ public class OpenAICompatibleProviderTests
 
         Assert.True(sut.Capabilities.SupportsGlossary);
         Assert.True(sut.Capabilities.SupportsCustomPrompt);
+        Assert.Equal(32, sut.Capabilities.RecommendedBatchItems);
+        Assert.Equal(3500, sut.Capabilities.RecommendedBatchCharacters);
     }
 
     [Fact]

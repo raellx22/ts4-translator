@@ -1,4 +1,5 @@
 using System.Net;
+using System.Text;
 using TS4Translator.Providers.Resilience;
 
 namespace TS4Translator.Providers.Tests;
@@ -187,5 +188,34 @@ public class HttpRetryTests
 
         Assert.Equal(2, callCount);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task SendWithRetryAsync_GeminiRetryInfo_HonorsRequestedDelay()
+    {
+        var callCount = 0;
+        TimeSpan? observedDelay = null;
+
+        var response = await HttpRetry.SendWithRetryAsync(
+            ct =>
+            {
+                callCount++;
+                if (callCount > 1)
+                {
+                    return Task.FromResult(Response(HttpStatusCode.OK));
+                }
+
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.TooManyRequests)
+                {
+                    Content = new StringContent("{\"error\":{\"details\":[{\"retryDelay\":\"28s\"}]}}", Encoding.UTF8, "application/json"),
+                });
+            },
+            CancellationToken.None,
+            maxRetries: 1,
+            serverDelayAsync: (delay, ct) => { observedDelay = delay; return Task.CompletedTask; });
+
+        Assert.Equal(2, callCount);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.InRange(observedDelay!.Value, TimeSpan.FromSeconds(28.05), TimeSpan.FromSeconds(28.25));
     }
 }

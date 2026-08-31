@@ -28,6 +28,35 @@ public sealed partial class SettingsPage : Page
         _ = ViewModel.LoadCommand.ExecuteAsync(null);
     }
 
+    private void TestProfile_Click(object sender, RoutedEventArgs e)
+    {
+        if (RowOf(sender) is { } row)
+        {
+            _ = ViewModel.TestProfileAsync(row);
+        }
+    }
+
+    private void EditProfile_Click(object sender, RoutedEventArgs e)
+    {
+        if (RowOf(sender) is { } row)
+        {
+            _ = ViewModel.EditProfileAsync(row);
+        }
+    }
+
+    private void DeleteProfile_Click(object sender, RoutedEventArgs e)
+    {
+        if (RowOf(sender) is { } row)
+        {
+            _ = ViewModel.DeleteProfileAsync(row);
+        }
+    }
+
+    // Tag, not ElementName binding: a button inside an ItemTemplate cannot reach the page's ViewModel
+    // through ElementName reliably in WinUI 3 (DEC-013).
+    private static ProviderProfileRowViewModel? RowOf(object sender) =>
+        (sender as FrameworkElement)?.Tag as ProviderProfileRowViewModel;
+
     // x:Bind generates an instance call for an unqualified function reference in XAML - CA1822 would
     // suggest static, but that breaks the generated MarkupCompilePass2 code (see EditorPage.xaml.cs).
 #pragma warning disable CA1822

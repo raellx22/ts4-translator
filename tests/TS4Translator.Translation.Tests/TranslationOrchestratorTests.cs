@@ -127,6 +127,34 @@ public class TranslationOrchestratorTests
     }
 
     [Fact]
+    public async Task TranslateAsync_LocalProviderWithTwoQueues_RunsTwoBatchesConcurrently()
+    {
+        var orchestrator = new TranslationOrchestrator(new TokenProtector(), new TranslationValidator(), new BatchBuilder(maxItemsPerBatch: 2), _memory);
+        var provider = new FakeTranslationProvider(recommendedConcurrency: 2, delay: TimeSpan.FromMilliseconds(50));
+        var items = Enumerable.Range(1, 4).Select(i => new TranslationSourceItem(i.ToString(CultureInfo.InvariantCulture), $"Item {i}")).ToList();
+
+        var outcomes = await orchestrator.TranslateAsync(items, provider, English, PortugueseBrazil);
+
+        Assert.Equal(4, outcomes.Count);
+        Assert.Equal(2, provider.MaxConcurrentCalls);
+        Assert.Equal(4, _memory.SaveCallCount);
+    }
+
+    [Fact]
+    public async Task TranslateAsync_ProviderRequestsMoreThanEightQueues_ClampsAtEight()
+    {
+        var orchestrator = new TranslationOrchestrator(new TokenProtector(), new TranslationValidator(), new BatchBuilder(maxItemsPerBatch: 1), _memory);
+        var provider = new FakeTranslationProvider(recommendedConcurrency: 12, delay: TimeSpan.FromMilliseconds(50));
+        var items = Enumerable.Range(1, 16).Select(i => new TranslationSourceItem(i.ToString(CultureInfo.InvariantCulture), $"Item {i}")).ToList();
+
+        var outcomes = await orchestrator.TranslateAsync(items, provider, English, PortugueseBrazil);
+
+        Assert.Equal(16, outcomes.Count);
+        Assert.Equal(8, provider.MaxConcurrentCalls);
+        Assert.Equal(16, _memory.SaveCallCount);
+    }
+
+    [Fact]
     public async Task TranslateAsync_MixOfMemoryHitsAndNewItems_ReturnsResultsInOriginalOrder()
     {
         await _memory.SaveAsync(new Core.Memory.TranslationMemoryEntry("Second.", English, PortugueseBrazil, "Segundo.", "manual", null, DateTimeOffset.UtcNow));
@@ -144,6 +172,32 @@ public class TranslationOrchestratorTests
         Assert.Equal("[fake] First.", outcomes[0].TranslatedText);
         Assert.Equal("Segundo.", outcomes[1].TranslatedText);
         Assert.Equal("[fake] Third.", outcomes[2].TranslatedText);
+    }
+
+    [Fact]
+    public async Task TranslateAsync_ProviderLeavesNaturalTextUnchanged_MarksForReviewAndDoesNotSaveMemory()
+    {
+        var provider = new FakeTranslationProvider(text => text);
+        var items = new[] { new TranslationSourceItem("1", "This sentence must be translated.") };
+
+        var outcomes = await _sut.TranslateAsync(items, provider, English, PortugueseBrazil);
+
+        Assert.False(outcomes[0].Success);
+        Assert.Contains(outcomes[0].Issues, issue => issue.Code == ValidationIssueCode.IdenticalToSource);
+        Assert.Equal(0, _memory.SaveCallCount);
+    }
+
+    [Fact]
+    public async Task TranslateAsync_ProviderRecommendsBatchLimits_OverridesGenericBatchBuilder()
+    {
+        var provider = new FakeTranslationProvider(recommendedBatchItems: 2, recommendedBatchCharacters: 8000);
+        var items = Enumerable.Range(1, 5)
+            .Select(index => new TranslationSourceItem(index.ToString(CultureInfo.InvariantCulture), $"Item {index}."))
+            .ToArray();
+
+        await _sut.TranslateAsync(items, provider, English, PortugueseBrazil);
+
+        Assert.Equal([2, 2, 1], provider.ObservedBatchSizes);
     }
 
     [Fact]

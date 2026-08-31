@@ -50,6 +50,17 @@ public class TranslationValidatorTests
         Assert.DoesNotContain(issues, i => i.Code == ValidationIssueCode.IdenticalToSource);
     }
 
+    [Theory]
+    [InlineData("<font>{0.String}</font>")]
+    [InlineData("{0.SimName}")]
+    [InlineData("# FLAG_VENUE_BEACH")]
+    public void Validate_IdenticalNonTranslatableStructure_DoesNotFlagAsIdentical(string text)
+    {
+        var issues = _sut.Validate(text, text);
+
+        Assert.DoesNotContain(issues, i => i.Code == ValidationIssueCode.IdenticalToSource);
+    }
+
     [Fact]
     public void Validate_TranslationMuchShorterThanSource_ReturnsLengthDiscrepancyWarning()
     {
@@ -80,6 +91,14 @@ public class TranslationValidatorTests
         var issues = _sut.Validate("Click <b>here</b>.", "Clique <b>aqui.");
 
         Assert.Contains(issues, i => i.Code == ValidationIssueCode.UnbalancedMarkup && i.Severity == ValidationSeverity.Error);
+    }
+
+    [Fact]
+    public void Validate_SourceMarkupAlreadyUnbalanced_TranslationPreservesIt_DoesNotFlagMarkup()
+    {
+        var issues = _sut.Validate("<font><b>Credits</b>", "<font><b>Créditos</b>");
+
+        Assert.DoesNotContain(issues, i => i.Code == ValidationIssueCode.UnbalancedMarkup);
     }
 
     [Fact]

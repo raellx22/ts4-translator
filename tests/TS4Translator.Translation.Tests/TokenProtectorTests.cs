@@ -72,6 +72,18 @@ public class TokenProtectorTests
     }
 
     [Theory]
+    [InlineData("Line one\\nLine two", "\\n")]
+    [InlineData("Line one\\r\\nLine two", "\\r\\n")]
+    [InlineData("Visit https://example.com/path now", "https://example.com/path")]
+    [InlineData("Ask @AdviserBot for help", "@AdviserBot")]
+    public void Protect_LiteralLineBreaksUrlsAndHandles_AreExtracted(string source, string expectedToken)
+    {
+        var result = _sut.Protect(source);
+
+        Assert.Contains(result.Tokens, token => token.OriginalValue == expectedToken);
+    }
+
+    [Theory]
     [InlineData("Click <b>here</b> to continue.")]
     [InlineData("Insert a <camera/> shot here.")]
     [InlineData("<a href=\"sims4://help\">Learn more</a>")]

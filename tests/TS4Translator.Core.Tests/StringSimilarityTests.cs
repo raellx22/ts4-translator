@@ -62,4 +62,25 @@ public class StringSimilarityTests
 
         Assert.Equal(StringSimilarity.Ratio(a, b), StringSimilarity.Ratio(b, a));
     }
+
+    [Fact]
+    public void RatioAtLeast_NearMatch_ReturnsTheSameRatioAsFullCalculation()
+    {
+        const string a = "Ask your sim to talk about their job.";
+        const string b = "Ask your sim to talk about their job!";
+
+        Assert.Equal(StringSimilarity.Ratio(a, b), StringSimilarity.RatioAtLeast(a, b, 0.97));
+    }
+
+    [Fact]
+    public void RatioAtLeast_DistantText_ReturnsNull()
+    {
+        Assert.Null(StringSimilarity.RatioAtLeast("Completely different text.", "Nothing alike is written here.", 0.97));
+    }
+
+    [Fact]
+    public void RatioAtLeast_LengthDifferenceAlreadyExceedsLimit_ReturnsNull()
+    {
+        Assert.Null(StringSimilarity.RatioAtLeast("A fairly long source sentence.", "Short.", 0.97));
+    }
 }

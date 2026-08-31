@@ -121,6 +121,9 @@ namespace TS4Translator.Persistence.Migrations
                     b.Property<Guid>("ProjectId")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("SourceFile")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasColumnType("TEXT");
@@ -136,7 +139,7 @@ namespace TS4Translator.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("ProjectId", "StblGroup", "StblFullInstance", "KeyHash")
+                    b.HasIndex("ProjectId", "SourceFile", "StblGroup", "StblFullInstance", "KeyHash")
                         .IsUnique();
 
                     b.ToTable("ProjectStrings");
@@ -165,7 +168,7 @@ namespace TS4Translator.Persistence.Migrations
                     b.ToTable("ProjectStringRevisions");
                 });
 
-            modelBuilder.Entity("TS4Translator.Persistence.Entities.ProviderConfigurationRecord", b =>
+            modelBuilder.Entity("TS4Translator.Persistence.Entities.ProviderProfileRecord", b =>
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
@@ -194,7 +197,7 @@ namespace TS4Translator.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("ProviderConfigurations");
+                    b.ToTable("ProviderProfiles");
                 });
 
             modelBuilder.Entity("TS4Translator.Persistence.Entities.TranslationMemoryRecord", b =>
@@ -241,6 +244,47 @@ namespace TS4Translator.Persistence.Migrations
                     b.ToTable("TranslationMemory");
                 });
 
+            modelBuilder.Entity("TS4Translator.Persistence.Entities.TranslationPipelineRecord", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("DifficultProfileId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("DifficultThreshold")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("MediumProfileId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("MediumThreshold")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("PrimaryProfileId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid?>("ProjectId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("RefinementProfileId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("ReviewProfileId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("TieredRoutingEnabled")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ProjectId")
+                        .IsUnique();
+
+                    b.ToTable("TranslationPipelines");
+                });
+
             modelBuilder.Entity("TS4Translator.Persistence.Entities.GlossaryTermRecord", b =>
                 {
                     b.HasOne("TS4Translator.Persistence.Entities.ProjectRecord", "Project")
@@ -282,6 +326,16 @@ namespace TS4Translator.Persistence.Migrations
                         .IsRequired();
 
                     b.Navigation("StringEntry");
+                });
+
+            modelBuilder.Entity("TS4Translator.Persistence.Entities.TranslationPipelineRecord", b =>
+                {
+                    b.HasOne("TS4Translator.Persistence.Entities.ProjectRecord", "Project")
+                        .WithMany()
+                        .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.Cascade);
+
+                    b.Navigation("Project");
                 });
 
             modelBuilder.Entity("TS4Translator.Persistence.Entities.ProjectRecord", b =>

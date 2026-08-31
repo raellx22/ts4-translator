@@ -15,6 +15,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ITranslationValidator, TranslationValidator>();
         services.AddSingleton<IBatchBuilder, BatchBuilder>();
         services.AddSingleton<ITranslationOrchestrator, TranslationOrchestrator>();
+        services.AddSingleton<IMultiEngineTranslator, MultiEngineTranslator>();
 
         return services;
     }

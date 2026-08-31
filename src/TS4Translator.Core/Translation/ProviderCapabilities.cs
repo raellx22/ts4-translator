@@ -7,6 +7,9 @@ namespace TS4Translator.Core.Translation;
 /// <param name="SupportsLocalExecution">Runs entirely on the user's machine (no network call).</param>
 /// <param name="RequiresApiKey">Needs a credential configured before it can be used.</param>
 /// <param name="MaxContextSize">Approximate maximum input size the provider accepts, in characters, when known.</param>
+/// <param name="RecommendedConcurrency">Safe number of independent batches to run concurrently.</param>
+/// <param name="RecommendedBatchItems">Provider-specific item limit; null uses the app default.</param>
+/// <param name="RecommendedBatchCharacters">Provider-specific character limit; null uses the app default.</param>
 public sealed record ProviderCapabilities(
     bool SupportsBatch,
     bool SupportsStreaming,
@@ -14,4 +17,7 @@ public sealed record ProviderCapabilities(
     bool SupportsGlossary,
     bool SupportsLocalExecution,
     bool RequiresApiKey,
-    int? MaxContextSize);
+    int? MaxContextSize,
+    int RecommendedConcurrency = 1,
+    int? RecommendedBatchItems = null,
+    int? RecommendedBatchCharacters = null);

@@ -21,7 +21,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ITranslationMemory, SqliteTranslationMemory>();
         services.AddSingleton<IProjectService, EfProjectService>();
         services.AddSingleton<IProjectStringService, EfProjectStringService>();
-        services.AddSingleton<IProviderConfigurationService, EfProviderConfigurationService>();
+        services.AddSingleton<IProviderProfileService, EfProviderProfileService>();
         services.AddSingleton<IGlossaryService, EfGlossaryService>();
 
         return services;

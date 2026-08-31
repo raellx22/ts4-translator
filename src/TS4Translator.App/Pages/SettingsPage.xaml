@@ -5,63 +5,325 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:local="using:TS4Translator.App.Pages"
+    xmlns:vm="using:TS4Translator.App.ViewModels"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     mc:Ignorable="d">
 
-    <Grid Padding="24,16,24,16" RowSpacing="16" MaxWidth="600" HorizontalAlignment="Left">
-        <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
-        </Grid.RowDefinitions>
+    <Page.Resources>
+        <Style x:Key="SectionCard" TargetType="Border">
+            <Setter Property="Padding" Value="16,14,16,14" />
+            <Setter Property="Background" Value="{ThemeResource CardBackgroundFillColorDefaultBrush}" />
+            <Setter Property="BorderBrush" Value="{ThemeResource CardStrokeColorDefaultBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="8" />
+        </Style>
+        <Style x:Key="SectionHeading" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="16" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+        </Style>
+        <Style x:Key="Hint" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="Opacity" Value="0.7" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+        </Style>
+    </Page.Resources>
 
-        <TextBlock Style="{StaticResource TitleTextBlockStyle}" Text="Configurações" />
+    <ScrollViewer Padding="20,12,20,20">
+        <StackPanel MaxWidth="880" HorizontalAlignment="Left" Spacing="12">
 
-        <TextBlock
-            Grid.Row="1"
-            Text="Provider de tradução"
-            TextWrapping="Wrap" />
+            <TextBlock Style="{StaticResource TitleTextBlockStyle}" Text="Configurações" />
 
-        <StackPanel Grid.Row="2" Spacing="8">
-            <ComboBox
-                Header="Tipo de provider"
-                ItemsSource="{x:Bind ViewModel.ProviderKindOptions}"
-                SelectedItem="{x:Bind ViewModel.SelectedProviderKindLabel, Mode=TwoWay}" />
-            <TextBox Header="Nome" Text="{x:Bind ViewModel.Name, Mode=TwoWay}" />
-            <TextBox Header="Endpoint" PlaceholderText="http://localhost:1234/v1" Text="{x:Bind ViewModel.Endpoint, Mode=TwoWay}" />
-            <TextBox
-                Header="Modelo"
-                PlaceholderText="nome do modelo"
-                Text="{x:Bind ViewModel.Model, Mode=TwoWay}"
-                Visibility="{x:Bind BoolToVisibility(ViewModel.ShowsModelField), Mode=OneWay}" />
-            <PasswordBox Header="API key" Password="{x:Bind ViewModel.ApiKey, Mode=TwoWay}" />
-            <TextBlock
-                FontSize="12"
-                Opacity="0.7"
-                Text="Deixe em branco para manter a API key já salva sem alterá-la."
-                TextWrapping="Wrap" />
-            <Button Command="{x:Bind ViewModel.ApplyNvidiaNimPresetCommand}" Content="Usar preset NVIDIA NIM" />
+            <!--  ===================== 1. MOTORES =====================  -->
+            <Border Style="{StaticResource SectionCard}">
+                <StackPanel Spacing="10">
+                    <Grid>
+                        <StackPanel Spacing="2">
+                            <TextBlock Style="{StaticResource SectionHeading}" Text="Motores" />
+                            <TextBlock Style="{StaticResource Hint}" Text="Cada motor é um perfil com endpoint, modelo e chave próprios. Vários do mesmo tipo podem coexistir." />
+                        </StackPanel>
+                        <Button
+                            HorizontalAlignment="Right"
+                            VerticalAlignment="Top"
+                            Command="{x:Bind ViewModel.AddProfileCommand}"
+                            Content="Adicionar" />
+                    </Grid>
+
+                    <!--  Editor inline, visível ao adicionar/editar  -->
+                    <Border
+                        Padding="14"
+                        Background="{ThemeResource LayerFillColorDefaultBrush}"
+                        CornerRadius="6"
+                        Visibility="{x:Bind BoolToVisibility(ViewModel.IsEditingProfile), Mode=OneWay}">
+                        <StackPanel Spacing="8">
+                            <TextBlock FontWeight="SemiBold" Text="{x:Bind ViewModel.EditorTitle, Mode=OneWay}" />
+
+                            <Grid ColumnSpacing="10">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <ComboBox
+                                    Grid.Column="0"
+                                    HorizontalAlignment="Stretch"
+                                    Header="Tipo"
+                                    ItemsSource="{x:Bind ViewModel.ProviderKindOptions}"
+                                    SelectedItem="{x:Bind ViewModel.EditorKindLabel, Mode=TwoWay}" />
+                                <TextBox
+                                    Grid.Column="1"
+                                    Header="Nome"
+                                    Text="{x:Bind ViewModel.EditorName, Mode=TwoWay}" />
+                            </Grid>
+
+                            <TextBlock Style="{StaticResource Hint}" Text="{x:Bind ViewModel.EditorKindDescription, Mode=OneWay}" />
+
+                            <TextBox
+                                Header="Endpoint"
+                                Text="{x:Bind ViewModel.EditorEndpoint, Mode=TwoWay}"
+                                Visibility="{x:Bind BoolToVisibility(ViewModel.EditorShowsEndpoint), Mode=OneWay}" />
+
+                            <StackPanel Spacing="4" Visibility="{x:Bind BoolToVisibility(ViewModel.EditorShowsModel), Mode=OneWay}">
+                                <Grid ColumnSpacing="8">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <ComboBox
+                                        Grid.Column="0"
+                                        HorizontalAlignment="Stretch"
+                                        Header="Modelo"
+                                        IsEditable="True"
+                                        ItemsSource="{x:Bind ViewModel.EditorModelOptions}"
+                                        Text="{x:Bind ViewModel.EditorModel, Mode=TwoWay}" />
+                                    <Button
+                                        Grid.Column="1"
+                                        VerticalAlignment="Bottom"
+                                        Command="{x:Bind ViewModel.LoadModelsCommand}"
+                                        Content="Buscar modelos"
+                                        IsEnabled="{x:Bind ViewModel.EditorCanListModels, Mode=OneWay}" />
+                                </Grid>
+                                <TextBlock Style="{StaticResource Hint}" Text="{x:Bind ViewModel.EditorModelsStatus, Mode=OneWay}" />
+                            </StackPanel>
+
+                            <PasswordBox
+                                Header="API key"
+                                Password="{x:Bind ViewModel.EditorApiKey, Mode=TwoWay}"
+                                Visibility="{x:Bind BoolToVisibility(ViewModel.EditorShowsApiKey), Mode=OneWay}" />
+                            <TextBlock
+                                Style="{StaticResource Hint}"
+                                Text="Deixe a chave em branco para manter a que já está salva."
+                                Visibility="{x:Bind BoolToVisibility(ViewModel.EditorShowsApiKey), Mode=OneWay}" />
+
+                            <StackPanel Spacing="6" Visibility="{x:Bind BoolToVisibility(ViewModel.EditorShowsArgosPanel), Mode=OneWay}">
+                                <TextBlock Style="{StaticResource Hint}" Text="{x:Bind ViewModel.ArgosStatusText, Mode=OneWay}" />
+                                <Button
+                                    HorizontalAlignment="Left"
+                                    Command="{x:Bind ViewModel.InstallArgosCommand}"
+                                    Content="Instalar ou reparar Argos" />
+                            </StackPanel>
+
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <Button
+                                    Command="{x:Bind ViewModel.SaveProfileCommand}"
+                                    Content="Salvar motor"
+                                    Style="{StaticResource AccentButtonStyle}" />
+                                <Button Command="{x:Bind ViewModel.CancelProfileEditCommand}" Content="Fechar" />
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+
+                    <ItemsControl ItemsSource="{x:Bind ViewModel.Profiles}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="vm:ProviderProfileRowViewModel">
+                                <Border
+                                    Margin="0,0,0,6"
+                                    Padding="10,8,10,8"
+                                    Background="{ThemeResource CardBackgroundFillColorSecondaryBrush}"
+                                    CornerRadius="6">
+                                    <Grid ColumnSpacing="10">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+
+                                        <StackPanel Grid.Column="0" Spacing="1">
+                                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                                <TextBlock FontWeight="SemiBold" Text="{x:Bind Name}" />
+                                                <Border
+                                                    Padding="6,0,6,1"
+                                                    VerticalAlignment="Center"
+                                                    Background="{ThemeResource AccentFillColorDefaultBrush}"
+                                                    CornerRadius="4"
+                                                    Visibility="{x:Bind RolesVisibility, Mode=OneWay}">
+                                                    <TextBlock
+                                                        FontSize="11"
+                                                        Foreground="{ThemeResource TextOnAccentFillColorPrimaryBrush}"
+                                                        Text="{x:Bind RolesText, Mode=OneWay}" />
+                                                </Border>
+                                            </StackPanel>
+                                            <TextBlock FontSize="12" Opacity="0.75" Text="{x:Bind KindLabel}" />
+                                            <TextBlock
+                                                FontSize="11"
+                                                Opacity="0.5"
+                                                Text="{x:Bind Details}"
+                                                TextWrapping="Wrap" />
+                                            <TextBlock
+                                                FontSize="11"
+                                                Opacity="0.6"
+                                                Text="{x:Bind UsageText, Mode=OneWay}"
+                                                Visibility="{x:Bind UsageVisibility, Mode=OneWay}" />
+                                        </StackPanel>
+
+                                        <StackPanel
+                                            Grid.Column="1"
+                                            VerticalAlignment="Center"
+                                            Orientation="Horizontal"
+                                            Spacing="4">
+                                            <Button Click="TestProfile_Click" Content="Testar" Tag="{x:Bind}" />
+                                            <Button Click="EditProfile_Click" Content="Editar" Tag="{x:Bind}" />
+                                            <Button Click="DeleteProfile_Click" Content="Remover" Tag="{x:Bind}" />
+                                        </StackPanel>
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+            </Border>
+
+            <!--  ===================== 2. PAPÉIS =====================  -->
+            <Border Style="{StaticResource SectionCard}">
+                <StackPanel Spacing="10">
+                    <Grid>
+                        <StackPanel Spacing="2">
+                            <TextBlock Style="{StaticResource SectionHeading}" Text="Quem faz o quê" />
+                            <TextBlock Style="{StaticResource Hint}" Text="Papel vazio herda o anterior: refino cai no principal, revisão cai no refino." />
+                        </StackPanel>
+                        <StackPanel
+                            HorizontalAlignment="Right"
+                            VerticalAlignment="Top"
+                            Orientation="Horizontal"
+                            Spacing="8">
+                            <ComboBox
+                                MinWidth="220"
+                                ItemsSource="{x:Bind ViewModel.ScopeOptions}"
+                                SelectedItem="{x:Bind ViewModel.SelectedScope, Mode=TwoWay}" />
+                            <Button
+                                Command="{x:Bind ViewModel.ResetScopeCommand}"
+                                Content="Voltar ao global"
+                                Visibility="{x:Bind BoolToVisibility(ViewModel.IsProjectScope), Mode=OneWay}" />
+                        </StackPanel>
+                    </Grid>
+
+                    <Grid ColumnSpacing="10">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <ComboBox
+                            Grid.Column="0"
+                            HorizontalAlignment="Stretch"
+                            Header="Tradução principal"
+                            ItemsSource="{x:Bind ViewModel.ProfileOptions}"
+                            SelectedItem="{x:Bind ViewModel.PrimaryProfileName, Mode=TwoWay}" />
+                        <ComboBox
+                            Grid.Column="1"
+                            HorizontalAlignment="Stretch"
+                            Header="Refino (linha a linha)"
+                            ItemsSource="{x:Bind ViewModel.ProfileOptions}"
+                            SelectedItem="{x:Bind ViewModel.RefinementProfileName, Mode=TwoWay}" />
+                        <ComboBox
+                            Grid.Column="2"
+                            HorizontalAlignment="Stretch"
+                            Header="Revisão (em lote)"
+                            ItemsSource="{x:Bind ViewModel.ProfileOptions}"
+                            SelectedItem="{x:Bind ViewModel.ReviewProfileName, Mode=TwoWay}" />
+                    </Grid>
+                </StackPanel>
+            </Border>
+
+            <!--  ===================== 3. ROTEAMENTO =====================  -->
+            <Border Style="{StaticResource SectionCard}">
+                <StackPanel Spacing="10">
+                    <StackPanel Spacing="2">
+                        <TextBlock Style="{StaticResource SectionHeading}" Text="Roteamento por dificuldade" />
+                        <TextBlock Style="{StaticResource Hint}" Text="Divide a tradução em massa entre até três motores rodando ao mesmo tempo, para o modelo caro só ser gasto onde faz diferença." />
+                    </StackPanel>
+
+                    <ToggleSwitch
+                        IsOn="{x:Bind ViewModel.TieredRoutingEnabled, Mode=TwoWay}"
+                        OffContent="Desligado"
+                        OnContent="Ligado" />
+
+                    <StackPanel Spacing="10" Visibility="{x:Bind BoolToVisibility(ViewModel.TieredRoutingEnabled), Mode=OneWay}">
+                        <Grid ColumnSpacing="10">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <ComboBox
+                                Grid.Column="0"
+                                HorizontalAlignment="Stretch"
+                                Header="Motor das médias"
+                                ItemsSource="{x:Bind ViewModel.ProfileOptions}"
+                                SelectedItem="{x:Bind ViewModel.MediumProfileName, Mode=TwoWay}" />
+                            <ComboBox
+                                Grid.Column="1"
+                                HorizontalAlignment="Stretch"
+                                Header="Motor das difíceis"
+                                ItemsSource="{x:Bind ViewModel.ProfileOptions}"
+                                SelectedItem="{x:Bind ViewModel.DifficultProfileName, Mode=TwoWay}" />
+                        </Grid>
+
+                        <Grid ColumnSpacing="10">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Slider
+                                Grid.Column="0"
+                                Header="Limiar das médias"
+                                Maximum="100"
+                                Minimum="0"
+                                StepFrequency="5"
+                                Value="{x:Bind ViewModel.MediumThreshold, Mode=TwoWay}" />
+                            <Slider
+                                Grid.Column="1"
+                                Header="Limiar das difíceis"
+                                Maximum="100"
+                                Minimum="0"
+                                StepFrequency="5"
+                                Value="{x:Bind ViewModel.DifficultThreshold, Mode=TwoWay}" />
+                        </Grid>
+
+                        <Border
+                            Padding="10,8,10,8"
+                            Background="{ThemeResource LayerFillColorDefaultBrush}"
+                            CornerRadius="6">
+                            <TextBlock
+                                FontSize="12"
+                                Text="{x:Bind ViewModel.RoutingBandsSummary, Mode=OneWay}"
+                                TextWrapping="Wrap" />
+                        </Border>
+
+                        <TextBlock Style="{StaticResource Hint}" Text="A pontuação sobe com tamanho do texto, placeholders, marcação, número de frases, formas de gênero, e com o histórico: uma string que já voltou marcada para revisão sobe de faixa automaticamente." />
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
+            <StackPanel Orientation="Horizontal" Spacing="10">
+                <Button
+                    Command="{x:Bind ViewModel.SavePipelineCommand}"
+                    Content="Salvar configuração"
+                    Style="{StaticResource AccentButtonStyle}" />
+                <ProgressRing
+                    Width="18"
+                    Height="18"
+                    VerticalAlignment="Center"
+                    IsActive="{x:Bind ViewModel.IsBusy, Mode=OneWay}" />
+            </StackPanel>
+
+            <TextBlock Text="{x:Bind ViewModel.StatusText, Mode=OneWay}" TextWrapping="Wrap" />
         </StackPanel>
-
-        <StackPanel
-            Grid.Row="3"
-            Orientation="Horizontal"
-            Spacing="12">
-            <Button Command="{x:Bind ViewModel.SaveCommand}" Content="Salvar" />
-            <Button Command="{x:Bind ViewModel.TestConnectionCommand}" Content="Testar conexão" />
-            <ProgressRing
-                Width="20"
-                Height="20"
-                IsActive="{x:Bind ViewModel.IsBusy, Mode=OneWay}" />
-        </StackPanel>
-
-        <TextBlock
-            Grid.Row="4"
-            Text="{x:Bind ViewModel.StatusText, Mode=OneWay}"
-            TextWrapping="Wrap" />
-    </Grid>
+    </ScrollViewer>
 </Page>

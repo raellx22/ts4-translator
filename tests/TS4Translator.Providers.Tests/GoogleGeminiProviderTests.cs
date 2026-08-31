@@ -24,11 +24,11 @@ public class GoogleGeminiProviderTests
         return JsonSerializer.Serialize(envelope);
     }
 
-    private static (GoogleGeminiProvider Provider, FakeHttpMessageHandler Handler) CreateSut(HttpStatusCode statusCode, string responseBody, string? apiKey = null, int maxRetries = 3)
+    private static (GoogleGeminiProvider Provider, FakeHttpMessageHandler Handler) CreateSut(HttpStatusCode statusCode, string responseBody, string? apiKey = null, int maxRetries = 3, string model = "gemini-2.5-flash")
     {
         var handler = new FakeHttpMessageHandler(statusCode, responseBody);
         var httpClient = new HttpClient(handler);
-        var provider = new GoogleGeminiProvider(httpClient, new GoogleGeminiProviderOptions("https://generativelanguage.googleapis.com", "gemini-2.5-flash", apiKey), maxRetries);
+        var provider = new GoogleGeminiProvider(httpClient, new GoogleGeminiProviderOptions("https://generativelanguage.googleapis.com", model, apiKey), maxRetries);
         return (provider, handler);
     }
 
@@ -44,6 +44,37 @@ public class GoogleGeminiProviderTests
         Assert.Equal(2, results.Count);
         Assert.Equal("Olá.", results.Single(r => r.Id == "1").TranslatedProtectedText);
         Assert.Equal("Tchau.", results.Single(r => r.Id == "2").TranslatedProtectedText);
+    }
+
+    [Fact]
+    public async Task TranslateBatchAsync_StructuredResponse_UsesSchemaOutputCapAndMinimalThinkingForGemini3()
+    {
+        var modelJson = """{"translations":{"1":"Olá.","2":"Tchau."}}""";
+        var (sut, handler) = CreateSut(HttpStatusCode.OK, GenerateContentEnvelope(modelJson), model: "gemini-3.5-flash-lite");
+
+        var results = await sut.TranslateBatchAsync(
+            [new TranslationRequestItem("1", "Hello."), new TranslationRequestItem("2", "Bye.")],
+            English,
+            PortugueseBrazil);
+
+        Assert.Equal(2, results.Count);
+        Assert.Contains("\"responseMimeType\":\"application/json\"", handler.LastRequestBody);
+        Assert.DoesNotContain("additionalProperties", handler.LastRequestBody);
+        Assert.Contains("\"required\":[\"1\",\"2\"]", handler.LastRequestBody);
+        Assert.Contains("\"maxOutputTokens\":256", handler.LastRequestBody);
+        Assert.Contains("\"thinkingLevel\":\"minimal\"", handler.LastRequestBody);
+        Assert.DoesNotContain("thinkingBudget", handler.LastRequestBody);
+    }
+
+    [Fact]
+    public async Task TranslateBatchAsync_Gemini25Flash_DisablesThinkingWithLegacyBudget()
+    {
+        var (sut, handler) = CreateSut(HttpStatusCode.OK, GenerateContentEnvelope("[]"));
+
+        await sut.TranslateBatchAsync([new TranslationRequestItem("1", "Hello.")], English, PortugueseBrazil);
+
+        Assert.Contains("\"thinkingBudget\":0", handler.LastRequestBody);
+        Assert.DoesNotContain("thinkingLevel", handler.LastRequestBody);
     }
 
     [Fact]
@@ -175,6 +206,9 @@ public class GoogleGeminiProviderTests
         Assert.True(sut.Capabilities.SupportsGlossary);
         Assert.True(sut.Capabilities.SupportsCustomPrompt);
         Assert.True(sut.Capabilities.RequiresApiKey);
+        Assert.Equal(4, sut.Capabilities.RecommendedConcurrency);
+        Assert.Equal(80, sut.Capabilities.RecommendedBatchItems);
+        Assert.Equal(6400, sut.Capabilities.RecommendedBatchCharacters);
     }
 
     [Fact]

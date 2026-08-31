@@ -17,6 +17,9 @@ public sealed partial class TranslationValidator(
     [GeneratedRegex(@"<(?<closing>/?)(?<name>[a-zA-Z][\w:-]*)[^<>]*?(?<selfclose>/?)>")]
     private static partial Regex TagPattern();
 
+    [GeneratedRegex(@"</?[a-zA-Z][^<>]*>|\{[^{}]*\}")]
+    private static partial Regex NonTranslatableStructurePattern();
+
     public IReadOnlyList<ValidationIssue> Validate(string originalText, string translatedText, TokenRestoreResult? tokenRestoreResult = null)
     {
         ArgumentNullException.ThrowIfNull(originalText);
@@ -43,7 +46,7 @@ public sealed partial class TranslationValidator(
 
         if (originalTrimmed.Length > 0
             && string.Equals(originalTrimmed, translatedTrimmed, StringComparison.Ordinal)
-            && originalTrimmed.Any(char.IsLetter))
+            && HasTranslatableContent(originalTrimmed))
         {
             issues.Add(new ValidationIssue(ValidationIssueCode.IdenticalToSource, ValidationSeverity.Warning,
                 "Translation is identical to the source text; it may not have been translated."));
@@ -59,7 +62,10 @@ public sealed partial class TranslationValidator(
             }
         }
 
-        if (!HasBalancedMarkup(translatedTrimmed))
+        // Some real mods ship intentionally or accidentally unbalanced rich-text fragments. Do not
+        // blame the translation for faithfully preserving that source structure; TokenProtector
+        // independently reports any tag that the provider actually drops or duplicates.
+        if (HasBalancedMarkup(originalTrimmed) && !HasBalancedMarkup(translatedTrimmed))
         {
             issues.Add(new ValidationIssue(ValidationIssueCode.UnbalancedMarkup, ValidationSeverity.Error,
                 "Translated text contains unbalanced or mismatched markup tags."));
@@ -113,5 +119,16 @@ public sealed partial class TranslationValidator(
         }
 
         return stack.Count == 0;
+    }
+
+    private static bool HasTranslatableContent(string text)
+    {
+        if (text.StartsWith('#'))
+        {
+            return false;
+        }
+
+        var visibleText = NonTranslatableStructurePattern().Replace(text, string.Empty);
+        return visibleText.Any(char.IsLetter);
     }
 }

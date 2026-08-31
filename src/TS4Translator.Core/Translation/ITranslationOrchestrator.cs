@@ -28,4 +28,25 @@ public interface ITranslationOrchestrator
         IReadOnlyList<GlossaryTerm>? glossaryTerms = null,
         string? customInstructions = null,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Re-runs items through <paramref name="provider"/> to improve an existing translation, rather
+    /// than to produce a first one.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately **not** the same call as <see cref="TranslateAsync"/> with different arguments:
+    /// that path consults translation memory first, and every item being refined is already in memory
+    /// by definition, so it would return the very translation the user is trying to improve and never
+    /// reach the provider at all. Refinement therefore skips the memory lookup. Token protection,
+    /// id-based reconciliation and validation all still apply, and a successful result still updates
+    /// memory — the improved text should be what future strings reuse.
+    /// </remarks>
+    Task<IReadOnlyList<TranslationOutcome>> RefineAsync(
+        IReadOnlyList<RefinementSourceItem> items,
+        ITranslationProvider provider,
+        CultureInfo sourceLocale,
+        CultureInfo targetLocale,
+        IReadOnlyList<GlossaryTerm>? glossaryTerms = null,
+        string? customInstructions = null,
+        CancellationToken cancellationToken = default);
 }
