@@ -61,39 +61,218 @@ public sealed class SqliteTranslationMemory(IDbContextFactory<TranslatorDbContex
         return best;
     }
 
+    public async Task<IReadOnlyList<FuzzyMatchResult?>> FindBestMatchesAsync(
+        IReadOnlyList<string> originalTexts,
+        CultureInfo sourceLocale,
+        CultureInfo targetLocale,
+        double minSimilarity = 0.85,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(originalTexts);
+        ArgumentNullException.ThrowIfNull(sourceLocale);
+        ArgumentNullException.ThrowIfNull(targetLocale);
+
+        if (originalTexts.Count == 0)
+        {
+            return [];
+        }
+
+        await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+        var candidates = await dbContext.TranslationMemory
+            .AsNoTracking()
+            .Where(r => r.SourceLocale == sourceLocale.Name && r.TargetLocale == targetLocale.Name)
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        var exactByHash = candidates.ToDictionary(r => r.OriginalHash, StringComparer.Ordinal);
+        var candidatesByLength = candidates
+            .Select(record => (Record: record, Normalized: record.OriginalText.Trim()))
+            .GroupBy(candidate => candidate.Normalized.Length)
+            .ToDictionary(group => group.Key, group => group.ToList());
+        var results = new List<FuzzyMatchResult?>(originalTexts.Count);
+
+        foreach (var originalText in originalTexts)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var normalized = originalText.Trim();
+            if (exactByHash.TryGetValue(ComputeHash(originalText), out var exact))
+            {
+                results.Add(new FuzzyMatchResult(ToEntry(exact), 1.0));
+                continue;
+            }
+
+            FuzzyMatchResult? best = null;
+            foreach (var (candidateLength, candidatesOfLength) in candidatesByLength)
+            {
+                // The Levenshtein distance can never be smaller than the length difference. At a
+                // 97% auto-reuse threshold this removes almost every unrelated candidate before the
+                // comparatively expensive dynamic-programming calculation.
+                var maxLength = Math.Max(normalized.Length, candidateLength);
+                var maximumDistance = (int)Math.Floor((1.0 - minSimilarity) * maxLength + 1e-9);
+                if (maximumDistance == 0 || Math.Abs(normalized.Length - candidateLength) > maximumDistance)
+                {
+                    continue;
+                }
+
+                foreach (var candidate in candidatesOfLength)
+                {
+                    var similarity = StringSimilarity.RatioAtLeast(normalized, candidate.Normalized, minSimilarity);
+                    if (similarity is not null && (best is null || similarity > best.Similarity))
+                    {
+                        best = new FuzzyMatchResult(ToEntry(candidate.Record), similarity.Value);
+                    }
+                }
+            }
+
+            results.Add(best);
+        }
+
+        return results;
+    }
+
+    public async Task<TranslationMemoryPage> SearchAsync(
+        string? query,
+        string? provider,
+        int skip,
+        int take,
+        CancellationToken cancellationToken = default)
+    {
+        await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+
+        var records = dbContext.TranslationMemory.AsNoTracking();
+
+        if (!string.IsNullOrWhiteSpace(query))
+        {
+            var term = query.Trim();
+            records = records.Where(record =>
+                EF.Functions.Like(record.OriginalText, $"%{term}%") ||
+                EF.Functions.Like(record.TranslatedText, $"%{term}%"));
+        }
+
+        if (!string.IsNullOrWhiteSpace(provider))
+        {
+            records = records.Where(record => record.Provider == provider);
+        }
+
+        var total = await records.CountAsync(cancellationToken).ConfigureAwait(false);
+
+        // Id descending rather than CreatedAtUtc: a whole batch shares a timestamp to the tick, and an
+        // unstable order across pages is how a user scrolling a list sees the same row twice.
+        var page = await records
+            .OrderByDescending(record => record.Id)
+            .Skip(Math.Max(0, skip))
+            .Take(Math.Clamp(take, 1, 1000))
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        return new TranslationMemoryPage([.. page.Select(ToEntry)], total);
+    }
+
+    public async Task<IReadOnlyList<TranslationMemoryProviderCount>> CountByProviderAsync(CancellationToken cancellationToken = default)
+    {
+        await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+
+        var counts = await dbContext.TranslationMemory
+            .AsNoTracking()
+            .GroupBy(record => record.Provider)
+            .Select(group => new { Provider = group.Key, Count = group.Count() })
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        return [.. counts
+            .OrderByDescending(count => count.Count)
+            .Select(count => new TranslationMemoryProviderCount(count.Provider, count.Count))];
+    }
+
+    public async Task<bool> DeleteAsync(string originalText, CultureInfo sourceLocale, CultureInfo targetLocale, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(originalText);
+        ArgumentNullException.ThrowIfNull(sourceLocale);
+        ArgumentNullException.ThrowIfNull(targetLocale);
+
+        await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+        var hash = ComputeHash(originalText);
+
+        var removed = await dbContext.TranslationMemory
+            .Where(record => record.OriginalHash == hash
+                && record.SourceLocale == sourceLocale.Name
+                && record.TargetLocale == targetLocale.Name)
+            .ExecuteDeleteAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        return removed > 0;
+    }
+
+    public async Task<int> DeleteByProviderAsync(string provider, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(provider);
+
+        await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+
+        return await dbContext.TranslationMemory
+            .Where(record => record.Provider == provider)
+            .ExecuteDeleteAsync(cancellationToken)
+            .ConfigureAwait(false);
+    }
+
     public async Task SaveAsync(TranslationMemoryEntry entry, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(entry);
 
-        await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
-        var hash = ComputeHash(entry.OriginalText);
+        await SaveManyAsync([entry], cancellationToken).ConfigureAwait(false);
+    }
 
-        var existing = await dbContext.TranslationMemory
-            .FirstOrDefaultAsync(
-                r => r.OriginalHash == hash && r.SourceLocale == entry.SourceLocale.Name && r.TargetLocale == entry.TargetLocale.Name,
-                cancellationToken)
-            .ConfigureAwait(false);
-
-        if (existing is null)
+    public async Task SaveManyAsync(IReadOnlyList<TranslationMemoryEntry> entries, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(entries);
+        if (entries.Count == 0)
         {
-            dbContext.TranslationMemory.Add(new TranslationMemoryRecord
-            {
-                OriginalHash = hash,
-                OriginalText = entry.OriginalText,
-                SourceLocale = entry.SourceLocale.Name,
-                TargetLocale = entry.TargetLocale.Name,
-                TranslatedText = entry.TranslatedText,
-                Provider = entry.Provider,
-                ProfileName = entry.ProfileName,
-                CreatedAtUtc = entry.CreatedAtUtc,
-            });
+            return;
         }
-        else
+
+        await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+        var keys = entries
+            .Select(entry => new
+            {
+                Entry = entry,
+                Hash = ComputeHash(entry.OriginalText),
+            })
+            .ToList();
+        var hashes = keys.Select(key => key.Hash).Distinct(StringComparer.Ordinal).ToList();
+        var existingRecords = await dbContext.TranslationMemory
+            .Where(record => hashes.Contains(record.OriginalHash))
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+        var existingByKey = existingRecords.ToDictionary(
+            record => (record.OriginalHash, record.SourceLocale, record.TargetLocale));
+
+        foreach (var key in keys)
         {
-            existing.TranslatedText = entry.TranslatedText;
-            existing.Provider = entry.Provider;
-            existing.ProfileName = entry.ProfileName;
-            existing.CreatedAtUtc = entry.CreatedAtUtc;
+            var entry = key.Entry;
+            var compositeKey = (key.Hash, entry.SourceLocale.Name, entry.TargetLocale.Name);
+            if (!existingByKey.TryGetValue(compositeKey, out var existing))
+            {
+                existing = new TranslationMemoryRecord
+                {
+                    OriginalHash = key.Hash,
+                    OriginalText = entry.OriginalText,
+                    SourceLocale = entry.SourceLocale.Name,
+                    TargetLocale = entry.TargetLocale.Name,
+                    TranslatedText = entry.TranslatedText,
+                    Provider = entry.Provider,
+                    ProfileName = entry.ProfileName,
+                    CreatedAtUtc = entry.CreatedAtUtc,
+                };
+                dbContext.TranslationMemory.Add(existing);
+                existingByKey[compositeKey] = existing;
+            }
+            else
+            {
+                existing.TranslatedText = entry.TranslatedText;
+                existing.Provider = entry.Provider;
+                existing.ProfileName = entry.ProfileName;
+                existing.CreatedAtUtc = entry.CreatedAtUtc;
+            }
         }
 
         await dbContext.SaveChangesAsync(cancellationToken).ConfigureAwait(false);

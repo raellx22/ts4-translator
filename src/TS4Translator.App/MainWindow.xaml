@@ -30,12 +30,25 @@
             </TitleBar.IconSource>
         </TitleBar>
 
+        <!--  Compact pane and a tightened content margin: the default NavigationView leaves a wide gutter
+              between the sidebar and the page, and its items sit far apart, which made every screen feel
+              emptier than it is.  -->
         <NavigationView
             x:Name="NavView"
             Grid.Row="1"
+            CompactModeThresholdWidth="0"
+            ExpandedModeThresholdWidth="1400"
             IsBackButtonVisible="Collapsed"
             IsPaneToggleButtonVisible="False"
-            SelectionChanged="NavView_SelectionChanged">
+            OpenPaneLength="196"
+            PaneDisplayMode="Left"
+            ItemInvoked="NavView_ItemInvoked">
+            <NavigationView.Resources>
+                <!--  The default leaves a wide gutter between the pane and the page, and stands the
+                      items far apart; both made every screen read as emptier than it is.  -->
+                <Thickness x:Key="NavigationViewContentMargin">0,0,0,0</Thickness>
+                <x:Double x:Key="NavigationViewItemOnLeftMinHeight">34</x:Double>
+            </NavigationView.Resources>
             <NavigationView.MenuItems>
                 <NavigationViewItem
                     Content="Home"
@@ -48,6 +61,11 @@
                 <NavigationViewItem Content="Glossário" Tag="glossary">
                     <NavigationViewItem.Icon>
                         <FontIcon Glyph="&#xE8A1;" />
+                    </NavigationViewItem.Icon>
+                </NavigationViewItem>
+                <NavigationViewItem Content="Memória" Tag="memory">
+                    <NavigationViewItem.Icon>
+                        <FontIcon Glyph="&#xE81C;" />
                     </NavigationViewItem.Icon>
                 </NavigationViewItem>
                 <NavigationViewItem Content="About" Tag="about">

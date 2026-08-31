@@ -44,4 +44,36 @@ public sealed class FakeTranslationMemory : ITranslationMemory
         _entries[(entry.OriginalText.Trim(), entry.SourceLocale.Name, entry.TargetLocale.Name)] = entry;
         return Task.CompletedTask;
     }
+
+    // ---- browsing and housekeeping: enough for the orchestrator tests, which never read them ----
+
+    public Task<TranslationMemoryPage> SearchAsync(string? query, string? provider, int skip, int take, CancellationToken cancellationToken = default)
+    {
+        var matches = _entries.Values
+            .Where(entry => string.IsNullOrWhiteSpace(query)
+                || entry.OriginalText.Contains(query, StringComparison.OrdinalIgnoreCase)
+                || entry.TranslatedText.Contains(query, StringComparison.OrdinalIgnoreCase))
+            .Where(entry => string.IsNullOrWhiteSpace(provider) || entry.Provider == provider)
+            .ToList();
+
+        return Task.FromResult(new TranslationMemoryPage([.. matches.Skip(skip).Take(take)], matches.Count));
+    }
+
+    public Task<IReadOnlyList<TranslationMemoryProviderCount>> CountByProviderAsync(CancellationToken cancellationToken = default) =>
+        Task.FromResult<IReadOnlyList<TranslationMemoryProviderCount>>(
+            [.. _entries.Values.CountBy(entry => entry.Provider).Select(pair => new TranslationMemoryProviderCount(pair.Key, pair.Value))]);
+
+    public Task<bool> DeleteAsync(string originalText, CultureInfo sourceLocale, CultureInfo targetLocale, CancellationToken cancellationToken = default) =>
+        Task.FromResult(_entries.Remove((originalText.Trim(), sourceLocale.Name, targetLocale.Name)));
+
+    public Task<int> DeleteByProviderAsync(string provider, CancellationToken cancellationToken = default)
+    {
+        var doomed = _entries.Where(pair => pair.Value.Provider == provider).Select(pair => pair.Key).ToList();
+        foreach (var key in doomed)
+        {
+            _entries.Remove(key);
+        }
+
+        return Task.FromResult(doomed.Count);
+    }
 }

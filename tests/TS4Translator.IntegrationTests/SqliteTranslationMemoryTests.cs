@@ -156,4 +156,114 @@ public sealed class SqliteTranslationMemoryTests : IDisposable
 
         Assert.Null(found);
     }
+
+    // ---------- browsing and housekeeping ----------
+
+    private async Task SeedAsync(params (string Original, string Translation, string Provider)[] entries)
+    {
+        foreach (var (original, translation, provider) in entries)
+        {
+            await _sut.SaveAsync(new TranslationMemoryEntry(original, English, PortugueseBrazil, translation, provider, null, DateTimeOffset.UtcNow));
+        }
+    }
+
+    [Fact]
+    public async Task SearchAsync_MatchesEitherSideOfTheEntry()
+    {
+        await SeedAsync(("Shallow", "Raso", "argos"), ("Average Hips", "Quadril médio", "argos"));
+
+        Assert.Equal("Raso", Assert.Single((await _sut.SearchAsync("shallow", null, 0, 50)).Entries).TranslatedText);
+        Assert.Equal("Raso", Assert.Single((await _sut.SearchAsync("RASO", null, 0, 50)).Entries).TranslatedText);
+    }
+
+    [Fact]
+    public async Task SearchAsync_FiltersByProvider()
+    {
+        await SeedAsync(("Shallow", "Raso", "argos"), ("Average Hips", "Quadril médio", "manual"));
+
+        var page = await _sut.SearchAsync(null, "manual", 0, 50);
+
+        Assert.Equal("Quadril médio", Assert.Single(page.Entries).TranslatedText);
+        Assert.Equal(1, page.TotalMatches);
+    }
+
+    /// <summary>The page has to report what it is not showing, or "próximas" cannot know when to stop.</summary>
+    [Fact]
+    public async Task SearchAsync_Paging_ReportsTheFullMatchCount()
+    {
+        await SeedAsync([.. Enumerable.Range(1, 10).Select(index => ($"Texto {index}", $"Tradução {index}", "argos"))]);
+
+        var page = await _sut.SearchAsync(null, null, skip: 4, take: 3);
+
+        Assert.Equal(3, page.Entries.Count);
+        Assert.Equal(10, page.TotalMatches);
+    }
+
+    [Fact]
+    public async Task SearchAsync_PagesDoNotOverlapOrSkipEntries()
+    {
+        await SeedAsync([.. Enumerable.Range(1, 25).Select(index => ($"Texto {index}", $"Tradução {index}", "argos"))]);
+
+        var first = await _sut.SearchAsync(null, null, 0, 10);
+        var second = await _sut.SearchAsync(null, null, 10, 10);
+        var third = await _sut.SearchAsync(null, null, 20, 10);
+
+        var seen = first.Entries.Concat(second.Entries).Concat(third.Entries).Select(entry => entry.OriginalText).ToList();
+        Assert.Equal(25, seen.Count);
+        Assert.Equal(25, seen.Distinct(StringComparer.Ordinal).Count());
+    }
+
+    [Fact]
+    public async Task CountByProviderAsync_GroupsByOrigin()
+    {
+        await SeedAsync(("A", "a", "argos"), ("B", "b", "argos"), ("C", "c", "manual"));
+
+        var counts = await _sut.CountByProviderAsync();
+
+        Assert.Equal(2, counts.Single(count => count.Provider == "argos").Count);
+        Assert.Equal(1, counts.Single(count => count.Provider == "manual").Count);
+    }
+
+    [Fact]
+    public async Task DeleteAsync_RemovesOnlyThatEntry()
+    {
+        await SeedAsync(("Shallow", "Raso", "argos"), ("Average Hips", "Quadril médio", "argos"));
+
+        Assert.True(await _sut.DeleteAsync("Shallow", English, PortugueseBrazil));
+
+        Assert.Null(await _sut.FindExactAsync("Shallow", English, PortugueseBrazil));
+        Assert.NotNull(await _sut.FindExactAsync("Average Hips", English, PortugueseBrazil));
+    }
+
+    [Fact]
+    public async Task DeleteAsync_UnknownEntry_ReportsNothingRemoved()
+        => Assert.False(await _sut.DeleteAsync("Nunca existiu", English, PortugueseBrazil));
+
+    /// <summary>The escape hatch for a memory filled by an engine the user has stopped trusting.</summary>
+    [Fact]
+    public async Task DeleteByProviderAsync_EmptiesOneOriginAndLeavesTheRest()
+    {
+        await SeedAsync(("A", "a", "argos"), ("B", "b", "argos"), ("C", "c", "manual"));
+
+        Assert.Equal(2, await _sut.DeleteByProviderAsync("argos"));
+
+        Assert.Equal("manual", Assert.Single(await _sut.CountByProviderAsync()).Provider);
+    }
+
+    /// <summary>
+    /// A human correction has to win over the machine entry it replaces — same key, so it overwrites
+    /// rather than piling up a second answer for the same source text.
+    /// </summary>
+    [Fact]
+    public async Task SaveAsync_ManualCorrectionOverAMachineEntry_ReplacesIt()
+    {
+        await SeedAsync(("Shallow", "Rasgo", "argos"));
+
+        await SeedAsync(("Shallow", "Raso", TranslationMemoryPolicy.ManualProvider));
+
+        var found = await _sut.FindExactAsync("Shallow", English, PortugueseBrazil);
+        Assert.Equal("Raso", found?.TranslatedText);
+        Assert.Equal(TranslationMemoryPolicy.ManualProvider, found?.Provider);
+        Assert.Equal(1, (await _sut.SearchAsync(null, null, 0, 50)).TotalMatches);
+    }
 }

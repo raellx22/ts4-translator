@@ -3,7 +3,6 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Navigation;
 using TS4Translator.App.ViewModels;
-using TS4Translator.Core.Glossary;
 
 namespace TS4Translator.App.Pages;
 
@@ -25,9 +24,26 @@ public sealed partial class GlossaryPage : Page
 
     private void RemoveTermButton_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is FrameworkElement { Tag: GlossaryTerm term })
+        if (sender is FrameworkElement { Tag: GlossaryTermViewModel term })
         {
             _ = ViewModel.DeleteTermCommand.ExecuteAsync(term);
+        }
+    }
+
+    private void TermField_LostFocus(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { DataContext: GlossaryTermViewModel term })
+        {
+            _ = ViewModel.SaveTermAsync(term);
+        }
+    }
+
+    // A checkbox has no "lost focus" moment worth waiting for - the click is the decision.
+    private void TermToggle_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { Tag: GlossaryTermViewModel term })
+        {
+            _ = ViewModel.SaveTermAsync(term);
         }
     }
 }

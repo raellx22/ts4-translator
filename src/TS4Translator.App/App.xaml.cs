@@ -6,6 +6,7 @@ using TS4Translator.App.ViewModels;
 using TS4Translator.Infrastructure;
 using TS4Translator.Persistence;
 using TS4Translator.Providers;
+using TS4Translator.Providers.Argos;
 using TS4Translator.Sims4;
 using TS4Translator.Translation;
 
@@ -51,12 +52,14 @@ public partial class App : Application
             .AddTranslationServices()
             .AddPersistenceServices(AppDataPaths.DatabaseFilePath)
             .AddInfrastructureServices()
-            .AddProviderServices()
+            .AddProviderServices(new ArgosRuntimeOptions(Path.Combine(AppDataPaths.Models, "Argos")))
             .AddSingleton<IPathPickerService, WindowsAppSdkPathPickerService>()
+            .AddSingleton<ExportManifestStore>()
             .AddTransient<HomePageViewModel>()
             .AddTransient<EditorPageViewModel>()
             .AddTransient<SettingsPageViewModel>()
             .AddTransient<GlossaryPageViewModel>()
+            .AddTransient<MemoryPageViewModel>()
             .BuildServiceProvider();
         Services = _services;
     }

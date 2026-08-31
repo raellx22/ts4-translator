@@ -42,6 +42,29 @@ public sealed class EfGlossaryService(IDbContextFactory<TranslatorDbContext> dbC
         return records.Select(ToTerm).ToList();
     }
 
+    public async Task<GlossaryTerm?> UpdateTermAsync(int termId, string original, string translation, bool neverTranslate, bool caseSensitive, string? notes, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(original);
+        ArgumentNullException.ThrowIfNull(translation);
+
+        await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+
+        var record = await dbContext.GlossaryTerms.FirstOrDefaultAsync(r => r.Id == termId, cancellationToken).ConfigureAwait(false);
+        if (record is null)
+        {
+            return null;
+        }
+
+        record.Original = original;
+        record.Translation = translation;
+        record.NeverTranslate = neverTranslate;
+        record.CaseSensitive = caseSensitive;
+        record.Notes = notes;
+
+        await dbContext.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+        return ToTerm(record);
+    }
+
     public async Task DeleteTermAsync(int termId, CancellationToken cancellationToken = default)
     {
         await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);

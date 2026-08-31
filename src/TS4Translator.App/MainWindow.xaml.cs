@@ -18,6 +18,11 @@ public sealed partial class MainWindow : Window
         SetTitleBar(AppTitleBar);
         AppWindow.TitleBar.PreferredHeightOption = TitleBarHeightOption.Tall;
         AppWindow.SetIcon("Assets/AppIcon.ico");
+
+        // Explicit, because navigation runs off ItemInvoked and that only fires on a real click.
+        // SelectionChanged used to fire once during load (Home carries IsSelected="True") and that was
+        // what put the first page on screen; without this the app opens to an empty content area.
+        NavFrame.Navigate(typeof(HomePage));
     }
 
     private void TitleBar_PaneToggleRequested(TitleBar sender, object args)
@@ -30,28 +35,47 @@ public sealed partial class MainWindow : Window
         NavFrame.GoBack();
     }
 
-    private void NavView_SelectionChanged(NavigationView sender, NavigationViewSelectionChangedEventArgs args)
+    /// <summary>
+    /// Navigation is driven by ItemInvoked rather than SelectionChanged.
+    /// </summary>
+    /// <remarks>
+    /// Opening a project navigates the frame to the Editor without changing which sidebar item is
+    /// selected, so "Home" stays highlighted. SelectionChanged then never fires when the user clicks it
+    /// - the selection did not change - and the click did nothing at all, leaving the only way out of a
+    /// project the title bar's back arrow. ItemInvoked fires either way.
+    /// </remarks>
+    private void NavView_ItemInvoked(NavigationView sender, NavigationViewItemInvokedEventArgs args)
     {
-        if (args.IsSettingsSelected)
+        if (args.IsSettingsInvoked)
         {
-            NavFrame.Navigate(typeof(SettingsPage));
+            NavigateTo(typeof(SettingsPage));
+            return;
         }
-        else if (args.SelectedItem is NavigationViewItem item)
+
+        if (args.InvokedItemContainer is not NavigationViewItem item)
         {
-            switch (item.Tag)
-            {
-                case "home":
-                    NavFrame.Navigate(typeof(HomePage));
-                    break;
-                case "glossary":
-                    NavFrame.Navigate(typeof(GlossaryPage));
-                    break;
-                case "about":
-                    NavFrame.Navigate(typeof(AboutPage));
-                    break;
-                default:
-                    throw new InvalidOperationException($"Unknown navigation item tag: {item.Tag}");
-            }
+            return;
+        }
+
+        NavigateTo(item.Tag switch
+        {
+            "home" => typeof(HomePage),
+            "glossary" => typeof(GlossaryPage),
+            "memory" => typeof(MemoryPage),
+            "about" => typeof(AboutPage),
+            _ => throw new InvalidOperationException($"Unknown navigation item tag: {item.Tag}"),
+        });
+    }
+
+    /// <summary>
+    /// Navigates unless that page is already showing - re-navigating to the page the user is already on
+    /// would throw away its state (a typed search, a scroll position) for no reason.
+    /// </summary>
+    private void NavigateTo(Type pageType)
+    {
+        if (NavFrame.CurrentSourcePageType != pageType)
+        {
+            NavFrame.Navigate(pageType);
         }
     }
 }

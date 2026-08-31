@@ -105,4 +105,37 @@ public sealed class EfGlossaryServiceTests : IDisposable
     {
         await _sut.DeleteTermAsync(999);
     }
+
+    /// <summary>Fixing a typo used to mean deleting the term and retyping it from scratch.</summary>
+    [Fact]
+    public async Task UpdateTermAsync_CorrectsTheTermInPlace()
+    {
+        var term = await _sut.AddTermAsync("Grim Reaper", "Ceifadr", neverTranslate: false, caseSensitive: false, notes: null, projectId: null);
+
+        var updated = await _sut.UpdateTermAsync(term.Id, "Grim Reaper", "Ceifador", neverTranslate: false, caseSensitive: true, notes: "nome próprio do jogo");
+
+        Assert.NotNull(updated);
+        Assert.Equal("Ceifador", updated.Translation);
+        Assert.True(updated.CaseSensitive);
+
+        var stored = Assert.Single(await _sut.GetTermsAsync(projectId: null));
+        Assert.Equal("Ceifador", stored.Translation);
+        Assert.Equal(term.Id, stored.Id);
+    }
+
+    /// <summary>A term keeps the scope it was created with; editing is not a way to move it between projects.</summary>
+    [Fact]
+    public async Task UpdateTermAsync_KeepsTheTermsScope()
+    {
+        var project = await _projectService.CreateAsync("Some Mod", [], English, PortugueseBrazil);
+        var term = await _sut.AddTermAsync("Aspiration", "Aspiração", neverTranslate: false, caseSensitive: false, notes: null, projectId: project.Id);
+
+        var updated = await _sut.UpdateTermAsync(term.Id, "Aspiration", "Aspiração de vida", neverTranslate: false, caseSensitive: false, notes: null);
+
+        Assert.Equal(project.Id, updated?.ProjectId);
+    }
+
+    [Fact]
+    public async Task UpdateTermAsync_UnknownId_ReturnsNull()
+        => Assert.Null(await _sut.UpdateTermAsync(999, "A", "B", neverTranslate: false, caseSensitive: false, notes: null));
 }

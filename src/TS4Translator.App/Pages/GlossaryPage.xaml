@@ -5,12 +5,12 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:local="using:TS4Translator.App.Pages"
-    xmlns:glossary="using:TS4Translator.Core.Glossary"
+    xmlns:vm="using:TS4Translator.App.ViewModels"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     x:Name="Root"
     mc:Ignorable="d">
 
-    <Grid Padding="24,16,24,16" RowSpacing="12" MaxWidth="800" HorizontalAlignment="Left">
+    <Grid Padding="24,16,24,16" RowSpacing="12" MaxWidth="1100" HorizontalAlignment="Left">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
@@ -24,19 +24,29 @@
         <TextBlock
             Grid.Row="1"
             Opacity="0.7"
-            Text="Termos globais aplicados automaticamente a qualquer tradução, em qualquer projeto - nomes próprios, marcas, ou termos que devem sempre virar (ou nunca virar) uma tradução específica."
+            Text="Termos aplicados automaticamente a qualquer tradução - nomes próprios, marcas, ou termos que devem sempre virar (ou nunca virar) uma tradução específica. Valem para todos os motores, vão junto no arquivo que você leva a um chat de IA, e a resposta é conferida contra eles."
             TextWrapping="Wrap" />
 
-        <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Bottom">
-            <TextBox Width="220" Header="Original" Text="{x:Bind ViewModel.NewOriginal, Mode=TwoWay}" />
-            <TextBox Width="220" Header="Tradução" Text="{x:Bind ViewModel.NewTranslation, Mode=TwoWay}" />
-            <CheckBox Content="Nunca traduzir" IsChecked="{x:Bind ViewModel.NewNeverTranslate, Mode=TwoWay}" />
-            <CheckBox Content="Diferenciar maiúsculas" IsChecked="{x:Bind ViewModel.NewCaseSensitive, Mode=TwoWay}" />
-            <Button Command="{x:Bind ViewModel.AddTermCommand}" Content="Adicionar" />
-            <ProgressRing
-                Width="20"
-                Height="20"
-                IsActive="{x:Bind ViewModel.IsBusy, Mode=OneWay}" />
+        <StackPanel Grid.Row="2" Spacing="8">
+            <!--  Escopo: global, ou os termos de um projeto. O serviço sempre suportou termos por
+                  projeto; sem esta lista eles não existiam na prática.  -->
+            <ComboBox
+                MinWidth="360"
+                Header="Glossário de"
+                ItemsSource="{x:Bind ViewModel.ScopeOptions}"
+                SelectedItem="{x:Bind ViewModel.SelectedScope, Mode=TwoWay}" />
+
+            <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Bottom">
+                <TextBox Width="220" Header="Original" Text="{x:Bind ViewModel.NewOriginal, Mode=TwoWay}" />
+                <TextBox Width="220" Header="Tradução" Text="{x:Bind ViewModel.NewTranslation, Mode=TwoWay}" />
+                <CheckBox Content="Nunca traduzir" IsChecked="{x:Bind ViewModel.NewNeverTranslate, Mode=TwoWay}" />
+                <CheckBox Content="Diferenciar maiúsculas" IsChecked="{x:Bind ViewModel.NewCaseSensitive, Mode=TwoWay}" />
+                <Button Command="{x:Bind ViewModel.AddTermCommand}" Content="Adicionar" />
+                <ProgressRing
+                    Width="20"
+                    Height="20"
+                    IsActive="{x:Bind ViewModel.IsBusy, Mode=OneWay}" />
+            </StackPanel>
         </StackPanel>
 
         <TextBlock
@@ -44,25 +54,54 @@
             Text="{x:Bind ViewModel.StatusText, Mode=OneWay}"
             TextWrapping="Wrap" />
 
+        <!--  Editável no lugar: um termo com erro de digitação tinha que ser apagado e redigitado.  -->
         <ListView Grid.Row="4" ItemsSource="{x:Bind ViewModel.Terms}">
             <ListView.ItemTemplate>
-                <DataTemplate x:DataType="glossary:GlossaryTerm">
-                    <Grid Padding="0,8,0,8" ColumnSpacing="16">
+                <DataTemplate x:DataType="vm:GlossaryTermViewModel">
+                    <Grid Padding="0,8,0,8" ColumnSpacing="12">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="140" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="130" />
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
-                        <TextBlock Grid.Column="0" Text="{x:Bind Original}" TextWrapping="Wrap" />
-                        <TextBlock Grid.Column="1" Text="{x:Bind Translation}" TextWrapping="Wrap" />
-                        <TextBlock
+                        <TextBox
+                            Grid.Column="0"
+                            LostFocus="TermField_LostFocus"
+                            Text="{x:Bind Original, Mode=TwoWay}"
+                            TextWrapping="Wrap" />
+                        <TextBox
+                            Grid.Column="1"
+                            LostFocus="TermField_LostFocus"
+                            Text="{x:Bind Translation, Mode=TwoWay}"
+                            TextWrapping="Wrap" />
+                        <CheckBox
                             Grid.Column="2"
+                            VerticalAlignment="Center"
+                            Content="Nunca traduzir"
+                            IsChecked="{x:Bind NeverTranslate, Mode=TwoWay}"
+                            Tag="{x:Bind}"
+                            Click="TermToggle_Click" />
+                        <CheckBox
+                            Grid.Column="3"
+                            VerticalAlignment="Center"
+                            Content="Maiúsculas"
+                            IsChecked="{x:Bind CaseSensitive, Mode=TwoWay}"
+                            Tag="{x:Bind}"
+                            Click="TermToggle_Click" />
+                        <TextBlock
+                            Grid.Column="4"
+                            VerticalAlignment="Center"
                             FontSize="12"
                             Opacity="0.7"
-                            Text="{x:Bind NeverTranslate}" />
+                            Text="{x:Bind ScopeText}"
+                            TextWrapping="Wrap"
+                            ToolTipService.ToolTip="Onde este termo vale. Um termo global corrigido aqui muda todos os projetos." />
                         <Button
-                            Grid.Column="3"
+                            Grid.Column="5"
+                            VerticalAlignment="Center"
                             Click="RemoveTermButton_Click"
                             Content="Remover"
                             Tag="{x:Bind}" />
