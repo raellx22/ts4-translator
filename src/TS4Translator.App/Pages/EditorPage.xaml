@@ -9,8 +9,11 @@
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     mc:Ignorable="d">
 
-    <Grid Padding="24,16,24,16" RowSpacing="12">
+    <Grid Padding="20,12,20,12" RowSpacing="8">
         <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
@@ -27,7 +30,8 @@
             Orientation="Horizontal"
             Spacing="12">
             <Button Command="{x:Bind ViewModel.TranslateCommand}" Content="Traduzir pendentes" IsEnabled="{x:Bind Not(ViewModel.IsTranslating), Mode=OneWay}" />
-            <Button Command="{x:Bind ViewModel.CancelTranslateCommand}" Content="Cancelar tradução" Visibility="{x:Bind BoolToVisibility(ViewModel.IsTranslating), Mode=OneWay}" />
+            <Button Command="{x:Bind ViewModel.CancelTranslateCommand}" Content="Cancelar" Visibility="{x:Bind BoolToVisibility(ViewModel.IsTranslating), Mode=OneWay}" />
+            <Button Command="{x:Bind ViewModel.EstimateCommand}" Content="Estimar custo" />
             <Button Command="{x:Bind ViewModel.ExportCommand}" Content="Exportar" />
             <ProgressRing
                 Width="20"
@@ -35,8 +39,76 @@
                 IsActive="{x:Bind ViewModel.IsBusy, Mode=OneWay}" />
         </StackPanel>
 
+        <!--  Refinement: pick a second, stronger engine and send either one string or everything flagged for review through it.  -->
         <StackPanel
             Grid.Row="2"
+            Orientation="Horizontal"
+            Spacing="8"
+            VerticalAlignment="Bottom">
+            <ComboBox
+                MinWidth="260"
+                Header="Refinar linha a linha com"
+                ItemsSource="{x:Bind ViewModel.RefineProfileOptions}"
+                SelectedItem="{x:Bind ViewModel.SelectedRefineProfileName, Mode=TwoWay}" />
+            <Button
+                VerticalAlignment="Bottom"
+                Command="{x:Bind ViewModel.RefineNeedsReviewCommand}"
+                Content="Revisar as marcadas (em lote)"
+                IsEnabled="{x:Bind Not(ViewModel.IsTranslating), Mode=OneWay}" />
+        </StackPanel>
+
+        <!--  Ida e volta por arquivo de texto para um chat de IA externo. O alcance é uma escolha
+              explícita: antes a exportação pegava as linhas marcadas ou o que a lista mostrava, e a
+              lista para em 500, então "exportar tudo" nunca era tudo de verdade.  -->
+        <StackPanel Grid.Row="3" Spacing="6">
+            <StackPanel Orientation="Horizontal" Spacing="8">
+                <ComboBox
+                    MinWidth="220"
+                    VerticalAlignment="Bottom"
+                    Header="Levar para um chat de IA — exportar"
+                    ItemsSource="{x:Bind ViewModel.ExportScopeOptions}"
+                    SelectedItem="{x:Bind ViewModel.SelectedExportScope, Mode=TwoWay}" />
+                <NumberBox
+                    Width="170"
+                    VerticalAlignment="Bottom"
+                    Header="Textos por arquivo (0 = tudo junto)"
+                    Maximum="100000"
+                    Minimum="0"
+                    SpinButtonPlacementMode="Compact"
+                    Value="{x:Bind ViewModel.MaximumStringsPerFileValue, Mode=TwoWay}" />
+                <CheckBox
+                    VerticalAlignment="Bottom"
+                    Content="Incluir identificadores internos"
+                    IsChecked="{x:Bind ViewModel.IncludeInternalIdentifiers, Mode=TwoWay}"
+                    ToolTipService.ToolTip="Manda também strings como debug_savedActor2, que não são texto e voltam sempre iguais." />
+                <Button
+                    VerticalAlignment="Bottom"
+                    Command="{x:Bind ViewModel.ExportBundleCommand}"
+                    Content="Exportar textos (.txt)"
+                    Style="{StaticResource AccentButtonStyle}" />
+                <Button
+                    VerticalAlignment="Bottom"
+                    Command="{x:Bind ViewModel.ImportBundleCommand}"
+                    Content="Importar do chat"
+                    ToolTipService.ToolTip="Pode selecionar de uma vez todos os arquivos de resposta, inclusive as partes." />
+                <Button
+                    VerticalAlignment="Bottom"
+                    Command="{x:Bind ViewModel.SelectAllMatchingCommand}"
+                    Content="Marcar tudo do filtro" />
+                <Button
+                    VerticalAlignment="Bottom"
+                    Command="{x:Bind ViewModel.ClearSelectionCommand}"
+                    Content="Limpar marcação" />
+            </StackPanel>
+            <TextBlock
+                FontSize="12"
+                Opacity="0.75"
+                Text="{x:Bind ViewModel.ExportScopeSummary, Mode=OneWay}"
+                TextWrapping="Wrap" />
+        </StackPanel>
+
+        <StackPanel
+            Grid.Row="4"
             Orientation="Horizontal"
             Spacing="12"
             Visibility="{x:Bind BoolToVisibility(ViewModel.IsTranslating), Mode=OneWay}">
@@ -51,7 +123,7 @@
             </TextBlock>
         </StackPanel>
 
-        <StackPanel Grid.Row="3" Orientation="Horizontal" Spacing="8" VerticalAlignment="Bottom">
+        <StackPanel Grid.Row="5" Orientation="Horizontal" Spacing="8" VerticalAlignment="Bottom">
             <TextBox
                 Width="500"
                 Header="Instruções de tradução (tom, estilo - opcional)"
@@ -59,13 +131,69 @@
             <Button Command="{x:Bind ViewModel.SaveCustomInstructionsCommand}" Content="Salvar instruções" />
         </StackPanel>
 
-        <TextBlock
-            Grid.Row="4"
-            Text="{x:Bind ViewModel.StatusText, Mode=OneWay}"
-            TextWrapping="Wrap" />
+        <StackPanel Grid.Row="6" Spacing="2">
+            <TextBlock
+                FontSize="12"
+                Opacity="0.7"
+                Text="{x:Bind ViewModel.PipelineSummary, Mode=OneWay}"
+                TextWrapping="Wrap" />
+            <TextBlock Text="{x:Bind ViewModel.StatusText, Mode=OneWay}" TextWrapping="Wrap" />
+            <TextBlock
+                FontSize="12"
+                Opacity="0.75"
+                Text="{x:Bind ViewModel.LastPreview, Mode=OneWay}"
+                TextWrapping="Wrap" />
+        </StackPanel>
+
+        <!--  O relatório da última importação. Existe porque a barra de status mostrava três problemas e
+              "(+184 aviso(s))", sem nenhum caminho para ver o resto: o usuário via que algo tinha
+              acontecido e não tinha como descobrir o quê.  -->
+        <InfoBar
+            Grid.Row="7"
+            IsOpen="{x:Bind ViewModel.HasImportReport, Mode=TwoWay}"
+            Message="{x:Bind ViewModel.ImportSummary, Mode=OneWay}"
+            Severity="{x:Bind ViewModel.ImportSeverity, Mode=OneWay}"
+            Title="Importação do chat">
+            <InfoBar.Content>
+                <StackPanel Margin="0,8,0,12" Spacing="8">
+                    <ScrollViewer MaxHeight="240" VerticalScrollBarVisibility="Auto">
+                        <ItemsControl ItemsSource="{x:Bind ViewModel.ImportProblems}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate x:DataType="vm:ImportProblemGroupViewModel">
+                                    <Expander
+                                        Margin="0,0,0,4"
+                                        HorizontalAlignment="Stretch"
+                                        HorizontalContentAlignment="Left"
+                                        IsExpanded="{x:Bind IsExpanded}">
+                                        <Expander.Header>
+                                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                                <TextBlock
+                                                    FontSize="11"
+                                                    FontWeight="SemiBold"
+                                                    Opacity="0.7"
+                                                    Text="{x:Bind SeverityLabel}"
+                                                    VerticalAlignment="Center" />
+                                                <TextBlock Text="{x:Bind Title}" TextWrapping="Wrap" />
+                                            </StackPanel>
+                                        </Expander.Header>
+                                        <TextBlock
+                                            FontSize="12"
+                                            IsTextSelectionEnabled="True"
+                                            Opacity="0.85"
+                                            Text="{x:Bind Details}"
+                                            TextWrapping="Wrap" />
+                                    </Expander>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </ScrollViewer>
+                    <Button Command="{x:Bind ViewModel.SaveImportReportCommand}" Content="Salvar relatório completo (.txt)" />
+                </StackPanel>
+            </InfoBar.Content>
+        </InfoBar>
 
         <StackPanel
-            Grid.Row="5"
+            Grid.Row="8"
             Orientation="Horizontal"
             Spacing="12">
             <ComboBox
@@ -75,32 +203,120 @@
                 Width="280"
                 PlaceholderText="Pesquisar original ou tradução..."
                 Text="{x:Bind ViewModel.SearchText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+            <TextBlock
+                VerticalAlignment="Center"
+                FontSize="12"
+                Opacity="0.7"
+                Text="{x:Bind ViewModel.FilterSummary, Mode=OneWay}" />
+            <Button
+                VerticalAlignment="Center"
+                Command="{x:Bind ViewModel.UseProjectPipelineCommand}"
+                Content="Usar motores só deste projeto"
+                Visibility="{x:Bind ViewModel.GlobalPipelineButtonVisibility, Mode=OneWay}" />
+            <Button
+                VerticalAlignment="Center"
+                Command="{x:Bind ViewModel.UseGlobalPipelineCommand}"
+                Content="Voltar aos motores globais"
+                Visibility="{x:Bind ViewModel.ProjectPipelineButtonVisibility, Mode=OneWay}" />
         </StackPanel>
 
-        <ListView Grid.Row="6" ItemsSource="{x:Bind ViewModel.Strings}">
+        <ListView Grid.Row="9" ItemsSource="{x:Bind ViewModel.Strings}">
             <ListView.ItemTemplate>
                 <DataTemplate x:DataType="vm:StringRowViewModel">
-                    <Grid Padding="0,8,0,8" ColumnSpacing="16">
+                    <Grid Padding="0,8,0,8" ColumnSpacing="12">
                         <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="180" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="170" />
                         </Grid.ColumnDefinitions>
-                        <TextBlock
+
+                        <!--  Marca quais linhas entram no arquivo para o chat.  -->
+                        <CheckBox
                             Grid.Column="0"
+                            MinWidth="0"
+                            Margin="0,-4,0,0"
+                            IsChecked="{x:Bind IsSelected, Mode=TwoWay}" />
+
+                        <!--  Selectable, not a plain TextBlock: the user needs to be able to select and copy
+                              the original to paste it into an online translator (Ctrl+C, the right-click
+                              menu, or the copy button below all work).  -->
+                        <TextBlock
+                            Grid.Column="1"
+                            IsTextSelectionEnabled="True"
                             Text="{x:Bind Original}"
                             TextWrapping="Wrap" />
+
                         <TextBox
-                            Grid.Column="1"
+                            Grid.Column="2"
                             AcceptsReturn="True"
                             LostFocus="TranslationTextBox_LostFocus"
                             Text="{x:Bind Translation, Mode=TwoWay}"
                             TextWrapping="Wrap" />
-                        <TextBlock
-                            Grid.Column="2"
-                            FontSize="12"
-                            Opacity="0.7"
-                            Text="{x:Bind StatusText, Mode=OneWay}" />
+
+                        <StackPanel
+                            Grid.Column="3"
+                            VerticalAlignment="Top"
+                            Orientation="Horizontal"
+                            Spacing="4">
+                            <Button
+                                Click="CopyOriginal_Click"
+                                Content="&#xE8C8;"
+                                FontFamily="{StaticResource SymbolThemeFontFamily}"
+                                Tag="{x:Bind}"
+                                ToolTipService.ToolTip="Copiar o texto original" />
+                            <Button
+                                Click="RefineRow_Click"
+                                Content="&#xE945;"
+                                FontFamily="{StaticResource SymbolThemeFontFamily}"
+                                IsEnabled="{x:Bind CanRefine, Mode=OneWay}"
+                                Tag="{x:Bind}"
+                                ToolTipService.ToolTip="Refinar esta tradução com o motor escolhido acima" />
+                            <ProgressRing
+                                Width="16"
+                                Height="16"
+                                VerticalAlignment="Center"
+                                IsActive="{x:Bind IsRefining, Mode=OneWay}" />
+                        </StackPanel>
+
+                        <StackPanel Grid.Column="4">
+                            <TextBlock
+                                FontSize="12"
+                                Opacity="0.7"
+                                Text="{x:Bind StatusText, Mode=OneWay}"
+                                TextWrapping="Wrap" />
+                            <TextBlock
+                                FontSize="11"
+                                Opacity="0.5"
+                                Text="{x:Bind SourceModName}"
+                                TextWrapping="Wrap" />
+                        </StackPanel>
+
+                        <!--  Right-click anywhere on the row. Tag carries the row itself: binding a
+                              ListView item's command back to the page ViewModel by ElementName does not
+                              resolve reliably in WinUI 3 (DEC-013).  -->
+                        <Grid.ContextFlyout>
+                            <MenuFlyout>
+                                <MenuFlyoutItem
+                                    Click="CopyOriginal_Click"
+                                    Tag="{x:Bind}"
+                                    Text="Copiar texto original" />
+                                <MenuFlyoutItem
+                                    Click="CopyTranslation_Click"
+                                    Tag="{x:Bind}"
+                                    Text="Copiar tradução" />
+                                <MenuFlyoutSeparator />
+                                <MenuFlyoutItem
+                                    Click="RefineRow_Click"
+                                    Tag="{x:Bind}"
+                                    Text="Refinar esta tradução" />
+                                <MenuFlyoutItem
+                                    Click="AddToGlossary_Click"
+                                    Tag="{x:Bind}"
+                                    Text="Adicionar ao glossário..." />
+                            </MenuFlyout>
+                        </Grid.ContextFlyout>
                     </Grid>
                 </DataTemplate>
             </ListView.ItemTemplate>

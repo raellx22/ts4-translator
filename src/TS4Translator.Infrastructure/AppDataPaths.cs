@@ -19,6 +19,13 @@ public static class AppDataPaths
 
     public static string Models => EnsureDirectory(Path.Combine(Root, "Models"));
 
+    /// <summary>
+    /// Records of which strings each chat bundle was exported with. Kept outside the database because it
+    /// is a note about a file on disk, not project data — and it has to outlive the app being closed,
+    /// since closing the app while the chat model works is exactly what the user does.
+    /// </summary>
+    public static string Exports => EnsureDirectory(Path.Combine(Data, "Exports"));
+
     public static string DatabaseFilePath => Path.Combine(Data, "ts4translator.db");
 
     private static string EnsureDirectory(string path)

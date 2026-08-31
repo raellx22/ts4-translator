@@ -36,4 +36,71 @@ public sealed class WindowsAppSdkPathPickerService : IPathPickerService
         var file = await picker.PickSaveFileAsync();
         return file?.Path;
     }
+
+    public async Task<string?> PickSaveTextFileAsync(string suggestedFileName)
+    {
+        var picker = new FileSavePicker
+        {
+            CommitButtonText = "Salvar",
+            SuggestedStartLocation = PickerLocationId.DocumentsLibrary,
+            SuggestedFileName = suggestedFileName,
+        };
+        picker.FileTypeChoices.Add("Texto", [".txt"]);
+
+        WinRT.Interop.InitializeWithWindow.Initialize(picker, App.WindowHandle);
+        var file = await picker.PickSaveFileAsync();
+        return file?.Path;
+    }
+
+    public async Task<string?> PickOpenTextFileAsync()
+    {
+        var picker = new FileOpenPicker
+        {
+            CommitButtonText = "Importar",
+            SuggestedStartLocation = PickerLocationId.DocumentsLibrary,
+            ViewMode = PickerViewMode.List,
+        };
+        picker.FileTypeFilter.Add(".txt");
+        picker.FileTypeFilter.Add(".md");
+
+        WinRT.Interop.InitializeWithWindow.Initialize(picker, App.WindowHandle);
+        var file = await picker.PickSingleFileAsync();
+        return file?.Path;
+    }
+
+    public async Task<IReadOnlyList<string>> PickOpenTextFilesAsync()
+    {
+        var picker = new FileOpenPicker
+        {
+            CommitButtonText = "Importar",
+            SuggestedStartLocation = PickerLocationId.DocumentsLibrary,
+            ViewMode = PickerViewMode.List,
+        };
+        picker.FileTypeFilter.Add(".txt");
+        picker.FileTypeFilter.Add(".md");
+
+        WinRT.Interop.InitializeWithWindow.Initialize(picker, App.WindowHandle);
+        var files = await picker.PickMultipleFilesAsync();
+
+        // Ordered by name so parte01, parte02, parte03 are applied in the order they were produced -
+        // the picker returns them in click order, which is whatever the user happened to do.
+        return [.. files.Select(file => file.Path).OrderBy(path => path, StringComparer.OrdinalIgnoreCase)];
+    }
+
+    public async Task<string?> PickFolderAsync()
+    {
+        var picker = new FolderPicker
+        {
+            CommitButtonText = "Exportar aqui",
+            SuggestedStartLocation = PickerLocationId.DocumentsLibrary,
+        };
+
+        // FolderPicker throws E_INVALIDARG when its filter list is empty - a long-standing WinRT quirk
+        // that has nothing to do with folders actually being filtered.
+        picker.FileTypeFilter.Add("*");
+
+        WinRT.Interop.InitializeWithWindow.Initialize(picker, App.WindowHandle);
+        var folder = await picker.PickSingleFolderAsync();
+        return folder?.Path;
+    }
 }
