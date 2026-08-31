@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using TS4Translator.Infrastructure;
 
 namespace TS4Translator.App.Services;
@@ -35,15 +36,14 @@ public sealed record ExportManifest(
 /// </remarks>
 public sealed class ExportManifestStore
 {
-    private static readonly JsonSerializerOptions Options = new() { WriteIndented = true };
-
     private readonly string _directory = AppDataPaths.Exports;
 
     public async Task SaveAsync(ExportManifest manifest, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(manifest);
 
-        await File.WriteAllTextAsync(PathFor(manifest.ProjectId), JsonSerializer.Serialize(manifest, Options), cancellationToken);
+        var json = JsonSerializer.Serialize(manifest, ExportManifestJsonContext.Default.ExportManifest);
+        await File.WriteAllTextAsync(PathFor(manifest.ProjectId), json, cancellationToken);
     }
 
     public async Task<ExportManifest?> LoadAsync(Guid projectId, CancellationToken cancellationToken = default)
@@ -56,7 +56,8 @@ public sealed class ExportManifestStore
 
         try
         {
-            return JsonSerializer.Deserialize<ExportManifest>(await File.ReadAllTextAsync(path, cancellationToken), Options);
+            var json = await File.ReadAllTextAsync(path, cancellationToken);
+            return JsonSerializer.Deserialize(json, ExportManifestJsonContext.Default.ExportManifest);
         }
         catch (JsonException)
         {
@@ -68,3 +69,16 @@ public sealed class ExportManifestStore
 
     private string PathFor(Guid projectId) => Path.Combine(_directory, $"{projectId:N}.json");
 }
+
+/// <summary>
+/// Source-generated serialization for the manifest.
+/// </summary>
+/// <remarks>
+/// Not a style preference: the app builds Release with trimming analysis on, and the reflection-based
+/// <see cref="JsonSerializer"/> overloads are an error there (IL2026) because the types a reflective
+/// serializer needs cannot be proven reachable. A generated context is checked at compile time and
+/// survives trimming.
+/// </remarks>
+[JsonSourceGenerationOptions(WriteIndented = true)]
+[JsonSerializable(typeof(ExportManifest))]
+internal sealed partial class ExportManifestJsonContext : JsonSerializerContext;
