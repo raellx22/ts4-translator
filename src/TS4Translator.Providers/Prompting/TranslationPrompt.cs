@@ -25,6 +25,18 @@ internal static class TranslationPrompt
         [property: JsonPropertyName("translation")] string? Translation);
 
     /// <summary>Builds the system prompt: same contract every chat provider in this app asks the model to honour.</summary>
+    /// <remarks>
+    /// The placeholder rule must never contain a complete, copyable placeholder. It used to read "Text
+    /// of the form <c>__TS4_TOKEN_0001__</c> is a placeholder…", and a real run of
+    /// Skarrd_Perverted_Expansion_Pack through Gemini 3.1 Flash-Lite came back with 29 strings where a
+    /// trailing number had been replaced by that exact literal: "clothing removal pantsfun 13" became
+    /// "Remoção de roupa: calça __TS4_TOKEN_0001__". None of those sources contained a token at all, and
+    /// the invented one was always 0001 — the number from the example, never any other. The model was
+    /// not hallucinating a format; it was copying the one string we handed it.
+    ///
+    /// So the shape is described and never spelled out, and not inventing one is stated as its own rule.
+    /// <c>PromptTests</c> guards this.
+    /// </remarks>
     internal static string BuildSystemPrompt(
         CultureInfo sourceLocale,
         CultureInfo targetLocale,
@@ -39,7 +51,8 @@ internal static class TranslationPrompt
             Preserve line breaks, punctuation, capitalization intent, and UI brevity unless the target language requires a natural adjustment.
             Do not omit, merge, split, reorder, or duplicate items.
             Do not add commentary, explanations, or markdown code fences - respond with raw JSON only.
-            Text of the form __TS4_TOKEN_0001__ is a placeholder and must be copied into your translation exactly as-is, unchanged, in a natural position for the target language's grammar.
+            A placeholder is the literal text __TS4_TOKEN_ followed by four digits and two underscores. Copy every placeholder that appears in an item's "text" into that same item's translation exactly as-is, unchanged, in a natural position for the target language's grammar.
+            NEVER write a placeholder that was not already in that item's "text". If an item's "text" contains no placeholder, its translation must contain none: a number, a name or a code-like word in the source is ordinary text, and replacing one with a placeholder corrupts the game file.
             """);
 
         if (glossaryTerms is { Count: > 0 })

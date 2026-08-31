@@ -1583,3 +1583,53 @@ cortado quando e longo demais, porque uma frase inteira como termo nao casa com 
 escopo: global, ou um projeto. Escolhendo um projeto ela mostra os termos dele **junto com os globais**,
 porque esse e o conjunto com que aquele projeto realmente traduz, e uma coluna diz de onde cada termo
 vem — um termo global que parece local e uma armadilha, ja que corrigi-lo ali muda todos os outros mods.
+
+## DEC-036 — O prompt entregou ao modelo o marcador que ele inventou, e revisar em lote
+
+**Contexto.** O usuário traduziu `Skarrd_Perverted_Expansion_Pack` com Gemini 3.1 Flash-Lite. 7.090
+strings saíram como `Translated`, 180 refinadas — e 35 ficaram em `NeedsReview`, das quais **29 com o
+mesmo defeito**: um marcador que não existia no original.
+
+```
+clothing removal pantsfun 13   ->  Remoção de roupa: calça __TS4_TOKEN_0001__
+clothing removal shirtdemi 11  ->  Remoção de roupa: camisa __TS4_TOKEN_0001__
+```
+
+Nenhum desses 29 originais continha marcador nenhum (conferido no banco: `original_tinha = 0`). Todos
+terminam num número, e o modelo trocou o número pelo marcador. E o marcador inventado era **sempre
+0001**, nunca 0002 nem outro.
+
+**Isso não foi azar do modelo, foi o prompt.** As três cópias do system prompt diziam, literalmente:
+
+> Text of the form `__TS4_TOKEN_0001__` is a placeholder and must be copied into your translation
+> exactly as-is...
+
+O modelo não alucinou um formato: ele copiou a única string completa que a gente entregou como exemplo,
+e aplicou onde o texto tinha algo que "parecia variável" — o número no fim. Um modelo mais forte ignora;
+um Flash-Lite não. A forma agora é **descrita e nunca soletrada**, e não inventar virou regra própria.
+`TranslationPromptTests` assere isso nos três providers de chat, porque cada um mantém a própria cópia
+do prompt e consertar um e esquecer os outros é exatamente o formato deste bug voltando.
+
+**A segunda metade do problema era não ter como consertar em lote.** A tradução inteira estava boa; o
+que sobrou foi uma fila de revisão onde 29 linhas tinham o mesmo defeito e a única saída era reescrever
+uma por uma. Isso não é revisar, é digitar. E exportar como estava produziria um package quebrado — um
+marcador corrompido quebra a string no jogo.
+
+Duas ações sobre as linhas marcadas:
+
+- **Reverter para o original** (`ClearTranslationsAsync`): descarta a tradução e volta a string para
+  `Pending`. É a direção segura, e não o oposto: o export escreve `TranslatedText ?? OriginalText`, então
+  uma linha sem tradução sai em inglês — errado de idioma, inofensivo no jogo. O texto descartado vira
+  revisão, e é isso que torna um reverter em massa uma decisão que o usuário pode tomar sem pesar.
+- **Aceitar como estão**: mantém a tradução e tira a marcação. A outra metade da triagem — parte dos
+  avisos é o validador estando certo e parte é ele sendo cauteloso ("Strip Poker!" voltando "Strip
+  Poker!" está correto), e sem isso a única forma de limpar um era redigitar a tradução por cima dela
+  mesma. Aceitar é um humano avalizando o texto, então a linha entra na memória como `manual`.
+
+Com o filtro "Revisar" + "Marcar tudo do filtro", a fila inteira vira uma decisão só.
+
+**Terceiro:** a linha mostrava a mensagem do validador em inglês — *"Text '__TS4_TOKEN_0001__' matches
+the placeholder format but does not correspond to any protected token"*. Essa frase é para quem depura o
+pipeline. Para quem olha a fila de revisão ela nomeia um marcador interno que a pessoa nunca viu, não
+diz que a IA o inventou e não sugere que o certo é reverter. `ValidationIssueText` traduz cada código
+para o que aconteceu e o que fazer.

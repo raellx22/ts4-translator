@@ -105,6 +105,26 @@
                 Opacity="0.75"
                 Text="{x:Bind ViewModel.ExportScopeSummary, Mode=OneWay}"
                 TextWrapping="Wrap" />
+
+            <!--  Acoes em lote. Existem porque uma rodada de traducao erra em bloco: um modelo inventou
+                  o mesmo marcador em 29 linhas, e consertar isso uma a uma nao e revisar, e digitar.  -->
+            <StackPanel Orientation="Horizontal" Spacing="8">
+                <TextBlock
+                    VerticalAlignment="Center"
+                    FontSize="12"
+                    Opacity="0.75"
+                    Text="{x:Bind ViewModel.SelectionSummary, Mode=OneWay}" />
+                <Button
+                    Click="RevertSelected_Click"
+                    Content="Reverter para o original"
+                    IsEnabled="{x:Bind ViewModel.HasSelection, Mode=OneWay}"
+                    ToolTipService.ToolTip="Descarta a tradução das linhas marcadas e volta ao texto original. O texto descartado fica no histórico." />
+                <Button
+                    Click="AcceptSelected_Click"
+                    Content="Aceitar como estão"
+                    IsEnabled="{x:Bind ViewModel.HasSelection, Mode=OneWay}"
+                    ToolTipService.ToolTip="Mantém a tradução das linhas marcadas e tira a marcação de revisão." />
+            </StackPanel>
         </StackPanel>
 
         <StackPanel

@@ -368,4 +368,81 @@ public sealed class EfProjectStringServiceTests : IAsyncLifetime, IDisposable
         Assert.Equal(ProjectStringStatus.NeedsReview, after.Status);
         Assert.NotNull(after.SourceFile);
     }
+
+    // ---------- reverter em lote ----------
+
+    private async Task<IReadOnlyList<ProjectStringEntry>> SeedTranslatedAsync(params string[] originals)
+    {
+        await _sut.ReplaceStringsAsync(
+            _projectId,
+            new ImportedTable("C:/Mods/Test.package", Stbl.Stbl),
+            [.. originals.Select((text, index) => ((uint)(index + 1), text))]);
+
+        var entries = await _sut.GetStringsAsync(_projectId);
+        await _sut.UpdateTranslationsAsync(
+            [.. entries.Select(entry => new ProjectStringTranslationUpdate(
+                entry.Id, $"traduzido {entry.KeyHash}", ProjectStringStatus.NeedsReview, "marcador inventado"))]);
+
+        return await _sut.GetStringsAsync(_projectId);
+    }
+
+    /// <summary>
+    /// The remedy for a run that failed the same way across many strings: back to pending, so the export
+    /// writes the original text instead of a translation the app could not vouch for.
+    /// </summary>
+    [Fact]
+    public async Task ClearTranslationsAsync_RevertsToPendingWithNoTranslation()
+    {
+        var entries = await SeedTranslatedAsync("clothing removal pantsfun 13", "clothing removal shirtdemi 11");
+
+        var cleared = await _sut.ClearTranslationsAsync([.. entries.Select(entry => entry.Id)]);
+
+        Assert.Equal(2, cleared);
+        Assert.All(await _sut.GetStringsAsync(_projectId), entry =>
+        {
+            Assert.Null(entry.TranslatedText);
+            Assert.Null(entry.IssueSummary);
+            Assert.Equal(ProjectStringStatus.Pending, entry.Status);
+        });
+    }
+
+    /// <summary>What makes a bulk revert something the user can do without weighing it.</summary>
+    [Fact]
+    public async Task ClearTranslationsAsync_KeepsWhatItDiscardedAsARevision()
+    {
+        var entry = (await SeedTranslatedAsync("clothing removal pantsfun 13"))[0];
+
+        await _sut.ClearTranslationsAsync([entry.Id]);
+
+        var revision = Assert.Single(await _sut.GetHistoryAsync(entry.Id));
+        Assert.Equal(entry.TranslatedText, revision.PreviousText);
+    }
+
+    [Fact]
+    public async Task ClearTranslationsAsync_OnlyTouchesTheIdsItWasGiven()
+    {
+        var entries = await SeedTranslatedAsync("um", "dois", "tres");
+        var target = entries[1];
+
+        Assert.Equal(1, await _sut.ClearTranslationsAsync([target.Id]));
+
+        var after = await _sut.GetStringsAsync(_projectId);
+        Assert.Null(after.Single(entry => entry.Id == target.Id).TranslatedText);
+        Assert.All(after.Where(entry => entry.Id != target.Id), entry => Assert.NotNull(entry.TranslatedText));
+    }
+
+    /// <summary>Reverting something already untranslated is a no-op, not a spurious empty revision.</summary>
+    [Fact]
+    public async Task ClearTranslationsAsync_StringWithNoTranslation_IsNotCountedAndWritesNoRevision()
+    {
+        await _sut.ReplaceStringsAsync(_projectId, new ImportedTable("C:/Mods/Test.package", Stbl.Stbl), [(1u, "Sem traducao")]);
+        var entry = (await _sut.GetStringsAsync(_projectId))[0];
+
+        Assert.Equal(0, await _sut.ClearTranslationsAsync([entry.Id]));
+        Assert.Empty(await _sut.GetHistoryAsync(entry.Id));
+    }
+
+    [Fact]
+    public async Task ClearTranslationsAsync_NoIds_DoesNothing()
+        => Assert.Equal(0, await _sut.ClearTranslationsAsync([]));
 }

@@ -257,6 +257,52 @@ public sealed class EfProjectStringService(IDbContextFactory<TranslatorDbContext
         await dbContext.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
     }
 
+    public async Task<int> ClearTranslationsAsync(IReadOnlyList<int> stringEntryIds, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(stringEntryIds);
+        if (stringEntryIds.Count == 0)
+        {
+            return 0;
+        }
+
+        await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+
+        var ids = stringEntryIds.Distinct().ToList();
+        var records = await dbContext.ProjectStrings
+            .Where(record => ids.Contains(record.Id))
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        var changedAtUtc = DateTimeOffset.UtcNow;
+        var cleared = 0;
+
+        foreach (var record in records)
+        {
+            if (record.TranslatedText is null)
+            {
+                continue;
+            }
+
+            // The discarded text becomes a revision, which is what makes a bulk revert something the
+            // user can do without weighing it: nothing is destroyed, the string just stops shipping a
+            // translation the app could not vouch for.
+            dbContext.ProjectStringRevisions.Add(new ProjectStringRevisionRecord
+            {
+                StringEntryId = record.Id,
+                PreviousText = record.TranslatedText,
+                ChangedAtUtc = changedAtUtc,
+            });
+
+            record.TranslatedText = null;
+            record.Status = ProjectStringStatus.Pending.ToString();
+            record.IssueSummary = null;
+            cleared++;
+        }
+
+        await dbContext.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+        return cleared;
+    }
+
     public async Task<IReadOnlyList<StringRevision>> GetHistoryAsync(int stringEntryId, CancellationToken cancellationToken = default)
     {
         await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);

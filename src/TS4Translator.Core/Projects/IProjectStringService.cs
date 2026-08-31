@@ -54,6 +54,20 @@ public interface IProjectStringService
         }
     }
 
+    /// <summary>
+    /// Throws away the translations of <paramref name="stringEntryIds"/> and puts those strings back to
+    /// <see cref="ProjectStringStatus.Pending"/>, keeping what was discarded as a recoverable revision.
+    /// </summary>
+    /// <remarks>
+    /// The remedy for a translation run that went wrong the same way across many strings. An export
+    /// writes <c>TranslatedText ?? OriginalText</c>, so a string with no translation ships its original
+    /// text — which is wrong-language but harmless, unlike a translation carrying a corrupted marker,
+    /// which breaks the string in-game. Reverting is therefore the safe direction, and it is only safe to
+    /// offer in bulk because the previous text is kept.
+    /// </remarks>
+    /// <returns>How many strings were reverted.</returns>
+    Task<int> ClearTranslationsAsync(IReadOnlyList<int> stringEntryIds, CancellationToken cancellationToken = default);
+
     /// <summary>Previous translations for this string, most recent first.</summary>
     Task<IReadOnlyList<StringRevision>> GetHistoryAsync(int stringEntryId, CancellationToken cancellationToken = default);
 }

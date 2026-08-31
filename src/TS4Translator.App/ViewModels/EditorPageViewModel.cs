@@ -12,6 +12,7 @@ using TS4Translator.Core.Packages;
 using TS4Translator.Core.Projects;
 using TS4Translator.Core.Providers;
 using TS4Translator.Core.Translation;
+using TS4Translator.Core.Validation;
 
 namespace TS4Translator.App.ViewModels;
 
@@ -647,7 +648,7 @@ public sealed partial class EditorPageViewModel(
             }
 
             var status = outcome.Success ? ProjectStringStatus.Refined : ProjectStringStatus.NeedsReview;
-            var issueSummary = outcome.Issues.Count > 0 ? outcome.Issues[0].Message : null;
+            var issueSummary = ValidationIssueText.Summarize(outcome.Issues);
             updates.Add(new ProjectStringTranslationUpdate(stringId, outcome.TranslatedText, status, issueSummary));
         }
 
@@ -754,6 +755,10 @@ public sealed partial class EditorPageViewModel(
             return;
         }
 
+        // Both summaries answer "what am I about to act on", change on the same events, and are
+        // suspended by the same flag during a bulk tick, so they are refreshed together.
+        RefreshSelectionSummary();
+
         var (sending, skipped) = PlanExport();
 
         if (sending.Count == 0)
@@ -778,6 +783,132 @@ public sealed partial class EditorPageViewModel(
         }
 
         ExportScopeSummary = summary;
+    }
+
+    // ---- Acoes em lote sobre as linhas marcadas ----
+
+    /// <summary>How many rows are ticked, so a bulk action says what it is about to touch.</summary>
+    [ObservableProperty]
+    public partial string SelectionSummary { get; set; } = "Nenhuma linha marcada.";
+
+    /// <summary>True while at least one row is ticked, gating the bulk actions.</summary>
+    [ObservableProperty]
+    public partial bool HasSelection { get; set; }
+
+    private List<StringRowViewModel> SelectedRows() => [.. _allRows.Where(row => row.IsSelected)];
+
+    private void RefreshSelectionSummary()
+    {
+        var count = _allRows.Count(row => row.IsSelected);
+        HasSelection = count > 0;
+        SelectionSummary = count == 0
+            ? "Nenhuma linha marcada."
+            : $"{count:N0} linha(s) marcada(s).";
+    }
+
+    /// <summary>
+    /// How many of the ticked rows a revert would actually change, for the confirmation text.
+    /// </summary>
+    public int SelectedWithTranslationCount => _allRows.Count(row => row.IsSelected && !string.IsNullOrEmpty(row.Translation));
+
+    /// <summary>
+    /// Throws away the translations of every ticked row and puts them back to pending.
+    /// </summary>
+    /// <remarks>
+    /// The fix for a run that failed the same way across many strings — a model that invented a marker in
+    /// twenty-nine lines, say. Correcting those by hand is not a review, it is data entry, and exporting
+    /// them as they stand ships a broken string table. Reverting is safe in a way that keeping them is
+    /// not: the export writes the original text where there is no translation, and the discarded text is
+    /// kept as a revision.
+    /// </remarks>
+    public async Task<int> RevertSelectedToOriginalAsync()
+    {
+        var rows = SelectedRows();
+        if (rows.Count == 0)
+        {
+            return 0;
+        }
+
+        try
+        {
+            IsBusy = true;
+
+            var cleared = await projectStringService.ClearTranslationsAsync([.. rows.Select(row => row.Id)]);
+
+            foreach (var row in rows)
+            {
+                row.ApplyResult(null, ProjectStringStatus.Pending, issueSummary: null);
+            }
+
+            ApplyFilter();
+            StatusText = cleared == 0
+                ? "Nenhuma das linhas marcadas tinha tradução para descartar."
+                : $"{cleared:N0} linha(s) voltaram ao texto original e estão pendentes de novo. A tradução descartada ficou no histórico de cada linha.";
+            return cleared;
+        }
+        catch (Exception exception)
+        {
+            StatusText = $"Falha ao reverter ({exception.GetType().Name}): {exception.Message}";
+            return 0;
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    /// <summary>
+    /// Accepts the ticked rows as they are: the translation stays, the review flag goes.
+    /// </summary>
+    /// <remarks>
+    /// The other half of triaging a review queue. Some flags are the validator being right and some are
+    /// it being cautious - "Strip Poker!" coming back as "Strip Poker!" is correct, not a failure - and
+    /// without this the only way to clear one was to retype the translation over itself.
+    /// </remarks>
+    public async Task<int> AcceptSelectedAsync()
+    {
+        var rows = SelectedRows().Where(row => !string.IsNullOrWhiteSpace(row.Translation)).ToList();
+        if (rows.Count == 0)
+        {
+            StatusText = "Nenhuma das linhas marcadas tem tradução para aceitar.";
+            return 0;
+        }
+
+        try
+        {
+            IsBusy = true;
+
+            var updates = rows
+                .Select(row => new ProjectStringTranslationUpdate(row.Id, row.Translation!, ProjectStringStatus.ManuallyEdited, null))
+                .ToList();
+
+            await projectStringService.UpdateTranslationsAsync(updates);
+
+            foreach (var row in rows)
+            {
+                row.ApplyResult(row.Translation, ProjectStringStatus.ManuallyEdited, issueSummary: null);
+            }
+
+            // Accepting is a human vouching for the text, so it earns a place in the memory on the same
+            // footing as an edit typed by hand.
+            var remembered = await RememberAsync(
+                [.. rows.Select(row => (row.Original, row.Translation))],
+                TranslationMemoryPolicy.ManualProvider);
+
+            ApplyFilter();
+            StatusText = $"{rows.Count:N0} linha(s) aceitas como estão"
+                + (remembered > 0 ? $" · {remembered:N0} guardada(s) na memória de tradução." : ".");
+            return rows.Count;
+        }
+        catch (Exception exception)
+        {
+            StatusText = $"Falha ao aceitar ({exception.GetType().Name}): {exception.Message}";
+            return 0;
+        }
+        finally
+        {
+            IsBusy = false;
+        }
     }
 
     /// <summary>Ticks every row the current filter matched, not just the ones the list is rendering.</summary>
@@ -1408,7 +1539,7 @@ public sealed partial class EditorPageViewModel(
                         }
 
                         var status = outcome.Success ? ProjectStringStatus.Translated : ProjectStringStatus.NeedsReview;
-                        var issueSummary = outcome.Issues.Count > 0 ? outcome.Issues[0].Message : null;
+                        var issueSummary = ValidationIssueText.Summarize(outcome.Issues);
                         updates.Add(new ProjectStringTranslationUpdate(stringId, outcome.TranslatedText, status, issueSummary));
                     }
 

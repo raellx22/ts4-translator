@@ -109,6 +109,43 @@ public sealed partial class EditorPage : Page
         }
     }
 
+    /// <summary>
+    /// Confirms before discarding translations in bulk. Nothing is lost - each discarded text is kept as
+    /// a revision - but the count is stated up front, because "reverter" on a list the user cannot see
+    /// the end of should never be a surprise.
+    /// </summary>
+    private async void RevertSelected_Click(object sender, RoutedEventArgs e)
+    {
+        var affected = ViewModel.SelectedWithTranslationCount;
+        if (affected == 0)
+        {
+            ViewModel.StatusText = "Nenhuma das linhas marcadas tem tradução para descartar.";
+            return;
+        }
+
+        var dialog = new ContentDialog
+        {
+            XamlRoot = XamlRoot,
+            Title = $"Reverter {affected} linha(s) para o original?",
+            Content = "A tradução dessas linhas é descartada e elas voltam a ficar pendentes. "
+                + "Na exportação do package, uma linha sem tradução sai com o texto original - em inglês, mas sem quebrar nada no jogo. "
+                + "O texto descartado continua no histórico de cada linha.",
+            PrimaryButtonText = "Reverter",
+            CloseButtonText = "Cancelar",
+            DefaultButton = ContentDialogButton.Close,
+        };
+
+        if (await dialog.ShowAsync() == ContentDialogResult.Primary)
+        {
+            await ViewModel.RevertSelectedToOriginalAsync();
+        }
+    }
+
+    private async void AcceptSelected_Click(object sender, RoutedEventArgs e)
+    {
+        await ViewModel.AcceptSelectedAsync();
+    }
+
     /// <summary>A sentence pre-filled in full would just be deleted; a short label is usually the term itself.</summary>
     private static string Trim(string text)
     {
