@@ -6,3 +6,5 @@ TestResults/
 *.suo
 AppPackages/
 *.pfx
+benchmark-results/
+tools/argos-prototype/.runtime/
