@@ -7,6 +7,12 @@ internal sealed class ProjectStringRecord
 
     public Guid ProjectId { get; set; }
 
+    /// <summary>
+    /// Full path of the imported `.package` this string came from. Null for rows stored before the app
+    /// tracked it; re-importing the project fills it in.
+    /// </summary>
+    public string? SourceFile { get; set; }
+
     public uint StblGroup { get; set; }
 
     public ulong StblFullInstance { get; set; }

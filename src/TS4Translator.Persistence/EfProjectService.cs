@@ -38,6 +38,33 @@ public sealed class EfProjectService(IDbContextFactory<TranslatorDbContext> dbCo
         return ToProject(record);
     }
 
+    public async Task<TranslationProject?> FindBySourceFilesAsync(IReadOnlyList<string> sourcePackagePaths, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(sourcePackagePaths);
+
+        if (sourcePackagePaths.Count == 0)
+        {
+            return null;
+        }
+
+        var wanted = NormalizePaths(sourcePackagePaths);
+
+        await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+
+        var records = await dbContext.Projects
+            .AsNoTracking()
+            .Include(p => p.SourceFiles)
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        // Set equality, not sequence equality: the file picker and drag-and-drop hand the same files
+        // back in whatever order the shell produced them, and that must not create a second project.
+        var match = records.FirstOrDefault(record =>
+            NormalizePaths(record.SourceFiles.Select(file => file.FilePath).ToList()).SetEquals(wanted));
+
+        return match is null ? null : ToProject(match);
+    }
+
     public async Task<IReadOnlyList<TranslationProject>> ListRecentAsync(int maxCount = 20, CancellationToken cancellationToken = default)
     {
         await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
@@ -97,6 +124,27 @@ public sealed class EfProjectService(IDbContextFactory<TranslatorDbContext> dbCo
         record.CustomInstructions = string.IsNullOrWhiteSpace(customInstructions) ? null : customInstructions;
         record.UpdatedAtUtc = DateTimeOffset.UtcNow;
         await dbContext.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>Windows paths, so case-insensitive; full-path'd so a relative and an absolute reference to the same package still match.</summary>
+    private static HashSet<string> NormalizePaths(IReadOnlyCollection<string> paths)
+    {
+        var normalized = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var path in paths)
+        {
+            try
+            {
+                normalized.Add(Path.GetFullPath(path));
+            }
+            catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException)
+            {
+                // A stored path the OS can no longer parse must not blow up the import; it simply
+                // never matches, so the import falls through to creating a fresh project.
+                normalized.Add(path);
+            }
+        }
+
+        return normalized;
     }
 
     private static TranslationProject ToProject(ProjectRecord record) => new(

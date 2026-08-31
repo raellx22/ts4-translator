@@ -17,6 +17,14 @@ public interface IProjectService
         CultureInfo targetLocale,
         CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// The existing project whose imported `.package` set is exactly <paramref name="sourcePackagePaths"/>,
+    /// or <c>null</c> when this is a first import. Re-importing a mod has to land in the project that
+    /// already holds its translations — creating a second one orphans all of that work and makes the
+    /// new/changed/reused diff of brief section 25 meaningless (it would always report 100% "new").
+    /// </summary>
+    Task<TranslationProject?> FindBySourceFilesAsync(IReadOnlyList<string> sourcePackagePaths, CancellationToken cancellationToken = default);
+
     /// <summary>Most recently updated projects first.</summary>
     Task<IReadOnlyList<TranslationProject>> ListRecentAsync(int maxCount = 20, CancellationToken cancellationToken = default);
 

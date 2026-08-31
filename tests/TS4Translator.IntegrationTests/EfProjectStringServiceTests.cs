@@ -15,7 +15,7 @@ public sealed class EfProjectStringServiceTests : IAsyncLifetime, IDisposable
     private readonly IProjectStringService _sut;
     private readonly IProjectService _projectService;
     private Guid _projectId;
-    private static readonly StblKey Stbl = new(Group: 0, FullInstance: 0x1122UL);
+    private static readonly ImportedTable Stbl = new("C:/Mods/Test.package", new StblKey(Group: 0, FullInstance: 0x1122UL));
     private static readonly CultureInfo English = CultureInfo.GetCultureInfo("en-US");
     private static readonly CultureInfo PortugueseBrazil = CultureInfo.GetCultureInfo("pt-BR");
 
@@ -59,7 +59,7 @@ public sealed class EfProjectStringServiceTests : IAsyncLifetime, IDisposable
 
         Assert.Equal(2, strings.Count);
         Assert.All(strings, s => Assert.Equal(ProjectStringStatus.Pending, s.Status));
-        Assert.All(strings, s => Assert.Equal(Stbl, s.SourceStbl));
+        Assert.All(strings, s => Assert.Equal(Stbl.Stbl, s.SourceStbl));
     }
 
     [Fact]
@@ -74,6 +74,28 @@ public sealed class EfProjectStringServiceTests : IAsyncLifetime, IDisposable
         Assert.Equal("Olá.", updated.TranslatedText);
         Assert.Equal(ProjectStringStatus.Translated, updated.Status);
         Assert.Null(updated.IssueSummary);
+    }
+
+    [Fact]
+    public async Task UpdateTranslationsAsync_PersistsAChunkAndKeepsPreviousTranslationsAsRevisions()
+    {
+        await _sut.ReplaceStringsAsync(_projectId, Stbl, [(1u, "Hello."), (2u, "Bye.")]);
+        var entries = (await _sut.GetStringsAsync(_projectId)).OrderBy(entry => entry.KeyHash).ToList();
+        await _sut.UpdateTranslationAsync(entries[0].Id, "Versão anterior.", ProjectStringStatus.Translated, null);
+
+        await _sut.UpdateTranslationsAsync(
+        [
+            new ProjectStringTranslationUpdate(entries[0].Id, "Olá.", ProjectStringStatus.ManuallyEdited, null),
+            new ProjectStringTranslationUpdate(entries[1].Id, "Tchau.", ProjectStringStatus.NeedsReview, "Revisar termo."),
+        ]);
+
+        var updated = (await _sut.GetStringsAsync(_projectId)).ToDictionary(entry => entry.Id);
+        Assert.Equal("Olá.", updated[entries[0].Id].TranslatedText);
+        Assert.Equal(ProjectStringStatus.ManuallyEdited, updated[entries[0].Id].Status);
+        Assert.Equal("Tchau.", updated[entries[1].Id].TranslatedText);
+        Assert.Equal("Revisar termo.", updated[entries[1].Id].IssueSummary);
+        Assert.Equal("Versão anterior.", Assert.Single(await _sut.GetHistoryAsync(entries[0].Id)).PreviousText);
+        Assert.Empty(await _sut.GetHistoryAsync(entries[1].Id));
     }
 
     [Fact]
@@ -212,5 +234,138 @@ public sealed class EfProjectStringServiceTests : IAsyncLifetime, IDisposable
         Assert.Equal(2, history.Count);
         Assert.Equal("V2", history[0].PreviousText);
         Assert.Equal("V1", history[1].PreviousText);
+    }
+    [Fact]
+    public async Task RemoveStringsOutsideAsync_DropsTablesTheImportNoLongerCovers()
+    {
+        var otherLocale = new ImportedTable("C:/Mods/Test.package", new StblKey(Group: 0, FullInstance: 0x1100_0000_0000_1122UL));
+        await _sut.ReplaceStringsAsync(_projectId, Stbl, [(1u, "Hello."), (2u, "Bye.")]);
+        await _sut.ReplaceStringsAsync(_projectId, otherLocale, [(1u, "Ola.")]);
+
+        var removed = await _sut.RemoveStringsOutsideAsync(_projectId, [Stbl]);
+
+        Assert.Equal(1, removed);
+        var remaining = await _sut.GetStringsAsync(_projectId);
+        Assert.Equal(2, remaining.Count);
+        Assert.All(remaining, entry => Assert.Equal(Stbl.Stbl, entry.SourceStbl));
+    }
+
+    [Fact]
+    public async Task RemoveStringsOutsideAsync_EverythingStillImported_RemovesNothing()
+    {
+        await _sut.ReplaceStringsAsync(_projectId, Stbl, [(1u, "Hello.")]);
+
+        Assert.Equal(0, await _sut.RemoveStringsOutsideAsync(_projectId, [Stbl]));
+        Assert.Single(await _sut.GetStringsAsync(_projectId));
+    }
+
+    [Fact]
+    public async Task RemoveStringsOutsideAsync_AlsoDropsTheirRevisionHistory()
+    {
+        await _sut.ReplaceStringsAsync(_projectId, Stbl, [(1u, "Hello.")]);
+        var entry = (await _sut.GetStringsAsync(_projectId))[0];
+        await _sut.UpdateTranslationAsync(entry.Id, "V1", ProjectStringStatus.Translated, null);
+        await _sut.UpdateTranslationAsync(entry.Id, "V2", ProjectStringStatus.ManuallyEdited, null);
+        Assert.NotEmpty(await _sut.GetHistoryAsync(entry.Id));
+
+        await _sut.RemoveStringsOutsideAsync(_projectId, [new ImportedTable("C:/Mods/Other.package", new StblKey(Group: 99, FullInstance: 0UL))]);
+
+        Assert.Empty(await _sut.GetStringsAsync(_projectId));
+        Assert.Empty(await _sut.GetHistoryAsync(entry.Id));
+    }
+    /// <summary>
+    /// Two unrelated mods imported into the same project may ship an STBL with the very same group
+    /// and instance id. Without the source file in the key, importing the second would wipe the first.
+    /// </summary>
+    [Fact]
+    public async Task ReplaceStringsAsync_TwoModsSharingAnStblKey_KeepsBothSetsOfStrings()
+    {
+        var fromModA = new ImportedTable("C:/Mods/ModA.package", Stbl.Stbl);
+        var fromModB = new ImportedTable("C:/Mods/ModB.package", Stbl.Stbl);
+
+        await _sut.ReplaceStringsAsync(_projectId, fromModA, [(1u, "From mod A")]);
+        await _sut.ReplaceStringsAsync(_projectId, fromModB, [(1u, "From mod B")]);
+
+        var strings = await _sut.GetStringsAsync(_projectId);
+
+        Assert.Equal(2, strings.Count);
+        Assert.Contains(strings, s => s.OriginalText == "From mod A" && s.SourceFile!.EndsWith("ModA.package", StringComparison.Ordinal));
+        Assert.Contains(strings, s => s.OriginalText == "From mod B" && s.SourceFile!.EndsWith("ModB.package", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task RemoveStringsOutsideAsync_ModNoLongerImported_DropsOnlyThatModsStrings()
+    {
+        var fromModA = new ImportedTable("C:/Mods/ModA.package", Stbl.Stbl);
+        var fromModB = new ImportedTable("C:/Mods/ModB.package", Stbl.Stbl);
+        await _sut.ReplaceStringsAsync(_projectId, fromModA, [(1u, "From mod A")]);
+        await _sut.ReplaceStringsAsync(_projectId, fromModB, [(1u, "From mod B")]);
+
+        var removed = await _sut.RemoveStringsOutsideAsync(_projectId, [fromModA]);
+
+        Assert.Equal(1, removed);
+        Assert.Equal("From mod A", Assert.Single(await _sut.GetStringsAsync(_projectId)).OriginalText);
+    }
+    /// <summary>
+    /// The regression that destroyed a real 1,351-string project: rows imported before the app tracked
+    /// source files carry SourceFile NULL, and the first re-import that names their file has to adopt
+    /// them - keeping their translations - instead of inserting duplicates and letting the prune delete
+    /// the originals.
+    /// </summary>
+    [Fact]
+    public async Task ReplaceStringsAsync_LegacyRowsWithoutASourceFile_AreAdoptedAndKeepTheirTranslations()
+    {
+        var legacy = new ImportedTable(null, Stbl.Stbl);
+        var named = new ImportedTable("C:/Mods/Test.package", Stbl.Stbl);
+
+        await _sut.ReplaceStringsAsync(_projectId, legacy, [(1u, "Hello."), (2u, "Bye.")]);
+        var before = await _sut.GetStringsAsync(_projectId);
+        await _sut.UpdateTranslationAsync(before[0].Id, "Ola.", ProjectStringStatus.Translated, null);
+        await _sut.UpdateTranslationAsync(before[1].Id, "Tchau.", ProjectStringStatus.ManuallyEdited, null);
+
+        var diff = await _sut.ReplaceStringsAsync(_projectId, named, [(1u, "Hello."), (2u, "Bye.")]);
+        var pruned = await _sut.RemoveStringsOutsideAsync(_projectId, [named]);
+
+        Assert.Equal(0, diff.NewCount);
+        Assert.Equal(2, diff.UnchangedCount);
+        Assert.Equal(0, pruned);
+
+        var after = await _sut.GetStringsAsync(_projectId);
+        Assert.Equal(2, after.Count);
+        Assert.All(after, entry => Assert.EndsWith("Test.package", entry.SourceFile!, StringComparison.Ordinal));
+        Assert.Contains(after, entry => entry.TranslatedText == "Ola." && entry.Status == ProjectStringStatus.Translated);
+        Assert.Contains(after, entry => entry.TranslatedText == "Tchau." && entry.Status == ProjectStringStatus.ManuallyEdited);
+    }
+
+    [Fact]
+    public async Task ReplaceStringsAsync_LegacyAndNamedRowsForTheSameHash_KeepsOnlyTheNamedOne()
+    {
+        var legacy = new ImportedTable(null, Stbl.Stbl);
+        var named = new ImportedTable("C:/Mods/Test.package", Stbl.Stbl);
+
+        await _sut.ReplaceStringsAsync(_projectId, legacy, [(1u, "Antigo")]);
+        await _sut.ReplaceStringsAsync(_projectId, named, [(1u, "Novo")]);
+
+        // Two rows for one hash would break the unique index the moment the legacy one is adopted.
+        var only = Assert.Single(await _sut.GetStringsAsync(_projectId));
+        Assert.Equal("Novo", only.OriginalText);
+    }
+
+    [Fact]
+    public async Task ReplaceStringsAsync_LegacyRowWhoseTextChanged_IsAdoptedAndFlaggedForReview()
+    {
+        var legacy = new ImportedTable(null, Stbl.Stbl);
+        var named = new ImportedTable("C:/Mods/Test.package", Stbl.Stbl);
+
+        await _sut.ReplaceStringsAsync(_projectId, legacy, [(1u, "Texto antigo")]);
+        var entry = (await _sut.GetStringsAsync(_projectId))[0];
+        await _sut.UpdateTranslationAsync(entry.Id, "Traducao", ProjectStringStatus.Translated, null);
+
+        await _sut.ReplaceStringsAsync(_projectId, named, [(1u, "Texto novo")]);
+
+        var after = Assert.Single(await _sut.GetStringsAsync(_projectId));
+        Assert.Equal("Traducao", after.TranslatedText);
+        Assert.Equal(ProjectStringStatus.NeedsReview, after.Status);
+        Assert.NotNull(after.SourceFile);
     }
 }

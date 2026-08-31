@@ -1,8 +1,12 @@
 using System.Globalization;
+using TS4Translator.Core.Glossary;
+using TS4Translator.Core.Packages;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using TS4Translator.Core.Projects;
+using TS4Translator.Core.Providers;
+using TS4Translator.Core.Security;
 using TS4Translator.Persistence;
 
 namespace TS4Translator.IntegrationTests;
@@ -19,7 +23,10 @@ public sealed class EfProjectServiceTests : IDisposable
     public EfProjectServiceTests()
     {
         var databasePath = Path.Combine(_tempDirectory, "projects.db");
-        _services = new ServiceCollection().AddPersistenceServices(databasePath).BuildServiceProvider();
+        _services = new ServiceCollection()
+            .AddPersistenceServices(databasePath)
+            .AddSingleton<ISecretStore>(new FakeSecretStore())
+            .BuildServiceProvider();
 
         using var context = _services.GetRequiredService<IDbContextFactory<TranslatorDbContext>>().CreateDbContext();
         context.Database.Migrate();
@@ -145,5 +152,95 @@ public sealed class EfProjectServiceTests : IDisposable
     public async Task UpdateCustomInstructionsAsync_UnknownId_DoesNotThrow()
     {
         await _sut.UpdateCustomInstructionsAsync(Guid.NewGuid(), "Anything");
+    }
+    [Fact]
+    public async Task FindBySourceFilesAsync_SameFilesInADifferentOrder_ReturnsTheExistingProject()
+    {
+        var modA = Path.Combine(_tempDirectory, "ModA.package");
+        var modB = Path.Combine(_tempDirectory, "ModB.package");
+        var created = await _sut.CreateAsync("Mod", [modA, modB], English, PortugueseBrazil);
+
+        var found = await _sut.FindBySourceFilesAsync([modB, modA]);
+
+        Assert.Equal(created.Id, found!.Id);
+    }
+
+    [Fact]
+    public async Task FindBySourceFilesAsync_DifferentFileSet_ReturnsNull()
+    {
+        var modA = Path.Combine(_tempDirectory, "ModA.package");
+        await _sut.CreateAsync("Mod", [modA], English, PortugueseBrazil);
+
+        Assert.Null(await _sut.FindBySourceFilesAsync([Path.Combine(_tempDirectory, "Other.package")]));
+    }
+
+    [Fact]
+    public async Task FindBySourceFilesAsync_SupersetOfAnExistingProjectsFiles_ReturnsNull()
+    {
+        var modA = Path.Combine(_tempDirectory, "ModA.package");
+        var modB = Path.Combine(_tempDirectory, "ModB.package");
+        await _sut.CreateAsync("Mod", [modA], English, PortugueseBrazil);
+
+        Assert.Null(await _sut.FindBySourceFilesAsync([modA, modB]));
+    }
+
+    [Fact]
+    public async Task FindBySourceFilesAsync_NoFiles_ReturnsNull()
+    {
+        await _sut.CreateAsync("Empty", [], English, PortugueseBrazil);
+
+        Assert.Null(await _sut.FindBySourceFilesAsync([]));
+    }
+    /// <summary>
+    /// Deleting a project is irreversible and the Home button now offers it, so what it takes with it
+    /// has to be proven rather than assumed: strings, their revision history, per-project engine
+    /// settings and project-scoped glossary terms all go by database cascade.
+    /// </summary>
+    [Fact]
+    public async Task DeleteAsync_TakesStringsRevisionsPipelineAndGlossaryWithIt()
+    {
+        var project = await _sut.CreateAsync("Para apagar", [], English, PortugueseBrazil);
+        var strings = _services.GetRequiredService<IProjectStringService>();
+        var profiles = _services.GetRequiredService<IProviderProfileService>();
+        var glossary = _services.GetRequiredService<IGlossaryService>();
+
+        var table = new ImportedTable("C:/Mods/X.package", new StblKey(0, 0x1122UL));
+        await strings.ReplaceStringsAsync(project.Id, table, [(1u, "Hello."), (2u, "Bye.")]);
+        var entry = (await strings.GetStringsAsync(project.Id))[0];
+        await strings.UpdateTranslationAsync(entry.Id, "V1", ProjectStringStatus.Translated, null);
+        await strings.UpdateTranslationAsync(entry.Id, "V2", ProjectStringStatus.ManuallyEdited, null);
+
+        var argos = await profiles.SaveAsync(null, "Argos", ProviderKind.Argos, "local://argos", "m", 0.0, null);
+        await profiles.SavePipelineSettingsAsync(new TranslationPipelineSettings(argos.Id), project.Id);
+        await glossary.AddTermAsync("Sim", "Sim", neverTranslate: false, caseSensitive: false, notes: null, project.Id);
+
+        Assert.NotEmpty(await strings.GetHistoryAsync(entry.Id));
+
+        await _sut.DeleteAsync(project.Id);
+
+        Assert.Null(await _sut.GetAsync(project.Id));
+        Assert.Empty(await strings.GetStringsAsync(project.Id));
+        Assert.Empty(await strings.GetHistoryAsync(entry.Id));
+        Assert.False(await profiles.HasPipelineOverrideAsync(project.Id));
+        Assert.Empty(await glossary.GetTermsAsync(project.Id));
+
+        // The engine profile itself is app-wide and must survive - only the project goes.
+        Assert.NotNull(await profiles.GetAsync(argos.Id));
+    }
+
+    [Fact]
+    public async Task DeleteAsync_OneProject_LeavesTheOthersAlone()
+    {
+        var keep = await _sut.CreateAsync("Fica", [], English, PortugueseBrazil);
+        var drop = await _sut.CreateAsync("Sai", [], English, PortugueseBrazil);
+        var strings = _services.GetRequiredService<IProjectStringService>();
+        var table = new ImportedTable("C:/Mods/X.package", new StblKey(0, 0x1122UL));
+        await strings.ReplaceStringsAsync(keep.Id, table, [(1u, "Fica.")]);
+        await strings.ReplaceStringsAsync(drop.Id, table, [(1u, "Sai.")]);
+
+        await _sut.DeleteAsync(drop.Id);
+
+        Assert.NotNull(await _sut.GetAsync(keep.Id));
+        Assert.Single(await strings.GetStringsAsync(keep.Id));
     }
 }
