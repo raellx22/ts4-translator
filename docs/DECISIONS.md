@@ -994,3 +994,592 @@ conexão..." durante a espera, então isso é esperado, não um bug. O item "ret
 (seção 11) estava listado no ROADMAP como não iniciado; parte dele (retry por falha transitória de
 rede) está pronta agora — falta ainda checkpoint/pause/resume entre sessões do app
 (`TranslationJob` persistido, ainda não implementado).
+
+---
+
+## DEC-023 — Baseline local em 8 GB: Qwen3.5 4B, reasoning off, saída estruturada e duas filas
+
+**Contexto:** O produto depende de traduzir mods grandes localmente com uma GPU de 8 GB. Na RTX 4060
+Ti testada, o AutoFit do Bionic carregou modelos com contextos de 75.776/131.072 tokens, ocupando quase
+toda a VRAM sem trazer qualidade adicional. O EraX Translator V1.0 disponível não lista português
+entre os idiomas suportados. O Qwen3.5 4B é Apache-2.0, cobre português e cabe em Q4_K_M.
+
+**Evidência:** Com o Qwen em 4.096 tokens, um lote de oito strings sem desativar reasoning gastou todos
+os 512 tokens de saída em raciocínio e retornou conteúdo vazio. Com `reasoning_effort: "none"`, a mesma
+classe de lote respondeu em ~3 s. Um lote de 100 strings retornou 100/100 em 34,90 s (44,4 tokens/s);
+dois lotes de 32 em paralelo retornaram 64/64 em 15,56 s (69,4 tokens/s agregados), cerca de 31% mais
+rápido que o tempo sequencial estimado.
+
+**Decisão:** Endpoints loopback OpenAI-compatible usam JSON Schema estrito por ID, limite de saída
+calculado e `reasoning_effort: "none"`. `ProviderCapabilities` expõe concorrência recomendada; o
+provider local recomenda duas filas e o orquestrador limita/coordena batches concorrentes. A busca e
+a gravação da translation memory, assim como a persistência das strings traduzidas, são feitas em
+lote por checkpoint. O baseline é Qwen3.5 4B Q4_K_M, contexto 8.192 e duas previsões no Bionic. A
+receita reproduzível está em `docs/LOCAL_MODELS.md` e `tools/Benchmark-LocalModel.ps1`.
+
+**Consequências:** Contexto maior só deve ser habilitado quando um lote real não couber; não é knob de
+qualidade. Mais de duas filas exige medição por hardware. Argos era, nesta decisão, um provider futuro
+de fallback CPU/offline; ele foi implementado depois na DEC-026. O benchmark sintético valida contrato e
+throughput, mas não substitui uma avaliação humana com corpus autorizado de STBLs reais.
+
+---
+
+## DEC-024 — Batches por provider e benchmark real do WickedWhims
+
+**Contexto:** O corpus real `TURBODRIVER_WickedWhims_Tuning.package` contém 6.779 strings inglesas.
+O limite único de 100 itens/8.000 caracteres excedeu o contexto do Qwen local; no extremo oposto,
+32 itens funcionaram no Gemini, mas gerariam 212 chamadas e esbarraram no free tier de 15 RPM.
+
+**Evidência:** Qwen3.5 4B, contexto 8.192, duas filas e batches 32/3.500 traduziu 200 strings em
+118,60 s (projeção ~67 min). Gemini 3.5 Flash-Lite traduziu as mesmas 200 em 9,50 s com batches de 32.
+Com 80/6.400, preservou estrutura em 200/200 em três requests; a auditoria linguística automática
+marcou duas como `NeedsReview`. O tempo de 40,91 s incluiu espera de quota.
+Uma tentativa integral revelou `retryDelay: 28s`, que o retry antigo ignorava. O schema Gemini também
+rejeitou `additionalProperties`, e uma string real mostrou que markup já desequilibrado na origem era
+um falso positivo do validador.
+
+**Decisão:** `ProviderCapabilities` passa a expor limites recomendados de itens e caracteres. Qwen
+loopback usa 32/3.500 e concorrência 2; Gemini usa 80/6.400 e concorrência 4. O retry honra
+`Retry-After`/`google.rpc.RetryInfo`. O schema Gemini usa seu dialeto suportado. Markup desequilibrado
+só é erro quando a origem era equilibrada; tags perdidas continuam críticas via proteção de tokens.
+Qualquer warning agora produz `NeedsReview` e não entra na translation memory; estrutura sem texto e
+flags internas são excluídas do alerta de conteúdo idêntico.
+
+**Consequências:** O app agora otimiza cloud e local separadamente. A projeção do Gemini é ~85 requests,
+piso 5m40 no free tier e custo standard equivalente ~US$ 0,87; o local continua gratuito, mas nesta GPU
+fica fora da meta de tempo para este mod. A execução integral requer aceite explícito porque a previsão
+prática é 6–7 minutos e ainda falta avaliação humana da qualidade linguística.
+
+---
+
+## DEC-025 — Hy-MT2 especializado substitui a hipótese de que Linux era o ganho principal
+
+**Contexto:** O benchmark Qwen3.5 4B no Windows projetou 67 minutos para o WickedWhims. O aplicativo
+Linux anterior parecia consideravelmente mais rápido no mesmo hardware, então era necessário separar
+efeito de sistema operacional, modelo e arquitetura de requisição.
+
+**Evidência:** O código Linux fixa `hy-mt2-1.8b`, contexto 8.192, paralelismo 8, temperatura 0,15,
+uma string por request, deduplicação e descarte acima de 500 caracteres. O mesmo Hy-MT2 oficial no
+Windows/Bionic traduziu 200 strings reais em 34,24 s (projeção 18,5 min), contra 118,60 s/200 do Qwen.
+A variante Q4 fez 31,19 s, mas gerou menos tokens e apresentou traduções piores; normalizada por token,
+não foi mais rápida que Q8. Um protótipo de lotes 8/1.200 com oito filas e fallback individual fez
+25,85 s/200 (projeção 14,0 min), sem IDs ausentes. Lotes 32/3.500 excederam contexto; outra execução
+sem fallback perdeu oito IDs.
+
+**Decisão:** Adotar Hy-MT2 1.8B Q8_0 como candidato especializado de tradução local em 8 GB, mantendo
+Qwen como fallback generalista. O provider Hy-MT2 deve ter capacidades próprias, oito filas, lotes
+pequenos e degradação por item; nunca compartilhar cegamente o perfil 32/3.500 do provider genérico.
+O teto do orquestrador sobe de quatro para oito filas e permanece limitado. Textos acima de 500
+caracteres não devem ser silenciosamente ignorados no produto final: precisam ser quebrados com
+preservação estrutural ou enviados ao fallback.
+
+**Consequências:** O sistema operacional não explica a maior parte do gap. O ganho reproduzido vem do
+modelo especializado e do contrato leve. A meta de 5–6 minutos ainda não é realista para tradução LLM
+integral nesta GPU; para alcançá-la, a arquitetura precisa traduzir a maioria das frases por memória/
+Argos e reservar o Hy-MT2 para textos difíceis, ou usar API. Aprovação estrutural continua insuficiente
+como nota linguística: a amostra mostrou traduções literais, termos parcialmente em inglês e inversão
+semântica que o validador atual não detecta.
+
+---
+
+## DEC-026 — Argos sob demanda, sidecar persistente e batch CTranslate2 entre strings
+
+**Contexto:** Mesmo o Hy-MT2 especializado projetou 14 minutos para o corpus WickedWhims, acima da
+meta local de 5–6 minutos. O host Windows não tinha Python instalado, e o Argos 1.11 declara
+Stanza/spaCy/PyTorch mesmo quando usa MiniSBD, tornando a instalação padrão desnecessariamente grande.
+
+**Evidência:** Python 3.12.10 embeddable + Argos 1.11.0 + CTranslate2 4.8.1 funcionaram no Windows com
+o modelo direto oficial `translate-en_pb-1_9`. O runtime enxuto sem Stanza/PyTorch ocupa ~221 MB e o
+modelo instalado ~83 MB. A API pública traduz quatro frases em ~0,95 s no primeiro uso. Agregar
+sentenças de 200 entradas numa chamada `translate_batch` fez o lote quente em 1,87 s. Na amostra real
+estável de 500 strings, a versão final fez 22,74 s, projetou 308,33 s/5,14 min e entregou 496 aprovações,
+quatro avisos `IdenticalToSource`, zero ausências e zero falhas estruturais.
+Na execução integral, respondeu 6.779/6.779 em 268,60 s (4 min 28,6 s): 6.674 aprovações, 102 avisos
+`IdenticalToSource`, três `LengthDiscrepancy` e nenhum erro crítico/estrutural.
+
+**Decisão:** Instalar sob demanda em `%LOCALAPPDATA%\TS4Translator\Models\Argos`, com downloads
+oficiais e hashes fixados; não aumentar o MSIX base em centenas de MB. Usar sidecar persistente JSONL,
+UTF-8 obrigatório, MiniSBD, CPU, beam 1, batch 64 tokens e batches do app 256/64.000. A versão 1.11 é
+fixada porque o sidecar reutiliza tokenização/sentenças/decoder internos para agrupar várias strings
+num único CTranslate2 `translate_batch`. Se placeholders forem alterados, uma rota determinística
+traduz apenas os segmentos entre eles e reinsere os tokens originais.
+
+**Consequências:** O Argos atinge a meta de velocidade local e não tem custo por uso, mas não substitui
+avaliação humana: sua linguagem é mais literal que APIs de ponta. Upgrades do Argos exigem repetir os
+benchmarks. O runtime e o instalador foram validados nesta máquina sem Python global e o app Release
+x64 compila; a execução a partir do MSIX final em Windows limpo continua sendo o último gate de
+distribuição, não um bloqueio da implementação do provider.
+
+---
+
+## DEC-027 — Importar só as STBLs do idioma de origem, reusar o projeto na reimportação, e mesclar tabelas na exportação
+
+**Contexto:** O usuário traduziu o `TURBODRIVER_WickedWhims_Tuning.package` inteiro com o Argos e, na
+exportação, o app falhou com `ArgumentException: An item with the same key has already been added.
+Key: StblKey { Group = 0, FullInstance = 1225235081583106710 }` (`0x1100E8D0AC1B9A96` — byte de topo
+`0x11`, que é justamente o locale pt-BR de destino).
+
+**Evidência:** O inventário real do package (`tools/TS4Translator.Benchmark --sample-size 0`) mostra
+**110 STBLs, das quais só 5 são en-US** — um mod publicado embarca uma tabela por idioma que ele já
+suporta. O banco do usuário confirmou o efeito: 149.138 strings armazenadas para esse projeto, exatamente
+6.779 para cada um dos 22 bytes de locale (0 a 21), 110 tabelas distintas. `HomePageViewModel` importava
+toda tabela que `FindStringTablesAsync` devolvesse, sem olhar o locale — 22 cópias do mesmo mod. Na
+exportação, `entries.GroupBy(SourceStbl).ToDictionary(WithLocale(..., pt-BR))` retargeta as 110 para
+pt-BR, o que as colapsa nas mesmas 5 chaves, e `ToDictionary` lança em vez de mesclar. Uma terceira
+falha apareceu no caminho: `RunImportAsync` sempre chamava `IProjectService.CreateAsync`, então
+reimportar um mod criava um projeto novo e vazio — a feature de mod-update da seção 25 (novas/alteradas/
+reaproveitadas) nunca rodou de verdade no app, sempre reportava 100% "nova".
+
+**Decisão:** (1) A importação filtra as STBLs pelo locale de origem do projeto via
+`IStringTableService.GetLocale`, com fallback para todas as tabelas quando o package não tem nenhuma no
+idioma de origem (um mod só em francês ainda importa). (2) A importação procura primeiro um projeto
+existente com o mesmo conjunto de arquivos (`IProjectService.FindBySourceFilesAsync`, comparação por
+conjunto e case-insensitive, não por ordem) e só cria um novo se não achar. (3) Depois de importar,
+`IProjectStringService.RemoveStringsOutsideAsync` apaga as strings de STBLs que não fazem mais parte da
+importação — sem isso, `ReplaceStringsAsync` (que só poda *dentro* de uma tabela que recebe) deixaria as
+105 tabelas erradas presas no projeto para sempre. Guardado contra conjunto vazio. (4) A montagem das
+tabelas de exportação saiu do ViewModel para `StringTableExportPlan` (Core), que filtra pelo locale de
+origem e **mescla** tabelas que colapsam na mesma chave de destino em vez de lançar.
+
+**Consequências:** Traduzir o WickedWhims passa a processar 6.779 strings em vez de 149.138. A
+exportação do projeto já existente do usuário foi verificada contra o banco real: 110 tabelas → 5,
+149.138 strings → 6.779, 142.359 excluídas, package de 185.279 bytes escrito e **round-trip válido**,
+com a chave que quebrava (`1100E8D0AC1B9A96`) agora escrita uma única vez. Um projeto importado antes
+desta correção se conserta sozinho: basta reimportar o mesmo `.package` — o projeto é reencontrado, as
+6.779 traduções em inglês são preservadas (`UnchangedCount`) e as 142.359 linhas restantes são
+descartadas. `StringTableExportPlan` tem testes próprios em `TS4Translator.Core.Tests`, incluindo o caso
+exato do colapso de chaves; `FindBySourceFilesAsync` e `RemoveStringsOutsideAsync` têm testes de
+integração contra SQLite real. Suíte: 239 testes, todos passando.
+
+---
+
+## DEC-028 — Modo de revisão por IA, cópia do original, exportação por mod e provider Google Tradutor
+
+**Contexto:** Depois da DEC-027 o usuário listou quatro pedidos e um bug: (1) um modo de refino em que ele
+escolhe um motor mais forte para melhorar uma tradução específica do Argos; (2) poder **copiar** o texto
+original (a coluna era um `TextBlock` puro, nem selecionável); (3) ao importar 12 mods de uma vez, só um
+parecia traduzido e a exportação gerava um único arquivo; (4) revisar o "Google Tradutor", que segundo ele
+pedia API key e configuração demais.
+
+**Evidência:** O banco mostrou que a importação dos 12 mods **funcionou** — 12 arquivos, 12 tabelas,
+1.351 strings, todas traduzidas. O que falhava era a legibilidade e a saída: o projeto era batizado só com
+o nome do primeiro arquivo, nenhuma linha dizia de qual mod vinha, e `StringTableExportPlan` juntava tudo
+num único package. Sobre o item 4: **não existia provider de Google Tradutor nenhum** — o que existia era
+`GoogleGemini`, que é uma API de LLM paga, com endpoint/modelo/API key obrigatórios. O usuário estava
+vendo o Gemini e chamando de tradutor. Testando o endpoint público real, ele responde **429 na primeira
+requisição quando não há cabeçalho `User-Agent`**, e 200 com qualquer valor não vazio.
+
+**Decisão:** (1) `ITranslationOrchestrator.RefineAsync` — pipeline separado do `TranslateAsync` porque este
+consulta a translation memory primeiro, e todo item sendo refinado já está lá: passar por ele devolveria
+exatamente o rascunho que o usuário quer melhorar. Providers com `SupportsCustomPrompt` recebem os
+rascunhos por id num prompt de revisão; os que não aceitam prompt (Argos, Google Tradutor, DeepL)
+simplesmente retraduzem com outro motor, que é o ponto quando o usuário troca de engine.
+(2) `ProviderConfiguration` passa a ter **uma linha por `ProviderKind`** com uma marcada como ativa, em vez
+de uma única linha sobrescrita a cada save — sem isso não há como refinar com um motor diferente do que fez
+a tradução em massa sem o usuário reconfigurar tudo. (3) Coluna `SourceFile` em `ProjectStringRecord`,
+parte da chave única: dois mods podem embarcar uma STBL com o mesmo group/instance, e sem o arquivo na
+chave a importação do segundo apagaria as strings do primeiro. A exportação passa a gerar **um `.package`
+por mod**, via seletor de pasta quando há mais de um. (4) Novo `ProviderKind.GoogleTranslate` /
+`GoogleTranslateProvider` usando `translate_a/single`, sem API key, endpoint ou modelo — tratado na tela de
+Configurações como o Argos, sem nenhum campo de credencial.
+
+**Consequências:** A migration `AddSourceFileAndProviderPerKind` marca a linha de provider existente como
+ativa via SQL explícito; sem isso o `IsActive` default 0 apagaria silenciosamente a escolha de provider do
+usuário — mesma classe de perda de dados da DEC-020, agora por mudança de schema. O endpoint gratuito do
+Google **estrangula agressivamente por IP**: verificado ao vivo, 6 requisições paralelas deram quatro 429,
+e a bateria de testes desta sessão esgotou a cota do IP por vários minutos. Por isso o provider é
+sequencial, com 250 ms entre requisições, e uma falha por item não derruba o lote inteiro — se tudo falhar,
+a exceção explica que é limite por IP. Ele é realista como motor de **refino** (poucas strings) e para mods
+pequenos; para 6.779 strings de uma vez, não. Dois bugs de UX apareceram durante a verificação rodando o app
+de verdade: a caixa de tradução salvava no `LostFocus` mesmo sem alteração nenhuma, marcando a string como
+"Editado manualmente" só por clicar nela e sair (corrigido com uma comparação contra o valor persistido), e
+um refino que devolve texto idêntico era reportado como falha (agora diz que o motor concordou com a
+tradução atual). 271 testes, todos passando.
+
+---
+
+## DEC-029 — Perfis nomeados por motor, papéis por etapa, e tradução com dois motores em paralelo
+
+**Contexto:** Até aqui só existia **uma** configuração de provider por vez (uma linha, sobrescrita a cada
+save; a DEC-028 dividiu em uma linha por `ProviderKind`, mas ainda uma só por tipo). O usuário pediu para
+separar de vez: cada motor com seu próprio perfil salvo — Gemini com API key, LLM local, Argos, Google
+Tradutor, OpenAI, Anthropic, DeepL — e poder escolher qual motor faz cada etapa, inclusive traduzindo com
+dois motores ao mesmo tempo, mandando as strings difíceis para o modelo bom e as fáceis para o barato.
+
+**Decisão:**
+
+1. **`ProviderProfile`** substitui `ProviderConfiguration`. Vários perfis do mesmo `ProviderKind` podem
+   coexistir (dois Geminis com chaves diferentes, um LM Studio local e outro remoto). A API key passa a ser
+   namespaced **por id de perfil** (`provider-profile:{id}`), não por tipo.
+2. **Três papéis** (`TranslationRole`): `Primary` (tradução em massa), `Refinement` (linha a linha, sob
+   demanda) e `Review` (varredura em lote das marcadas). São separados de propósito — um modelo caro e
+   lento pode servir para meia dúzia de cliques manuais sem ser solto sobre centenas de strings, ou o
+   contrário. Papel vazio herda o anterior (`ResolveProfileId`).
+3. **`StringDifficulty`** pontua cada string de 0 a 100 por forma do texto: tamanho, placeholders,
+   marcação, número de frases e variantes de gênero. Heurística transparente de propósito — o usuário
+   precisa conseguir olhar o slider e prever o efeito, e ela roda sobre dezenas de milhares de strings
+   antes de qualquer tradução começar.
+4. **`IDualEngineTranslator`** divide o lote pelo limiar e roda as duas faixas **concorrentemente** via
+   `Task.WhenAll`, com um semáforo serializando só o callback de persistência (duas faixas gravando no
+   mesmo `DbContext` e nas mesmas coleções observáveis ao mesmo tempo seria uma corrida que o chamador não
+   tem como se defender sozinho).
+5. **`AnthropicProvider`** novo (Messages API), e `ProviderKind.OpenAI` como tipo distinto que reusa o
+   `OpenAICompatibleProvider` — mesmo contrato de fio, separado só para a UI predefinir o endpoint certo e
+   deixar óbvia a diferença entre "nuvem paga" e "sua máquina".
+6. **Configurações reorganizada em três blocos**: motores (tabela de perfis com badge do papel que cada um
+   ocupa), quem faz o quê, e dois motores. Motor é coisa que se configura uma vez; papel é decisão que se
+   muda toda hora — misturar os dois foi o que obrigava o usuário a reconfigurar um motor toda vez que
+   queria usar outro.
+
+**Evidência (corpus real do WickedWhims, 6.779 strings inglesas):** mediana de pontuação 9, p75 27, p90 50,
+máximo 94. No limiar padrão de 35 a divisão fica **5.379 fáceis (79,3%) / 1.400 difíceis (20,7%)** — ou
+seja, o modelo caro é acionado em um quinto do corpus. A 25 vai para 26,3% e a 50 cai para 10,9%.
+
+**Consequências:** A migration copia as configurações antigas para perfis **antes** de dropar a tabela
+(a versão gerada pelo `dotnet ef` dropava primeiro, o que teria apagado tudo — mesma armadilha da DEC-020
+e da DEC-028, agora num rename de tabela) e aponta o papel `Primary` para o que estava ativo. Chaves DPAPI
+não podem ser movidas por SQL, então `ResolveApiKey` cai no slot antigo `provider:{Kind}` quando o novo
+ainda não existe; a chave é renomeada para o namespace do perfil no primeiro save.
+**O nome do perfil virou identidade**: é assim que ele é escolhido nos seletores de papel, então nomes
+duplicados são rejeitados no save. Um banco escrito antes dessa regra ainda pode ter duplicados — foi o caso
+real desta máquina, com dois perfis "Argos Translate" (um deles na verdade um Gemini, porque a tela antiga
+deixava trocar o tipo sem retypar o nome), e o resultado era o combo mostrar um perfil enquanto o papel
+apontava para outro. A UI desambigua com `(#id)` quando detecta duplicata, em vez de confiar no nome.
+`StringDifficulty` mede risco **estrutural**, não ambiguidade semântica: "Shallow" pontua 1 e o Argos ainda
+assim traduziu como "Rasgo". Esse tipo de erro é trabalho da revisão/refino, não do roteamento.
+307 testes, todos passando.
+
+---
+
+## DEC-030 — Roteamento em três faixas com sinais de histórico, pipeline por projeto, catálogo de modelos e refino de UI
+
+**Contexto:** Cinco pendências ficaram da DEC-029, mais a UI. O usuário pediu todas de uma vez.
+
+**Decisões:**
+
+1. **Roteamento por conteúdo, não só por forma.** `StringDifficulty.Score` passa a aceitar um
+   `StringRiskContext` opcional: `PreviouslyFlaggedForReview` (+25) e `HasGlossaryTerm` (+10), mais um
+   empurrão de +12 para rótulos curtos sem contexto de frase. O primeiro é o único sinal que é **prova**
+   e não palpite — aquela string já voltou com problema. Resolve exatamente o caso "Shallow → Rasgo",
+   que nenhuma pontuação por forma consegue enxergar: o app não entende o texto, mas lembra o que
+   aconteceu com ele.
+2. **Três motores em paralelo.** `IDualEngineTranslator` virou `IMultiEngineTranslator` com
+   `RoutingPlan`/`EngineLane`: N faixas, cada uma com um limite inferior, resolvidas pela mais alta que
+   a pontuação alcança. Duas ou três faixas conforme o usuário configurar; todas rodam via
+   `Task.WhenAll` com um semáforo serializando só a persistência.
+3. **Pipeline por projeto.** `TranslationPipelineRecord` ganhou `ProjectId` nullable com índice único —
+   uma linha global (`ProjectId` null) e no máximo uma por projeto. Um projeto sem override **herda** o
+   global em vez de copiá-lo, então mudar o global continua alcançando quem nunca sobrescreveu.
+4. **Estimativa antes de traduzir.** `IMultiEngineTranslator.Preview` devolve strings, caracteres e
+   requisições por motor, calculado do mesmo plano que a execução usa. Deliberadamente **não** em
+   dinheiro: uma cifra exigiria tabela de preços por modelo que envelhece assim que um provider muda o
+   preço. Caracteres e requisições são as unidades de que as contas são calculadas, e são exatas.
+5. **Editor com centenas de milhares de linhas.** A busca ganhou debounce de 300 ms e a lista renderiza
+   no máximo 500 resultados, reportando o total real. O `ListView` já virtualizava o desenho; o custo
+   era o `Clear()` + `Add()` da `ObservableCollection` de 149 mil itens a cada tecla.
+6. **Catálogo de modelos.** `IProviderDirectory` consulta a própria API por modelos disponíveis:
+   `GET /models` para OpenAI e compatíveis, `GET /v1beta/models` para Gemini (filtrando por
+   `generateContent` e removendo o prefixo `models/`), `GET /v1/models` para Anthropic. O campo Modelo
+   virou um ComboBox editável com botão "Buscar modelos".
+7. **Cota.** Só a DeepL expõe uso a uma API key comum (`GET /v2/usage`); Gemini, OpenAI e Anthropic
+   deixam isso em console de billing atrás de outra credencial. O app mostra a cota da DeepJ e não
+   inventa número para as demais.
+8. **UI.** Barra lateral compacta (`OpenPaneLength` 196, altura de item 34, margem de conteúdo zerada),
+   páginas com padding 20/12 em vez de 24/16, Configurações em cards com hierarquia visual, e a Home
+   passou a mostrar **progresso real** por projeto (barra, traduzidas/total, quantas para revisar) em vez
+   de nome e contagem crua de arquivos.
+
+**Consequências e armadilhas encontradas:**
+
+- A migration gerada renomeava `DifficultyThreshold` para `MediumThreshold`, o que transformaria o 35 do
+  usuário em limiar **médio** com o difícil em 0 — mandando o corpus inteiro para o motor mais caro na
+  execução seguinte. Corrigida para renomear em `DifficultThreshold` e criar `MediumThreshold` com o
+  padrão. Terceira vez que uma migration gerada tentaria destruir configuração do usuário.
+- `x:Bind` com chamada de função **aninhada** (`BoolToVisibility(Not(...))`) compila em Debug e derruba
+  o passe de XAML do Release com erro interno mascarado. Substituído por propriedades `Visibility` no
+  ViewModel. Vale como regra: nunca aninhar chamadas em `x:Bind`.
+- Reconstruir o `ItemsSource` de um `ComboBox` zera seu `SelectedItem`, e o CommunityToolkit só notifica
+  quando o valor muda — um papel cujo nome continuou igual nunca mandava o controle re-selecionar, e a
+  caixa aparecia **vazia** com a configuração correta por trás. Resolvido notificando explicitamente
+  após recarregar, e ignorando a escrita vazia que o reset devolve pelo binding.
+- `DeleteAsync` de um perfil limpava papéis em **uma** linha de pipeline; com o global mais um override
+  por projeto isso passou a varrer todas.
+- Os dois perfis chamados "Argos Translate" (um deles um Gemini) foram renomeados no banco do usuário
+  para "Argos (offline)" e "Google Gemini (gemini-2.5-flash)", preservando a chave salva.
+
+339 testes, todos passando.
+
+---
+
+## DEC-031 — Clique morto na lista de projetos, exclusão de projeto, e a perda de dados que a DEC-028 causou
+
+**Contexto:** O usuário relatou que clicar num projeto na Home não fazia nada, e pediu para poder apagar
+projetos antigos. Investigando isso, apareceu um problema muito pior.
+
+**Bug 1 — clique morto.** Quando a Home passou a listar `ProjectCardViewModel` em vez de
+`TranslationProject` (DEC-030), o `ItemClick` do code-behind continuou testando
+`e.ClickedItem is TranslationProject`. O cast falhava em toda linha, silenciosamente, e o app ficava sem
+caminho nenhum para a tela de tradução — inutilizável. **Trocar o tipo de um `ItemsSource` obriga a
+reler todo code-behind que consome aquela lista; o compilador não avisa porque `is` com tipo errado é
+código válido.**
+
+**Bug 2 — exclusão de projeto.** Adicionado botão por card, com `ContentDialog` de confirmação que diz
+quantas strings serão perdidas e que os `.package` originais não são tocados. O cascade do banco leva
+strings, histórico de revisões, override de pipeline e termos de glossário do projeto; o perfil de motor,
+que é global, sobrevive. Coberto por teste.
+
+**Bug 3 — PERDA DE DADOS REAL, causada pela DEC-028.** A coluna `SourceFile` virou parte da chave de
+`ReplaceStringsAsync`. Linhas importadas antes disso têm `SourceFile` NULL. Na primeira reimportação
+depois da atualização, a busca por linhas existentes filtrava por `SourceFile == <caminho>`, não achava
+nada, inseria 1.351 linhas novas como `Pending`, e em seguida `RemoveStringsOutsideAsync` apagava as
+originais porque a tabela delas (arquivo nulo) não estava no conjunto importado. **Resultado: o projeto
+de 12 mods do usuário perdeu 1.351 traduções — e a reimportação era exatamente o que as notas de versão
+mandavam fazer para consertar projetos antigos.** O sintoma visível foi o card mostrando
+`0/1.351 traduzidas (0%)`.
+
+**Decisão:** `ReplaceStringsAsync` passa a **adotar** linhas legadas: a consulta traz tanto as do arquivo
+exato quanto as de `SourceFile` NULL, a linha adotada recebe o caminho e mantém tradução, status e
+histórico. Quando existem as duas para o mesmo hash, a do arquivo nomeado vence e a legada é removida —
+senão a adoção violaria o índice único. Três testes de regressão cobrem adoção simples, conflito, e
+adoção com texto alterado.
+
+**Recuperação:** as traduções foram restauradas na íntegra a partir de `ts4translator.pre-tiered.bak`,
+casando por `(ProjectId, StblGroup, StblFullInstance, KeyHash)` — deliberadamente **sem** `SourceFile`,
+que é justamente a coluna cuja mudança causou a perda. 1.351 linhas restauradas com tradução, status e
+`IssueSummary` originais: 1.332 `Translated`, 13 `ManuallyEdited`, 6 `NeedsReview`.
+
+**Consequências:** Os outros três projetos ainda têm `SourceFile` NULL e teriam sofrido a mesma perda na
+próxima reimportação; a correção os protege. **Lição de processo: um backup do `.db` sem o `-wal` mostra
+um checkpoint antigo.** A primeira análise desta investigação concluiu "o banco está intacto" lendo o
+arquivo sozinho, quando o estado real (com WAL) já estava destruído — sempre copiar `.db`, `.db-wal` e
+`.db-shm` juntos antes de afirmar qualquer coisa sobre o estado do banco.
+
+341 testes, todos passando.
+
+---
+
+## DEC-032 — `COMException` na tradução: callback de UI numa thread de background
+
+**Contexto:** Na primeira tradução real que o usuário tentou, o app falhou com
+`Falha ao traduzir (COMException):` — mensagem vazia. A estimativa antes disso funcionou e mostrou a
+divisão correta entre Gemini e Argos, então o roteamento estava certo; a falha era ao aplicar resultados.
+
+**Causa:** `IMultiEngineTranslator` roda as faixas com `ConfigureAwait(false)` e invoca
+`onChunkCompleted` de dentro desse contexto, ou seja, numa thread do pool. O callback do
+`EditorPageViewModel` mexia em `StringRowViewModel` (propriedades observáveis), `ProgressCurrent`,
+`StatusText` e na `ObservableCollection` `Strings` — tudo ligado ao XAML. WinUI responde a isso com
+`COMException` (`RPC_E_WRONG_THREAD`) sem mensagem.
+
+Regressão da DEC-030: antes, o laço de chunks vivia no ViewModel, cujos `await` sem
+`ConfigureAwait(false)` retomavam na thread de UI. Mover o laço para o roteador tirou essa garantia sem
+que nada no contrato dissesse em que thread o callback chega.
+
+**Decisão:** o ViewModel captura o `DispatcherQueue` da UI no `LoadAsync` e passa por ele tudo que o
+XAML observa; a gravação no banco continua na thread de background, que é onde deve ficar. O contrato de
+`IMultiEngineTranslator` agora documenta explicitamente que o callback chega numa thread arbitrária.
+
+**Bug 2 — clique morto na barra lateral.** Abrir um projeto navega o frame para o Editor sem mudar o item
+selecionado da `NavigationView` ("Home" continua marcado). `SelectionChanged` então nunca dispara quando
+o usuário clica em Home — a seleção não mudou — e a única saída do projeto era a seta de voltar da barra
+de título. Trocado para `ItemInvoked`, que dispara mesmo com o item já selecionado.
+
+**Regressão que essa troca causou, pega na validação:** `ItemInvoked` só dispara em clique real, enquanto
+`SelectionChanged` disparava uma vez durante o load (o item Home tem `IsSelected="True"`) — e era **isso**
+que colocava a primeira página na tela. O app passou a abrir com a área de conteúdo **em branco**, pior
+que o bug original. Corrigido com uma navegação inicial explícita no construtor da janela.
+
+**Validação de ponta a ponta** (a razão de tudo isso ter aparecido): um projeto de teste com 38 strings
+reais foi semeado, traduzido pelo app, revisado e exportado.
+- Tradução: 36 traduzidas, 2 para revisar, 0 sem resposta — Argos 37 strings / Gemini 1 string, as duas
+  faixas em paralelo, sem exceção.
+- Revisão em lote com Gemini: 2 de 2 melhoradas ("BWC Addict", que tinha voltado idêntica ao original,
+  virou "Viciado em BWC").
+- Exportação: 1 package, 38 strings, round-trip válido, com o texto traduzido gravado.
+- Navegação: abrir projeto, voltar pela barra lateral, Glossário, Configurações e voltar — todos OK.
+- Exclusão de projeto pelo diálogo de confirmação: OK.
+
+**Nota de processo:** durante esta validação o usuário estava usando o app ao mesmo tempo (apagou projetos
+antigos e reimportou os 12 mods às 00:14 UTC). Isso apareceu como "dados sumindo" numa leitura
+intermediária e quase virou um diagnóstico errado. Antes de concluir que o app perdeu dados, conferir os
+carimbos `CreatedAtUtc`/`UpdatedAtUtc`: eles distinguem ação do usuário de bug.
+
+344 testes, todos passando.
+
+---
+
+## DEC-033 — Ida e volta por arquivo de texto para um chat de IA externo
+
+**Contexto:** O usuário quer levar as strings para o chat que já assina (ChatGPT, Claude, Gemini, Grok),
+pedir a tradução lá, e trazer o resultado de volta. Isso dá acesso a modelos que o app não tem via API,
+sem custo adicional. O pedido incluiu explicitamente: seleção do que sai, e o app preparado para o caso
+de a resposta voltar **sem os identificadores**.
+
+**Formato (`TS4TRANSLATOR-BUNDLE v1`):** cabeçalho com projeto e par de idiomas, instruções para a IA
+dentro do próprio arquivo, e blocos de três linhas entre marcadores de início e fim:
+
+```
+#1042
+EN: Shallow
+PT:
+```
+
+As decisões que fazem isso sobreviver a uma janela de chat:
+
+- **Uma linha por campo, com escapes `\n`/`\t`/`\`.** Strings do jogo têm quebras de linha reais, e um
+  formato onde um registro ocupa um número imprevisível de linhas é exatamente o que um modelo reformata
+  até virar algo não parseável. A convenção é a de `.properties`/`.po`, que os modelos reproduzem sem
+  precisar aprender.
+- **Id em linha própria, antes do texto**, para nunca ser confundido com conteúdo a traduzir.
+- **Marcadores de início e fim**, para descartar o que o modelo escreve antes e depois.
+- **Rascunho em linha `ATUAL:` separada**, nunca pré-preenchendo `PT:` — assim o parser jamais precisa
+  decidir se um `PT:` é a resposta ou o rascunho ecoado de volta.
+- **Instruções dentro do arquivo**, porque o usuário vai colar o arquivo e mais nada.
+
+**Leitura tolerante, identidade estrita.** O parser aceita code fences, prosa em volta, rótulos em
+negrito e maiúsculas trocadas. O que ele nunca faz é adivinhar de quem é cada tradução — as três
+estratégias são reportadas:
+
+1. **Por id** — autoritativo.
+2. **Pelo texto original** — quando a IA removeu os ids mas manteve as linhas `EN:`. Só vale para
+   originais únicos no lote; um texto repetido não identifica ninguém.
+3. **Por posição** — último recurso, só quando o número de traduções bate exatamente com o de textos
+   pendentes, e sempre com aviso.
+
+Se nada disso serve, a importação **falha em vez de gravar** — associar traduções erradas a strings
+erradas seria pior que não importar.
+
+**Validação na entrada:** tradução vazia é ignorada; idêntica ao original vira aviso; marcador do jogo
+perdido ou alterado vira aviso e a string entra como `NeedsReview`. Toda tradução que **não** veio por id
+também entra como `NeedsReview`, com o motivo no `IssueSummary` — o usuário precisa conferir se caiu na
+linha certa. Só o caminho por id com marcadores intactos entra como `ManuallyEdited`.
+
+**Seleção:** checkbox por linha; sem nada marcado, exporta o que o filtro atual mostra. Filtrar por
+"Revisar" e exportar é o caminho rápido; marcar linha a linha é o preciso.
+
+**Consequências:** o arquivo é gravado em UTF-8 **com BOM** — o usuário abre no Bloco de Notas e cola no
+navegador, e sem a marca o Notepad historicamente erra a codificação e estraga os acentos. O bundle
+exportado fica guardado na sessão para a importação casar contra exatamente o que saiu; se o app for
+reaberto no meio do processo, a importação cai para o projeto inteiro como universo de comparação, o que
+ainda funciona mas dá menos apoio às estratégias sem id.
+
+Verificado com o arquivo real e uma resposta simulada no pior caso realista (code fence, prosa em volta e
+**todos os ids removidos**): 4 de 4 recuperadas pelo texto original, `\n` restaurado como quebra real,
+marcadores preservados, e a única que voltou idêntica ao original devidamente sinalizada.
+
+376 testes, todos passando (37 novos só para o formato).
+
+## DEC-034 — Ruido de importacao, o que e "texto" num STBL, e exportar o mod inteiro
+
+**Contexto.** Mil strings do "[Kritical] Dreams Of Surrender" foram para um chat, voltaram e o app
+reportou avisos suficientes para o usuario achar que o arquivo tinha vindo quebrado. Ele nao tinha
+vindo. A analise do arquivo e do banco mostrou: 1000 de 1000 blocos casados por id, nenhum id duplicado
+ou inventado, nenhuma linha `EN:` alterada, zero marcadores perdidos, `\n` e `\` preservados em 100%
+dos registros, e no banco 1000 linhas em `ManuallyEdited` com `IssueSummary` vazio e `TranslatedText`
+identico byte a byte a cada linha `PT:`. A importacao tinha funcionado inteira.
+
+Os avisos vinham todos de uma regra so — "voltou igual ao original" — e **128 dos 134** eram strings como
+`debug_savedActor2`, `craftGags1_cd`, `publicUseCd` e `highWaistBelt`: identificadores de tuning que
+moram na string table e nunca aparecem para o jogador. A IA acertou em nao traduzi-los. Cinco eram
+rotulos tecnicos. **Um** era falha real: um paragrafo inteiro que voltou em ingles. Ficou enterrado.
+
+**Quatro defeitos, quatro decisoes.**
+
+1. **A barra de status nao era um canal de diagnostico.** Mostrava tres problemas e `(+184 aviso(s))`,
+   sem nenhum caminho para ver o resto. O usuario sabia que algo tinha acontecido e nao tinha como
+   descobrir o que — pior que o problema que ele tentava diagnosticar. Agora a importacao abre um painel
+   com os problemas **agrupados por tipo** (cem identificadores sao um fato, nao cem fatos) e
+   `BundleImportReport.Write` grava o relatorio completo em arquivo. A linha interessante costuma ser
+   justamente a que seria cortada.
+
+2. **`StringTranslatability` (`Code` | `Term` | `Prose`).** Um STBL do Sims 4 guarda tres coisas
+   diferentes e o app tratava as tres como texto. Heuristica transparente sobre a forma do texto, no
+   modelo da `StringDifficulty` — o usuario tem que conseguir olhar uma string que o app pulou e ver
+   imediatamente por que. Erra deliberadamente para `Term` quando a forma e ambigua: um aviso a mais
+   custa uma olhada, uma string retida indevidamente sai sem traducao no package.
+
+3. **Severidade pelo que a string e, nao pelo texto ter mudado.** `Prose` que volta identica e aviso;
+   `Term` e `Code` que voltam identicos sao observacao. No arquivo real: **1 aviso** no lugar de 134, e o
+   aviso e exatamente o paragrafo que a IA recusou. Tambem entrou o `DraftKept` — 434 linhas voltaram
+   identicas ao rascunho enviado, ou seja, a IA nao refinou nada nelas, e nada no app dizia isso.
+
+4. **`Code` nao vai para o tradutor.** Eram 866 das 4133 strings desse mod (21%) — contexto e dinheiro
+   gastos para receber de volta o que ja se tinha. Ha um checkbox para mandar assim mesmo, porque
+   "exportar tudo" precisa poder significar tudo de verdade, e um filtro "Identificadores internos" na
+   lista, porque uma contagem de pendentes que nunca pode chegar a zero e uma pequena mentira.
+
+**Exportar o mod inteiro.** O alcance da exportacao era implicito — as linhas marcadas, ou o que a lista
+estivesse mostrando — e a lista para em `MaximumVisibleRows` (500). Num mod de quatro mil strings isso
+nao tinha como ser percebido de fora: o usuario marcava de 500 em 500 e torcia. Agora o alcance e uma
+escolha explicita (**o que falta traduzir · o mod inteiro · o que o filtro achou · so as marcadas**), com
+a contagem exibida antes de confirmar, e o `BundleSplitter` corta em partes numeradas com a garantia que
+importa: **cada string em exatamente uma parte, na ordem, e a concatenacao das partes e a entrada**.
+`0 textos por arquivo` significa arquivo unico. A importacao aceita varios arquivos de uma vez.
+
+**`ExportManifestStore`.** Saber quais strings foram enviadas e o que torna possivel dizer "23 de 1000
+nao voltaram", e um modelo que para no meio devolve um arquivo de aparencia perfeitamente saudavel. Isso
+morava num campo do ViewModel, ou seja, sobrevivia ate a janela fechar — enquanto o fluxo real e
+exportar, fechar o app, passar vinte minutos num chat, reabrir e importar. Foi para o disco, em
+`%LOCALAPPDATA%\TS4Translator\Data\Exports\<projeto>.json`. E conveniencia, nunca requisito: sem
+manifesto a importacao ainda casa por id e diz que nao pode atestar completude.
+
+## DEC-035 — A memoria so aprendia com a maquina; e o glossario nunca chegava ao chat
+
+**Contexto.** A memoria de traducao existia desde cedo e e boa: chave por SHA-256 do original trimado +
+par de idiomas, **sem `ProjectId`** (global de verdade), com busca fuzzy Levenshtein e reuso automatico
+so a >=97%. O que ninguem tinha percebido e **quem escrevia nela**. `SaveManyAsync` so era chamado de
+dentro do `TranslationOrchestrator`. Medido no banco real:
+
+| Status | Linhas | Na memoria |
+|---|---:|---:|
+| `Translated` (motor automatico) | 146.619 | 146.618 |
+| `Refined` (refino por motor) | 95 | 95 |
+| `ManuallyEdited` (usuario digitando + import do chat) | 1.275 | **2** |
+
+Das 1.000 traducoes trazidas de um chat para o "Dreams Of Surrender", **1** estava na memoria — e essa
+por coincidencia. O arranjo era o pior possivel: as duas fontes de **maior** qualidade eram as unicas que
+nao deixavam rastro.
+
+**Decisao 1 — edicao manual e import do chat alimentam a memoria, atras de um portao.** Simplesmente
+chamar `SaveAsync` envenenaria o store. Os dois caminhos nao tem o que o pipeline tem: o validador
+recusando persistir o que levantou issue. `TranslationMemoryPolicy.ShouldRemember` e o substituto, com
+tres recusas, cada uma por uma falha que aconteceu de verdade: traducao vazia; **traducao identica a
+origem** (o paragrafo que a IA recusou entrou como `ManuallyEdited` — memoriza-lo ensinaria o app que o
+ingles e o portugues, para todo mod futuro com aquela linha); e identificadores de tuning. Nos dados
+reais: 866 das 1.000 aceitas, 134 recusadas, exatamente as certas. Provider fica `manual` ou `chat`.
+
+Efeito colateral desejado: como `TranslateAsync` consulta a memoria **antes** de chamar o motor, uma
+entrada feita a mao blinda aquela string — o Argos nao a sobrescreve mais.
+
+**Decisao 2 — a memoria ganhou tela.** Eram 8.427 entradas invisiveis, 8.330 delas de um motor local de
+qualidade irregular, decidindo a traducao de todo mod futuro, sem poder ser lidas, corrigidas ou
+apagadas. Um store que dirige silenciosamente todo resultado futuro e nao pode ser inspecionado nao e uma
+funcionalidade que o usuario possui. Busca dos dois lados, filtro por origem, edicao no lugar (grava
+como `manual`, mesmo upsert), exclusao por entrada, e "limpar tudo desta origem" com confirmacao — a
+saida para uma memoria enchida por um motor em que se deixou de confiar. Mais um **backfill**: recolhe
+para a memoria o que ja foi editado a mao em todos os projetos (1.208 linhas, hoje, com a politica
+aplicada na entrada).
+
+**Decisao 3 — o glossario chega ao chat.** Ele alimentava todo motor com `SupportsGlossary`, alimentava
+o roteamento por dificuldade... e o `TranslationBundle` nao o mencionava. O motor mais forte do fluxo
+atual do usuario era o unico traduzindo sem terminologia nenhuma — junto com as instrucoes de estilo do
+projeto, igualmente ausentes. Agora o bundle carrega os dois, e o writer imprime so os termos que
+ocorrem naquele arquivo (mesma regra do caminho de provider: contexto de chat e orcamento, e cem termos
+irrelevantes soterram os que importam). Cada parte de uma exportacao dividida carrega ambos, porque cada
+parte e colada numa janela de chat propria.
+
+**Decisao 4 — e o glossario e verificado na volta.** `BundleTranslation.GlossaryRespected`, simetrico a
+`PlaceholdersMatch`: presenca, nao posicao — um termo cai onde o portugues o coloca, e exigir lugar
+marcaria toda traducao correta. Termo `NeverTranslate` tem que sobreviver literal. O que nao respeita
+entra como `NeedsReview` com o motivo na linha.
+
+**Decisao 5 — o glossario ficou preenchivel.** Estava com **zero termos**, e nao por acaso: so dava para
+adicionar e apagar (corrigir um erro de digitacao exigia apagar e redigitar), e o unico caminho era uma
+pagina separada com um formulario em branco. Agora os termos sao editaveis na propria lista, e o menu de
+contexto do editor abre um dialogo ja preenchido com a linha que o usuario esta olhando — com o texto
+cortado quando e longo demais, porque uma frase inteira como termo nao casa com nada e nao faz nada.
+
+**Decisao 6 — termos por projeto ganharam lista.** O servico sempre aceitou um id de projeto em
+`AddTermAsync`, e sem uma tela esses termos nao existiam na pratica. A pagina agora tem um seletor de
+escopo: global, ou um projeto. Escolhendo um projeto ela mostra os termos dele **junto com os globais**,
+porque esse e o conjunto com que aquele projeto realmente traduz, e uma coluna diz de onde cada termo
+vem — um termo global que parece local e uma armadilha, ja que corrigi-lo ali muda todos os outros mods.

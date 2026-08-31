@@ -18,7 +18,8 @@ configuração depois (DEC-020, já corrigido para não repetir) — o usuário 
 provider antes de continuar. Ver [`docs/STATUS.md`](docs/STATUS.md) para o estado exato e
 [`docs/HANDOFF.md`](docs/HANDOFF.md) para retomar o trabalho em uma nova sessão.
 
-Implementado e testado até agora (202 testes automatizados, todos passando):
+Implementado e testado até agora (227 testes automatizados; 223 passaram neste sandbox e quatro
+testes DPAPI exigem um perfil de usuário Windows carregado):
 
 - Solução .NET 10 / WinUI 3 completa (`TS4Translator.sln`), com App, seis bibliotecas de camada e
   cinco projetos de teste, compilando limpo em x64.
@@ -37,14 +38,15 @@ Implementado e testado até agora (202 testes automatizados, todos passando):
 - **Glossário**: termos globais (nomes próprios, marcas — nunca traduzir, ou sempre traduzir de um
   jeito específico), aplicados automaticamente durante a tradução. Tela própria para adicionar/remover
   termos globais; termos por projeto existem no serviço mas ainda sem UI dedicada.
-- **Configurações**: seletor de tipo de provider (OpenAI-compatible, DeepL, ou Google Gemini), cada um
-  com sua própria API key criptografada via DPAPI do Windows (nunca em texto puro), campo "Modelo"
-  escondido quando não se aplica (DeepL), botão "Testar conexão".
+- **Configurações**: seletor de tipo de provider (Argos offline, OpenAI-compatible, DeepL ou Google
+  Gemini); providers HTTP têm API key criptografada via DPAPI, e o Argos oferece instalação/reparo do
+  runtime e modelo locais sem exigir Python global.
 - Fluxo completo confirmado rodando o app instalado como MSIX, com um `.package` sintético — ver
   DEC-011 e [`docs/BUILD.md`](docs/BUILD.md) para como testar isso você mesmo.
-- `TokenProtector`: protege tokens `{0.SimFirstName}`/`{M0.He}`/`{F0.She}`, tags de markup e quebras
+- `TokenProtector`: protege tokens `{0.SimFirstName}`/`{M0.He}`/`{F0.She}`, tags de markup, URLs,
+  handles e quebras
   de linha antes de qualquer tradução, e reconcilia o resultado por identidade de placeholder (não por
-  ordem). 23 testes.
+  ordem). 27 casos de teste.
 - `TranslationValidator`/`BatchBuilder`/`TranslationOrchestrator`: pipeline completo
   memory (exata→fuzzy≥97%)→protect→provider→reconciliação por ID→restore→validate, nunca confiando na
   ordem/contagem dos resultados do provider. Um reaproveitamento fuzzy sempre volta marcado para
@@ -53,12 +55,13 @@ Implementado e testado até agora (202 testes automatizados, todos passando):
 - `Sims4PackageService`/`SmartSimStringTableService`: leitura/escrita real de STBL via
   `LlamaLogic.Packages` (inclusive múltiplas STBLs num único package de saída), locale (incluindo
   PT-BR) via `SmartSimUtilities`, nunca sobrescrevendo o package original. 13 testes.
-- `OpenAICompatibleProvider`, `DeepLProvider`, `GoogleGeminiProvider`: três providers reais
-  selecionáveis em Configurações (`ProviderKind`/`ConfiguredProviderFactory`), cada um com recuperação
-  controlada de JSON truncado/malformado onde aplicável. 40 testes contra HTTP falso — `DeepLProvider`/
-  `GoogleGeminiProvider` nunca rodaram contra a API real de nenhum dos dois.
+- `ArgosTranslateProvider`, `OpenAICompatibleProvider`, `DeepLProvider`, `GoogleGeminiProvider`: quatro
+  providers reais selecionáveis em Configurações (`ProviderKind`/`ConfiguredProviderFactory`), com recuperação
+  controlada de JSON truncado/malformado onde aplicável. `GoogleGeminiProvider` foi validado contra a
+  API real e num corpus real do WickedWhims; Argos foi validado localmente no mesmo corpus, com
+  6.779 strings em 4 min 28,6 s e zero falhas estruturais; DeepL continua apenas em HTTP falso.
 
-Ainda não implementado: Argos Translate (offline), DeepL/Gemini validados com API key real, OpenAI
+Ainda não implementado: DeepL validado com API key real, OpenAI
 dedicado e Claude como providers, UI de glossário por projeto (só o escopo global tem tela), fuzzy
 matching navegável no Editor (a API já existe, só falta a tela), biblioteca de perfis de tradução
 nomeados/reutilizáveis, empacotamento MSIX de distribuição. Ver [`docs/ROADMAP.md`](docs/ROADMAP.md).
@@ -88,7 +91,7 @@ src/
   TS4Translator.Core/            contratos (interfaces) e modelos de domínio, sem dependências externas
   TS4Translator.Sims4/           DBPF/STBL via LlamaLogic.Packages, atrás de IPackageService/IStringTableService
   TS4Translator.Translation/     TokenProtector, TranslationValidator, BatchBuilder, orquestração
-  TS4Translator.Providers/       implementações de ITranslationProvider (OpenAI-compatible, DeepL, Google Gemini, Argos futuramente)
+  TS4Translator.Providers/       implementações de ITranslationProvider (Argos, OpenAI-compatible, DeepL, Google Gemini)
   TS4Translator.Persistence/     SQLite: projetos, translation memory, glossário, jobs
   TS4Translator.Infrastructure/  logging, credenciais (Windows Credential Manager/DPAPI), HTTP
 tests/
@@ -108,5 +111,4 @@ docs/
 - [`docs/ROADMAP.md`](docs/ROADMAP.md) — fases de implementação e o que falta.
 - [`docs/STATUS.md`](docs/STATUS.md) — estado atual, bloqueios, próximos passos.
 - [`docs/HANDOFF.md`](docs/HANDOFF.md) — como retomar este projeto em uma nova sessão/agente.
-- [`docs/ARGOS.md`](docs/ARGOS.md) — por que Argos Translate (offline) não foi implementado nesta fase,
-  e o que uma sessão futura precisa verificar antes de tentar.
+- [`docs/ARGOS.md`](docs/ARGOS.md) — runtime, sidecar, otimização, benchmark e limites do Argos offline.

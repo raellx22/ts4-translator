@@ -3,7 +3,7 @@
 Leia isto antes de qualquer outra coisa se você é uma nova sessão/agente retomando este projeto.
 Depois leia `README.md`, `docs/STATUS.md`, `docs/ROADMAP.md`, `docs/ARCHITECTURE.md`, `docs/DECISIONS.md`,
 `docs/BUILD.md`, nessa ordem (e `docs/ARGOS.md` se for mexer com o provider offline). Não reconstrua a arquitetura do zero — ela existe, compila, tem 202
-testes automatizados passando, e **o caminho prático completo (importar → extrair → editor →
+testes automatizados (223/227 passam no sandbox; quatro DPAPI exigem perfil Windows), e **o caminho prático completo (importar → extrair → editor →
 exportar com validação) foi verificado de ponta a ponta rodando o app instalado de verdade.**
 
 ## ⚠️ Leia isto antes de reinstalar o pacote MSIX para testar qualquer coisa
@@ -39,7 +39,7 @@ similar sem chamar o provider, sempre marcado para revisão), correção de robu
 (`OpenAICompatibleProvider`, `DeepLProvider`, `GoogleGeminiProvider`) selecionáveis via um
 `ProviderKind` em Configurações (DEC-019), correção do model id padrão do Gemini que tinha ficado
 obsoleto (DEC-021), e — a mais recente — **retry com backoff em falha transitória de provider**
-(503/429/5xx/timeout, DEC-022) — tudo pronto e testado (202 testes automatizados + `GlossaryPage`/
+(503/429/5xx/timeout, DEC-022) — tudo pronto e testado (227 testes automatizados + `GlossaryPage`/
 preset NVIDIA NIM/barra de progresso/seletor de tipo de provider verificados rodando o app de verdade).
 
 **O usuário já testou a tradução contra provider real** (NVIDIA NIM e, depois, Google Gemini) fora
@@ -77,6 +77,32 @@ Nada em progresso. Todo trabalho desta sessão foi levado a um estado compiláve
 verificado rodando o app de verdade antes de parar.
 
 ## Exact next task
+
+**Estado em 2026-08-31 (DEC-027 a DEC-033):** tudo compilado, 344 testes passando, e o pacote
+`TS4Translator.ArgosDev` **1.3.0.0 já instalado e rodando** nesta máquina. O caminho completo foi
+validado de ponta a ponta rodando o app de verdade (DEC-032): importar → traduzir com dois motores em
+paralelo → revisar em lote → exportar com round-trip → apagar projeto.
+Motores são perfis nomeados, com papéis por etapa, roteamento opcional em até três faixas rodando em
+paralelo, e configuração global ou por projeto — ver DEC-029 e DEC-030. A
+identidade do pacote agora está versionada no repo (ver `docs/BUILD.md`), então rebuildar em Release não
+quebra mais o registro.
+
+Primeiros testes que o usuário precisa fazer:
+
+1. **Reimportar `TURBODRIVER_WickedWhims_Tuning.package`** — o projeto existente deve ser reencontrado,
+   reportar ~6.779 reaproveitadas e descartar ~142.359 linhas dos outros idiomas. Só depois de reimportar
+   é que as linhas passam a ter `SourceFile` e a exportação por mod funciona para projetos antigos.
+2. **Reimportar o projeto dos 12 mods** pelo mesmo motivo, e então exportar: agora pede uma pasta e
+   escreve um `.package` por mod.
+3. **Configurar os motores**: em Configurações, criar um perfil por motor que for usar e definir os papéis
+   em "Quem faz o quê". Opcionalmente ligar "Dividir por dificuldade" e escolher o motor das difíceis.
+4. **Testar o refino**: escolher um perfil em "Refinar linha a linha com" e usar o botão de raio de uma
+   linha; "Revisar as marcadas (em lote)" usa o motor do papel de revisão.
+
+**Atenção ao migrar:** o nome do perfil virou identidade (é como ele é escolhido nos papéis). O banco
+desta máquina tinha dois perfis chamados "Argos Translate" vindos da tela antiga — um deles é na verdade um
+Gemini. Renomeie-o em Configurações → Editar; enquanto houver duplicata a UI mostra `(#id)` para
+desambiguar.
 
 **O usuário precisa reconfigurar o provider primeiro** (config perdida no incidente da DEC-020) antes
 de continuar testando a tradução real. Depois disso:
@@ -169,8 +195,47 @@ Todas em `docs/DECISIONS.md`, mas as mais fáceis de "corrigir" por engano:
 
 ## Known bugs
 
-Nenhum bug conhecido no código existente. Bugs reais encontrados em sessões anteriores já foram
-corrigidos e commitados (exceção engolida pelo `AsyncRelayCommand`; o "bug" do picker era um problema
+Nenhum bug conhecido em aberto. **Uma perda de dados real aconteceu na rodada da DEC-031** (a coluna
+`SourceFile` da DEC-028 fez a primeira reimportação apagar 1.351 traduções de um projeto do usuário);
+foi corrigida com adoção de linhas legadas e os dados foram restaurados do backup. Ver DEC-031.
+
+Armadilhas que valem como regra permanente:
+
+- **Trocar o tipo de um `ItemsSource` obriga a reler todo code-behind que consome aquela lista.** Um
+  `e.ClickedItem is TipoAntigo` continua compilando e falha em silêncio - foi assim que a lista de
+  projetos ficou sem clique nenhum (DEC-031).
+- **Um backup do `.db` sem o `-wal` mostra um checkpoint antigo.** Copie `.db`, `.db-wal` e `.db-shm`
+  juntos antes de afirmar qualquer coisa sobre o estado do banco (DEC-031).
+- **Um callback que atravessa camadas precisa dizer em que thread chega.** `IMultiEngineTranslator` roda
+  com `ConfigureAwait(false)`, então o callback cai numa thread do pool; tocar em algo ligado ao XAML de
+  lá dá `COMException` sem mensagem. Marshale pelo `DispatcherQueue` (DEC-032).
+- **`ItemInvoked` da `NavigationView` não dispara no load; `SelectionChanged` disparava.** Se trocar de
+  um para o outro, navegue explicitamente para a primeira página no construtor, senão o app abre em
+  branco (DEC-032).
+
+- **Nunca aninhe chamadas de função em `x:Bind`** (`BoolToVisibility(Not(...))`): compila em Debug e
+  derruba o passe de XAML do Release com um erro interno mascarado (`WMC9999`), que não diz onde está.
+  Exponha uma propriedade `Visibility` no ViewModel.
+- **Reconstruir o `ItemsSource` de um `ComboBox` zera o `SelectedItem`**, e o CommunityToolkit só
+  notifica quando o valor muda - uma seleção cujo valor continuou igual nunca manda o controle
+  re-selecionar e a caixa fica vazia com a configuração certa por trás. Notifique explicitamente depois
+  de recarregar.
+- **Toda migration gerada pelo `dotnet ef` que mexe em configuração precisa ser lida linha a linha.**
+  Já tentou três vezes destruir dados do usuário: dropar a tabela antes de copiar (DEC-029), default 0
+  num `IsActive` (DEC-028) e renomear um limiar para a coluna errada (DEC-030). Na segunda rodada de 2026-08-30 (DEC-028), verificar o refino rodando o
+app de verdade revelou mais dois bugs reais, ambos corrigidos: a caixa de tradução salvava no `LostFocus`
+mesmo sem nenhuma alteração, marcando a string como "Editado manualmente" só por clicar nela e sair; e um
+refino que devolvia texto idêntico era reportado como "não retornou uma versão utilizável", que lê como
+falha quando na verdade o motor só concordou com a tradução existente. Na rodada de 2026-08-30, o teste do usuário com o WickedWhims real
+revelou três bugs de verdade, todos corrigidos e verificados contra o banco dele (DEC-027):
+exportação lançando `ArgumentException` por chaves STBL colapsadas; importação ingerindo as 110 STBLs
+do mod (22 idiomas) em vez das 5 do idioma de origem; e reimportação criando um projeto novo em vez de
+reusar o existente, o que fazia a feature de mod-update da seção 25 nunca rodar de fato no app.
+**Lição (a mesma de DEC-015): uma integração testada camada por camada pode simplesmente nunca ser
+chamada pelo call site real — a reimportação tinha `ImportDiffResult` completo e testado, e o app
+nunca chegava a exercitá-lo.**
+
+Bugs anteriores já corrigidos (exceção engolida pelo `AsyncRelayCommand`; o "bug" do picker era um problema
 de processo de teste, não de código — ver DEC-010; `ArgumentNullException` quando o provider retornava
 `"translation": null` — ver DEC-017; tradução de mods grandes sem feedback de progresso e sem
 salvamento incremental — ver DEC-018; `HasApiKey` herdando o valor de um `ProviderKind` diferente ao
@@ -181,7 +246,7 @@ confirmados.
 
 ## Tests currently failing
 
-Nenhum. 202 testes automatizados passando.
+Nenhum. 376/376 passam nesta máquina (os quatro DPAPI só falham em sandbox sem perfil Windows).
 
 ## Commands to build / test / run
 

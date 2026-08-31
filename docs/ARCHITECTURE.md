@@ -128,8 +128,8 @@ saída já existente não é sobrescrita).
   `GoogleGemini`) para a classe concreta certa a partir do que está salvo em
   `IProviderConfigurationService`. A UI (`EditorPage`, `SettingsPage`) só conhece essa fábrica, nunca
   um provider concreto diretamente. Ver DEC-019.
-- Ainda faltam: Argos Translate (Fase 4, bloqueado em prototipagem de empacotamento — ver
-  `docs/ARGOS.md`), OpenAI dedicado, Claude (Fase 6). Cada um isolado o suficiente para uma falha ou
+- Argos Translate está implementado como sidecar persistente sob demanda (Fase 4/DEC-026 — ver
+  `docs/ARGOS.md`). Ainda faltam OpenAI dedicado e Claude (Fase 6). Cada provider é isolado o suficiente para uma falha ou
   mudança de API de um não afetar os outros nem o core do app (seção 18).
 
 ### TS4Translator.Persistence

@@ -47,7 +47,8 @@ o conjunto de itens, não o primeiro que funcionar.
 
 ## FASE 3 — Translation Core — **em andamento, núcleo pronto**
 
-- [x] `ITokenProtector`/`TokenProtector` — 23 testes, cobre todos os casos da seção 45.
+- [x] `ITokenProtector`/`TokenProtector` — 27 casos de teste, incluindo quebras escapadas, URLs e
+  handles, cobre todos os casos da seção 45.
 - [x] `ITranslationValidator`/`TranslationValidator` — cobre vazio, idêntico, discrepância de tamanho,
   markup desbalanceado, e funde os problemas de token.
 - [x] `ITranslationProvider`/`ProviderCapabilities` (seção 12) — contrato em `Core/Translation/`.
@@ -68,6 +69,11 @@ o conjunto de itens, não o primeiro que funcionar.
 - [x] Retry/backoff em falha transitória de rede (503/429/5xx/timeout) — `Providers/Resilience/HttpRetry.cs`,
   usado pelos três providers. Confirmado necessário por uma falha real (503 do Gemini derrubando a
   tradução inteira mesmo com cota de sobra). Ver DEC-022.
+- [x] Baseline local de 8 GB (DEC-023) — Qwen3.5 4B Q4_K_M validado no Bionic/LM Studio; reasoning
+  desligado, JSON Schema estrito, output cap, duas filas locais, translation memory e persistência em
+  lote. Receita e medições em `docs/LOCAL_MODELS.md`.
+- [x] Benchmark real e batches por provider (DEC-024) — WickedWhims com 6.779 strings; Qwen 32/3.500,
+  Gemini 80/6.400, schema Gemini compatível e retry obedecendo o atraso de quota.
 - [ ] Rate-limit proativo/pause/resume/checkpoint entre sessões do app (resto da seção 11) — não
   iniciado; depende de `TranslationJob` existir como entidade persistida (seção 35), o que também não
   existe ainda. O que já existe (DEC-018/DEC-022): checkpoint DENTRO de uma execução (blocos de 100
@@ -75,16 +81,17 @@ o conjunto de itens, não o primeiro que funcionar.
   fechamento do app no meio do caminho.
 - [ ] `ITranslationJobService`/estados de job (seção 35) — não iniciado.
 
-## FASE 4 — Argos — **não iniciada, deliberadamente (ver `docs/ARGOS.md`)**
+## FASE 4 — Argos — **implementada; falta certificação no MSIX final**
 
-Empacotar um runtime Python + `argostranslate`/`ctranslate2` dentro de um MSIX é um projeto de
-integração de sistemas à parte, que exigiria prototipagem e teste em máquina limpa antes de qualquer
-código de produção — não é algo que deveria ser fingido como "concluído" sem essa verificação (seção 60
-do brief). `docs/ARGOS.md` documenta as duas abordagens candidatas (sidecar por processo vs. `pythonnet`
-embutido), os riscos de cada uma, e os passos concretos que uma sessão futura com acesso a testar
-empacotamento MSIX de verdade deveria seguir antes de escrever `ArgosTranslateProvider`. A arquitetura
-já está pronta para receber esse provider sem nenhuma mudança (`ITranslationProvider`,
-`ProviderCapabilities.SupportsLocalExecution`, `AppDataPaths.ModelsDirectory` já existem para isso).
+- [x] Runtime Python embarcável gerenciado pelo app, sem Python global.
+- [x] Instalação enxuta Argos 1.11/CTranslate2 4.8.1 + modelo direto `en → pb`, com hashes fixados.
+- [x] Sidecar persistente JSONL, UTF-8, ciclo de vida e erros gerenciados.
+- [x] Provider/factory/DI e seleção/instalação/reparo na tela Configurações.
+- [x] Batch CTranslate2 cruzando entradas e fallback determinístico de preservação de tokens.
+- [x] Benchmark real WickedWhims: 500 entradas em 22,74 s, 496 aprovadas e 4 avisos não estruturais;
+  execução integral das 6.779 strings em 4 min 28,6 s, sem ausência ou erro estrutural.
+- [ ] Instalar o MSIX final em um Windows limpo e confirmar que o pacote consegue iniciar o executável
+  baixado em LocalAppData; só então marcar a distribuição Argos como certificada.
 
 ## FASE 5 — NVIDIA NIM — **base pronta via `OpenAICompatibleProvider`, falta validar e expor na UI**
 

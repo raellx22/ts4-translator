@@ -87,3 +87,66 @@ WinUI 3/Windows App SDK não roda corretamente se executado diretamente sem essa
 falha silenciosamente, sem sequer criar uma janela). Para distribuição real, o caminho é o MSIX (ver
 seção anterior) com um certificado de publicação de verdade — isso ainda não foi resolvido para release
 (ver `docs/ROADMAP.md` Fase 14).
+
+## ⚠️ A identidade `TS4Translator.ArgosDev` instalada hoje **não** vem do `Package.appxmanifest` deste repo
+
+Descoberto em 2026-08-30. O pacote realmente registrado nesta máquina é:
+
+```
+Name            : TS4Translator.ArgosDev
+PackageFullName : TS4Translator.ArgosDev_1.0.6.0_x64__xpm2g6md2ezh4
+InstallLocation : src\TS4Translator.App\bin\x64\Release\net10.0-windows10.0.26100.0\win-x64
+```
+
+Ou seja: é um **registro solto** (`Add-AppxPackage -Register AppxManifest.xml`) apontando direto para a
+pasta de saída do build Release — não um MSIX instalado. E o `AppxManifest.xml` gerado nessa pasta tem
+`Identity Name="TS4Translator.ArgosDev"`, enquanto o `src/TS4Translator.App/Package.appxmanifest` deste
+repo tem `Name="60A02515-8E6A-4123-8A54-E9CB7C1B7A72"`. A string `ArgosDev` **não existe em lugar nenhum
+do repositório** — o manifesto gerado foi editado à mão depois do build, e essa edição não está versionada.
+
+**Consequência prática:** qualquer `dotnet build -c Release` regenera `AppxManifest.xml` a partir do
+`Package.appxmanifest` versionado e **apaga a identidade `ArgosDev`**, deixando o registro instalado
+apontando para uma pasta cujo manifesto não bate mais com ele. Antes de rebuildar em Release, decida:
+
+- **Voltar para o fluxo documentado (MSIX assinado, identidade `60A02515-...`)** — rebuildar, gerar e
+  assinar o MSIX e `Add-AppxPackage`, conforme os passos acima. Note que `ts4dev.pfx` não está mais na
+  raiz do repo (é gitignored); o certificado `CN=TS4Translator` continua em `Cert:\CurrentUser\My`
+  (thumbprint `8228EB96...`, válido até 2027-08-26) e pode ser reexportado.
+- **Adotar `TS4Translator.ArgosDev` de vez** — então mudar o `Identity Name` no `Package.appxmanifest`
+  versionado, para que o rebuild pare de destruir a edição manual.
+
+**Os dados do app não correm risco nessa transição:** o banco vivo está em
+`%LOCALAPPDATA%\TS4Translator\Data\ts4translator.db` (caminho não virtualizado, independente da
+identidade do pacote). Existe também uma cópia antiga e menor dentro de
+`%LOCALAPPDATA%\Packages\TS4Translator.ArgosDev_xpm2g6md2ezh4\LocalCache\Local\` — não é a que o app
+vem usando; confira a data de modificação antes de assumir qual é qual.
+
+## ⚠️ Duas pastas de dados: a cópia em `LocalCache` sombreia `%LOCALAPPDATA%\TS4Translator`
+
+Também descoberto em 2026-08-30, e vale mais atenção do que parece.
+
+`AppDataPaths` resolve tudo a partir de `Environment.GetFolderPath(LocalApplicationData)`. Rodando
+empacotado, o redirecionamento de sistema de arquivos do MSIX **serve a cópia em
+`%LOCALAPPDATA%\Packages\<PackageFamilyName>\LocalCache\Local\TS4Translator\` sempre que ela existir**,
+mesmo que os dados de verdade estejam em `%LOCALAPPDATA%\TS4Translator\`. Era exatamente esse o estado
+da máquina: dados reais em `%LOCALAPPDATA%\TS4Translator\` (banco de 50 MB com o projeto WickedWhims,
+runtime Argos de 377 MB) e uma cópia abandonada de uma instalação MSIX anterior em `LocalCache`
+(banco de 557 KB, Argos parcial de 35 MB). O app empacotado abria a cópia velha e parecia ter perdido
+todos os projetos.
+
+**Como diagnosticar:** rode o app e veja qual `ts4translator.db-wal` aparece — o SQLite cria o `-wal`
+ao lado do banco que ele realmente abriu.
+
+**Resolvido nesta máquina** renomeando a cópia velha para
+`...\LocalCache\Local\TS4Translator.stale-backup` (nada foi apagado). Com ela fora do caminho, o app
+empacotado passa a enxergar `%LOCALAPPDATA%\TS4Translator\` — banco e runtime Argos corretos. Se algum
+dia essa pasta de backup não for mais necessária, ela pode ser apagada.
+
+**Nota relacionada:** rodar `TS4Translator.App.exe` direto da pasta de saída **não funciona** enquanto
+existe um registro de pacote para ela — o processo morre imediatamente com exit code `0xE0434352`
+(exceção .NET não tratada, WinUI sem contexto de pacote). O caminho de execução é sempre via AUMID:
+
+```powershell
+$pkg = Get-AppxPackage -Name "TS4Translator.ArgosDev"
+Start-Process "shell:AppsFolder\$($pkg.PackageFamilyName)!App"
+```

@@ -1,86 +1,71 @@
-# Argos Translate (offline provider) — pesquisa e arquitetura, sem implementação
+# Argos Translate — provider offline implementado
 
-Este documento existe para ser honesto sobre um item do brief (seção 3/4: Argos Translate como
-provider offline/gratuito de primeira classe) que **não foi implementado** nesta fase do projeto, e
-para deixar registrado o suficiente de pesquisa e design para que uma sessão futura não recomece do
-zero. Ver `docs/ROADMAP.md` Fase 0/4 para o contexto de quando essa pesquisa foi feita.
+O Argos é um provider local de primeira classe do TS4 Translator. Ele não exige uma instalação de
+Python do usuário, API key, servidor local ou GPU. A tela Configurações baixa e mantém um runtime
+isolado em `%LOCALAPPDATA%\TS4Translator\Models\Argos`, instala o modelo direto inglês → português do
+Brasil e permite selecionar `Argos Translate (offline)` como provider ativo.
 
-## Por que não foi implementado
+## Componentes e versões fixadas
 
-Empacotar um runtime Python completo (Argos Translate depende de `ctranslate2`, `sentencepiece`,
-`sacremoses`, `stanza`/`spacy` dependendo da direção de tradução, e os próprios modelos `.argosmodel`,
-que somam facilmente algumas centenas de MB por par de idiomas) dentro de um app WinUI 3/MSIX é, em si,
-um projeto de integração de sistemas com escopo comparável ao resto deste app — não uma tarde de
-trabalho. Diferente de escrever `OpenAICompatibleProvider` (que é só um cliente HTTP), aqui há decisões
-reais de empacotamento, distribuição e testes de instalação num ambiente Windows limpo que exigiriam
-verificação prática (instalar em uma máquina sem Python, medir o tamanho final do instalador, testar
-que o `ctranslate2` nativo carrega corretamente dentro do sandbox de um MSIX) que esta sessão não tem
-como fazer de forma confiável. Implementar uma versão que compila mas nunca foi de fato instalada e
-testada seria pior do que não ter a feature — exatamente o tipo de "meio-pronto que parece pronto" que
-o brief pede para evitar (seção 60).
+- Python 3.12.10 embeddable x64, baixado de `python.org` e validado por SHA-256 fixado.
+- Argos Translate 1.11.0 e CTranslate2 4.8.1.
+- Modelo oficial `translate-en_pb-1_9.argosmodel` (`en` → `pb`), validado por SHA-256.
+- Sidecar persistente por stdin/stdout, com mensagens JSONL e correlação por `id`.
 
-## O que já é verdade, hoje, sobre a arquitetura
+Argos 1.11 declara Stanza e spaCy mesmo quando o caminho MiniSBD é escolhido. Instalar o grafo padrão
+traria PyTorch e centenas de megabytes não usados. O instalador do app fixa `ARGOS_CHUNK_TYPE=MINISBD`,
+instala apenas CTranslate2/MiniSBD e suas dependências e fornece um módulo Stanza inerte para satisfazer
+o import obrigatório. O runtime medido ocupa aproximadamente 221 MB e o modelo instalado 83 MB; os
+arquivos compactados baixados somam aproximadamente 79 MB e ficam no cache para reparo.
 
-A boa notícia é que **nenhuma mudança arquitetural é necessária** para adicionar Argos depois — o
-projeto já foi desenhado para isso:
+## Por que um sidecar
 
-- `ITranslationProvider` (`Core/Translation/`) é a única superfície que um provider precisa
-  implementar. `Argos` seria `TS4Translator.Providers.Argos.ArgosTranslateProvider : ITranslationProvider`,
-  igual a `OpenAICompatibleProvider` hoje.
-- `ProviderCapabilities.SupportsLocalExecution: true` e `RequiresApiKey: false` já existem no contrato
-  exatamente para diferenciar um provider local (Argos) de um provider HTTP (OpenAI-compatible).
-- `ITranslationOrchestrator` não sabe nem se importa como um provider traduz um batch — protege
-  tokens, chama `TranslateBatchAsync`, reconcilia por `Id`, restaura, valida. Um provider local que
-  responde na hora (sem round-trip de rede) funciona sem nenhuma mudança no orquestrador.
-- `AppDataPaths.ModelsDirectory` (`Infrastructure/`) já resolve
-  `%LOCALAPPDATA%\TS4Translator\Models` — o lugar óbvio para `.argosmodel` baixados ficarem, fora da
-  pasta de instalação do MSIX (que é somente-leitura depois de instalado).
+O Python fica isolado do processo WinUI. `ArgosRuntimeManager` inicia uma única instância sem janela,
+mantém o modelo carregado entre lotes, força UTF-8 no Windows, captura erros e encerra a árvore do
+processo com o app. `ArgosTranslateProvider` continua obedecendo ao mesmo `ITranslationProvider` dos
+providers HTTP, com `SupportsLocalExecution=true`, `RequiresApiKey=false`, concorrência 1 e batches
+recomendados de 256 itens/64.000 caracteres.
 
-## Duas abordagens candidatas (pesquisadas, nenhuma prototipada)
+## Otimização que fechou o gap
 
-### 1. Sidecar por processo — `argostranslate` via um executável Python separado, comunicação por stdin/stdout ou um socket local
+A API pública do Argos recebe uma string por tradução. Em STBLs, isso produz milhares de chamadas
+CTranslate2 quase vazias. O sidecar fixa a versão 1.11 e reutiliza seu tokenizador, sentencizador e
+decoder, mas agrega as sentenças de até 256 entradas em uma única chamada `translate_batch`. Se a
+estrutura interna esperada não estiver disponível, ele volta para a API pública.
 
-- **Como funcionaria**: o instalador (ou um passo de "baixar Argos" na UI) baixa um Python embarcável
-  (`python-3.x-embed-amd64.zip`, distribuição oficial, ~15-25MB) mais as wheels de `argostranslate` e
-  suas dependências para uma pasta em `AppDataPaths`; `ArgosTranslateProvider` inicia esse Python como
-  processo filho (`Process.Start`) rodando um pequeno script que lê JSON de um batch pela stdin e
-  escreve JSON de resultado pela stdout, ficando vivo entre chamadas (evita o custo de start-up do
-  interpretador a cada batch).
-- **Vantagem**: isola completamente o runtime Python do processo do app — uma falha do lado Python não
-  derruba o WinUI; mais fácil de testar/depurar o lado Python isoladamente com um terminal comum.
-- **Risco**: gerenciar o ciclo de vida do processo filho corretamente dentro de um pacote MSIX
-  (permissões, o processo filho sobrevivendo ao encerramento do app, antivírus/SmartScreen reagindo a
-  um `.exe`/`pythonw.exe` desconhecido rodando de dentro da pasta do app) é a parte que precisaria de
-  teste real em uma máquina limpa antes de confiar nisso.
+Tokens do The Sims são primeiro convertidos em caracteres Unicode privados. Se qualquer placeholder
+for perdido, duplicado ou alterado, o sidecar repete somente essa entrada por uma rota determinística:
+traduz os segmentos de linguagem natural entre tokens e intercala os placeholders originais. O
+`TokenProtector` também cobre tags, quebras reais e escapadas (`\n`/`\r\n`), URLs e handles `@nome`.
 
-### 2. Embutido no processo — `pythonnet` (`ArgosTranslate.PyNet`, mencionado na pesquisa original) hospedando o interpretador Python dentro do próprio processo .NET
+## Validação real em Windows
 
-- **Como funcionaria**: `pythonnet` inicializa um runtime Python embutido no AppDomain do .NET;
-  chamadas a `argostranslate.translate.translate(text, from_code, to_code)` acontecem via interop
-  direto, sem serialização JSON nem IPC.
-- **Vantagem**: sem overhead de IPC, sem gerenciar processo filho separado, latência menor por chamada.
-- **Risco**: acopla o ciclo de vida do interpretador Python ao processo WinUI (uma trava/crash do lado
-  Python pode derrubar o app inteiro); `pythonnet` dentro de um pacote MSIX sandboxed é uma combinação
-  bem menos testada na comunidade do que fora de um pacote — maior risco de superfície desconhecida.
+O host usado não tinha `python`, `py` ou Argos no PATH. O bootstrap embarcável, a instalação enxuta,
+o import de Argos/CTranslate2, a instalação do modelo, o processo persistente e uma tradução foram
+executados com sucesso. O comando de instalação do próprio `ArgosRuntimeManager` também foi exercitado
+de ponta a ponta.
 
-**Nenhuma das duas foi prototipada.** A pesquisa original (arquivada nesta sessão, resumida acima)
-achou que a abordagem 1 (sidecar) é a mais segura para um primeiro protótipo — isola a superfície de
-falha — mas isso não foi validado com código real.
+No `TURBODRIVER_WickedWhims_Tuning.package` real:
 
-## O que uma sessão futura deveria fazer antes de escrever `ArgosTranslateProvider`
+- 6.779 strings inglesas, 440.402 caracteres, cinco STBLs de origem;
+- amostra estável de 500 entradas: 22,74 s, projeção de 308,33 s (5,14 min) para o corpus;
+- 496/500 aprovadas automaticamente, zero ausentes e zero falhas estruturais;
+- quatro revisões eram somente `IdenticalToSource` (nomes próprios/frases que o modelo manteve).
+- execução integral: 268,60 s (4 min 28,6 s), 6.779/6.779 respostas, 6.674 aprovadas e 105 para
+  revisão; os 105 casos eram 102 `IdenticalToSource` e três `LengthDiscrepancy`, sem erro crítico.
 
-1. Prototipar a abordagem 1 (sidecar) num diretório isolado, fora do MSIX, e confirmar: o Python
-   embarcável consegue rodar `argostranslate` sem exigir uma instalação de Visual C++ Redistributable
-   adicional (algumas wheels nativas de `ctranslate2` podem exigir isso); o tamanho total (runtime +
-   pelo menos um par de modelo en↔pt) é aceitável para distribuir.
-2. Só depois disso, integrar dentro do MSIX e testar num Windows limpo (sem Python, sem
-   Redistributables extras) — exatamente o tipo de verificação que DEC-010 já mostrou ser
-   imprescindível para qualquer coisa que dependa de empacotamento.
-3. Implementar `ArgosTranslateProvider` só depois dos dois passos acima terem funcionado de verdade —
-   não antes.
+Os relatórios reproduzíveis são `benchmark-results/argos-wickedwhims-500-final.json` e
+`benchmark-results/argos-wickedwhims-full.json` (diretório ignorado no Git por conter texto de mod de
+terceiros).
 
-## Não fazer
+## Limites conhecidos
 
-Não implementar um `ArgosTranslateProvider` que apenas chama um `Process.Start` sem ter verificado que
-o processo filho de fato existe/funciona em uma máquina limpa, e não declarar essa feature como
-"concluída" em `docs/STATUS.md` até isso ser verdade.
+- Argos é muito rápido e gratuito, mas a naturalidade é inferior aos melhores modelos pagos. A
+  amostra contém escolhas literais e terminologia que merece revisão humana.
+- Nesta versão só existe o par direto `en → pt-BR`; outros pares precisam de UI/manifesto próprios.
+- O sidecar otimizado depende de detalhes internos da versão Argos 1.11, por isso as versões são
+  fixadas e upgrades exigem repetir testes estruturais e de desempenho.
+- O runtime foi validado fora do sandbox e o app x64 Release compila. Ainda é obrigatório validar a
+  instalação/execução a partir do MSIX final em um Windows limpo antes de declarar distribuição pronta.
+- O instalador é sob demanda e requer internet apenas na primeira instalação ou reparo. Depois disso,
+  a tradução é totalmente offline.

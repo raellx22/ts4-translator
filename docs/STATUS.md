@@ -1,6 +1,6 @@
 # Status
 
-Última atualização: 2026-08-28.
+Última atualização: 2026-08-31.
 
 ## Current phase
 
@@ -22,8 +22,12 @@ fora desta sessão de desenvolvimento) e encontrou dois problemas reais:
    em blocos de 100 strings, cada um persistido antes do próximo, com barra de progresso real e botão
    de cancelar (que preserva o que já foi traduzido).
 
-Continua sem confirmação de que o restante do fluxo (qualidade das traduções, formatação) funciona
-corretamente ponta a ponta com esse provider.
+O provider local foi validado de verdade em 2026-08-29 com Bionic/LM Studio e Qwen3.5 4B Q4_K_M numa
+RTX 4060 Ti 8 GB: contexto 8.192, raciocínio desligado, saída estruturada e dois lotes simultâneos.
+No WickedWhims real, 200 strings levaram 118,60 s (projeção ~67 min). Gemini 3.5 Flash-Lite preservou
+estrutura em 200/200 com lote 80 e deixou 2 textos para revisão, mas o free tier observado limita 15 requests/min; ver DEC-024 e
+`docs/LOCAL_MODELS.md`. Estrutura e placeholders foram validados; qualidade linguística ainda precisa
+de avaliação humana.
 
 **Importante:** a configuração de provider do usuário (endpoint, modelo e API key da NVIDIA NIM) foi
 **perdida** num incidente real durante esta sessão — reinstalar o pacote MSIX (`Remove-AppxPackage` +
@@ -116,26 +120,92 @@ por fase.
 
 ## In progress
 
-Nada em edição neste momento — todo trabalho desta sessão foi levado a um estado compilável, testado,
-e verificado rodando o app de verdade antes de parar.
+Avaliação linguística humana do corpus real autorizado. Desempenho, completude e integridade estrutural
+já foram medidos em `docs/LOCAL_MODELS.md`/DEC-024.
 
 ## Blocked
 
 Nada bloqueado por motivo interno ao app. Três itens têm **incerteza de fato pendente de verificação
 externa** (não são bloqueios de código, são coisas que só um teste com infraestrutura real resolve):
 
-1. Confirmação de que a tradução funciona corretamente (não só sem crash) contra um provider real, com
-   texto não-nulo — o usuário vai precisar reconfigurar o provider primeiro (config perdida, ver
-   DEC-020) antes de retomar esse teste; qualquer novo problema encontrado entra numa correção pontual
-   como a DEC-017/DEC-018.
+1. Confirmação humana da qualidade linguística. O corpus autorizado do WickedWhims já foi testado com
+   Qwen e Gemini; falta referência pt-BR para medir terminologia e naturalidade em escala.
 2. `DeepLProvider` nunca rodou contra a API real — só testado com HTTP falso (DEC-019). Precisa de uma
    API key para validar de fato. `GoogleGeminiProvider` **já foi validado contra a API real** com a
    chave do usuário (DEC-021, depois de corrigir o model id padrão que estava obsoleto) — "Testar
    conexão" retornou "Conexão OK." de verdade.
 3. Formato exato do prompt esperado por `nvidia/riva-translate-4b-instruct-v2` — duas fontes
    discordam (playground ao vivo vs. NGC catalog). Precisa de uma API key NVIDIA real para testar.
-4. Nenhuma receita testada de empacotar Argos Translate sem exigir Python do usuário — ver
-   `docs/ARGOS.md` para o design e os passos que faltam.
+4. Argos funciona sem Python global por download sob demanda e já passou no benchmark real. Falta a
+   certificação final do fluxo dentro do MSIX instalado em um Windows limpo — ver `docs/ARGOS.md`.
+
+## Entregue em 2026-08-31 (DEC-033) — ida e volta por arquivo de texto para um chat de IA
+
+Exportar as strings selecionadas como `.txt`, colar num chat (ChatGPT, Claude, Gemini, Grok), e reimportar
+a resposta como tradução. Formato `TS4TRANSLATOR-BUNDLE v1`: um bloco de três linhas por string
+(`#id` / `EN:` / `PT:`), escapes `
+` para manter cada campo numa linha só, instruções para a IA dentro
+do próprio arquivo, e marcadores de início/fim.
+
+A leitura tolera code fence, prosa em volta e rótulos em negrito, e recupera a associação por id, pelo
+texto original (quando a IA apaga os ids) ou pela ordem (só se as quantidades baterem, sempre com aviso).
+Se nada disso servir, recusa em vez de gravar. Tradução sem id ou com marcador perdido entra como
+"Revisar". Seleção por checkbox; sem marcação, exporta o que o filtro mostra.
+
+## Entregue em 2026-08-30, quarta rodada (DEC-030) — roteamento em três faixas, escopo por projeto e UI
+
+- **Roteamento por histórico**: uma string que já voltou marcada para revisão sobe de faixa sozinha,
+  o que resolve o caso "Shallow → Rasgo" que nenhuma pontuação por forma enxerga.
+- **Até três motores em paralelo** (`IMultiEngineTranslator`), com faixas configuráveis por limiar.
+- **Pipeline por projeto**: cada projeto pode ter seus próprios motores ou herdar o global.
+- **Estimativa antes de traduzir**: strings, caracteres e requisições por motor.
+- **Editor performático**: busca com debounce e teto de 500 linhas renderizadas (o projeto de 149 mil
+  travava a janela a cada tecla).
+- **Catálogo de modelos** vindo da própria API (OpenAI, compatíveis, Gemini, Anthropic) e **cota** da
+  DeepL. Gemini/OpenAI/Anthropic não expõem cota a uma API key comum.
+- **UI**: barra lateral compacta, padding reduzido, Configurações em cards, Home com progresso real.
+
+## Entregue em 2026-08-30, terceira rodada (DEC-029) — motores separados por perfil
+
+- **Perfis nomeados**: cada motor (Argos, Google Tradutor, LLM local, OpenAI, Anthropic, Gemini, DeepL) é
+  um perfil salvo com endpoint, modelo e chave próprios. Vários do mesmo tipo podem coexistir.
+- **Papéis por etapa**: tradução principal, refino linha a linha e revisão em lote podem usar motores
+  diferentes. Papel vazio herda o anterior.
+- **Dois motores em paralelo**: o lote é dividido por `StringDifficulty` e as duas faixas rodam ao mesmo
+  tempo. No WickedWhims real, o limiar padrão 35 manda 79,3% para o motor barato e 20,7% para o bom.
+- **Providers novos**: Anthropic (Messages API) e OpenAI como tipo próprio.
+- **Configurações reorganizada** em três blocos: motores, quem faz o quê, dois motores.
+
+## Entregue em 2026-08-30, segunda rodada (DEC-028)
+
+- **Modo de revisão por IA**: seletor "Refinar traduções com" no Editor, botão de refino por linha
+  (ícone e menu de contexto), e botão "Refinar as que precisam de revisão" para o lote inteiro. O motor
+  de refino é independente do que fez a tradução em massa.
+- **Cópia do texto original**: a coluna original agora é selecionável, com botão de copiar e menu de
+  contexto ("Copiar texto original" / "Copiar tradução"). Antes era um `TextBlock` puro, impossível de
+  copiar para colar num tradutor online.
+- **Exportação por mod**: um `.package` por arquivo importado, com seletor de pasta quando há mais de um.
+  Importar 12 mods gerava um único arquivo, o que parecia que só o primeiro tinha sido traduzido.
+- **Provider Google Tradutor** (`ProviderKind.GoogleTranslate`): grátis, sem API key, endpoint ou modelo.
+  Ele simplesmente não existia — o que havia era o Google Gemini, que é API paga de LLM.
+- Dois bugs de UX achados rodando o app: `LostFocus` marcava a string como editada manualmente sem
+  nenhuma alteração; refino idêntico era reportado como falha. Ver DEC-028.
+
+## Corrigido em 2026-08-30 (DEC-027) — três bugs reais encontrados no teste do usuário com o WickedWhims
+
+- **Exportação quebrada** (`ArgumentException: An item with the same key has already been added`):
+  as 110 STBLs do mod colapsavam nas mesmas 5 chaves pt-BR e `ToDictionary` lançava em vez de mesclar.
+  Agora `StringTableExportPlan` (Core) filtra pelo locale de origem e mescla. Verificado contra o banco
+  real do usuário: 110 tabelas → 5, 149.138 strings → 6.779, package escrito e round-trip válido.
+- **Importação ingeria todos os idiomas do mod**: 149.138 strings em vez de 6.779 (22 cópias do mesmo
+  mod, uma por locale embarcado). Agora só as STBLs do locale de origem são importadas.
+- **Reimportar criava um projeto novo em vez de reusar o existente**: `RunImportAsync` sempre chamava
+  `CreateAsync`, então a feature de mod-update da seção 25 nunca rodou de verdade no app — sempre
+  reportava 100% "nova" e órfanava as traduções anteriores. Agora `FindBySourceFilesAsync` reencontra
+  o projeto e `RemoveStringsOutsideAsync` descarta tabelas que saíram da importação.
+
+**Um projeto importado antes desta correção se conserta reimportando o mesmo `.package`** — as
+traduções válidas são preservadas e as linhas dos outros idiomas são descartadas.
 
 ## Known issues
 
@@ -160,7 +230,8 @@ externa** (não são bloqueios de código, são coisas que só um teste com infr
 
 ## Tests currently failing
 
-Nenhum. 202 testes automatizados passando (`dotnet test TS4Translator.sln --filter "FullyQualifiedName!~TS4Translator.App"`).
+Nenhum. A suíte tem 376 testes e todos passam nesta máquina (incluindo os quatro DPAPI, que só falham
+em sandbox sem perfil Windows carregado).
 `TS4Translator.Core.Tests` finalmente tem testes reais (`StringSimilarityTests`) — estava vazio (só
 scaffolding do template) desde o início do projeto.
 `TS4Translator.App` não tem testes automatizados de UI (não há framework de UI test configurado), mas
@@ -193,3 +264,69 @@ Ver "Próximas tarefas concretas" no final de `docs/ROADMAP.md`. Em ordem:
 4. UI de "sugestões de fuzzy match" navegável no Editor (a API já existe com limiar mais permissivo,
    0.85 — DEC-016 — só falta a tela).
 5. `TranslationJob`/progresso para lotes grandes, `SettingsPage` em abas reais (seção 41).
+
+## Limitação conhecida do provider Google Tradutor (medida ao vivo, 2026-08-30)
+
+O endpoint público `translate_a/single` é grátis e não pede API key, mas **estrangula por IP de forma
+agressiva**. Medições reais desta máquina:
+
+- Sem cabeçalho `User-Agent`: **429 na primeira requisição**, sempre. Com qualquer `User-Agent` não
+  vazio: 200 OK. O provider envia `TS4Translator/1.0`; remover esse cabeçalho quebra o provider por
+  completo (há teste de regressão).
+- Seis requisições em paralelo: quatro voltaram 429.
+- Depois de algumas dezenas de requisições de teste, o IP ficou recusando **até requisições sequenciais**
+  por vários minutos.
+
+Por isso o provider é sequencial, com 250 ms entre requisições, e uma falha por item não derruba o lote
+(o item fica sem resultado e continua pendente). Se **todas** falharem, a exceção diz explicitamente que é
+limite por IP.
+
+**Uso realista:** ótimo como motor de **refino** (uma string por vez, ou algumas dezenas marcadas para
+revisão) e para mods pequenos. Para traduzir 6.779 strings de uma vez, não — use Argos (offline, sem
+limite) ou uma API paga. Uma verificação ao vivo do lote completo de 6 strings ficou pendente porque os
+testes desta sessão esgotaram a cota do IP; o caminho unitário está coberto por teste.
+
+## Divisão por dificuldade no corpus real (medida em 2026-08-30)
+
+`TURBODRIVER_WickedWhims_Tuning.package`, 6.779 strings inglesas. Pontuação: mediana 9, p75 27, p90 50,
+máximo 94.
+
+| Limiar | Fáceis (motor barato) | Difíceis (motor bom) | % difíceis |
+|-------:|----------------------:|---------------------:|-----------:|
+| 20 | 4.468 | 2.311 | 34,1% |
+| 25 | 4.995 | 1.784 | 26,3% |
+| 30 | 5.167 | 1.612 | 23,8% |
+| **35 (padrão)** | **5.379** | **1.400** | **20,7%** |
+| 40 | 5.629 | 1.150 | 17,0% |
+| 50 | 6.037 | 742 | 10,9% |
+| 60 | 6.418 | 361 | 5,3% |
+
+Serve para dimensionar custo: no limiar padrão, uma API paga é acionada para cerca de um quinto do mod.
+
+## Rodada de 2026-08-31 — diagnóstico do ida-e-volta com chat, memória e glossário
+
+Partiu de um caso real: mil strings do `[Kritical]DreamsOfSurrender_1_35` foram para um chat, voltaram
+e o app reportou avisos suficientes para o usuário achar que o arquivo tinha vindo quebrado. **Não tinha.**
+A análise do arquivo e do banco mostrou 1000/1000 casadas por id, zero marcador perdido, `\n` e `\`
+preservados em 100% dos registros, e 1000 linhas gravadas como `ManuallyEdited` com `IssueSummary` vazio.
+O problema era o app contando a história errada. Ver DEC-034 e DEC-035.
+
+O que mudou, com os números medidos no corpus real:
+
+| Item | Antes | Depois |
+|---|---|---|
+| Avisos numa importação limpa de 1000 strings | 134 (128 falsos) | **1 aviso** — a única falha real |
+| Ver a lista completa de problemas | impossível (3 + "(+184)") | painel agrupado + relatório em `.txt` |
+| Alcance máximo de uma exportação | 500 (o que a lista renderiza) | o mod inteiro, em partes numeradas |
+| Identificadores de tuning mandados ao tradutor | 866 de 4.133 (21%) | 0 por padrão |
+| Traduções manuais/do chat na memória | 2 de 1.275 | todas as que passam pela política |
+| Glossário chegando ao chat | não ia | vai, e a volta é conferida |
+| Termos no glossário | 0 | editáveis, por projeto ou globais, criáveis do editor |
+
+Estado da memória no banco do usuário nesta data: 8.427 entradas (8.330 `argos-en-pb-1.9`,
+97 `google-gemini`), todas en-US→pt-BR. O backfill da tela de Memória traz mais 1.208 traduções feitas
+à mão que estavam trancadas dentro dos projetos.
+
+**Ainda não feito:** o filtro de `StringTranslatability` vale para a exportação ao chat, mas não para
+"Traduzir pendentes" — os mesmos identificadores continuam indo para os motores pagos numa rodada em
+massa. É a mesma economia (21% do mod), num caminho diferente.
