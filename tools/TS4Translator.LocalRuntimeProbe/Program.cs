@@ -1,86 +1,53 @@
-using System.Diagnostics;
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using TS4Translator.Core.Glossary;
 using TS4Translator.Core.Translation;
 using TS4Translator.Providers.LocalModel;
-using TS4Translator.Translation;
 
 Console.OutputEncoding = Encoding.UTF8;
 
-// Smoke test do provider real, pelo mesmo caminho que o app usa: LocalModelOptions -> LocalModelRuntime
-// -> LocalModelProvider, com o TokenProtector e o TranslationValidator de producao pontuando o resultado.
+// A variante C provou que o problema e o modelo nao saber o que o jargao significa. Mas instrucao de
+// estilo e o lugar errado para isso: o lugar certo e o glossario. Este teste confirma pelo caminho real.
 
 var options = new LocalModelOptions(@"C:\Users\israe\AppData\Local\TS4Translator\Models\Local");
 await using var runtime = new LocalModelRuntime(options);
-
-var status = runtime.GetStatus(null);
-Console.WriteLine($"backend : {status.Backend}");
-Console.WriteLine($"pronto  : {status.IsReady}");
-Console.WriteLine($"mensagem: {status.Message}");
-Console.WriteLine();
-
-if (!status.IsReady)
-{
-    return;
-}
-
-var provider = new LocalModelProvider(runtime, null);
-Console.WriteLine($"capacidades: glossario={provider.Capabilities.SupportsGlossary} prompt={provider.Capabilities.SupportsCustomPrompt} lote={provider.Capabilities.RecommendedBatchItems}");
-Console.WriteLine();
-
-var corpusPath = Path.Combine(AppContext.BaseDirectory, "corpus-200.json");
-var corpus = JsonSerializer.Deserialize<List<CorpusItem>>(File.ReadAllText(corpusPath),
+var corpus = JsonSerializer.Deserialize<List<Item>>(
+    File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "corpus-200.json")),
     new JsonSerializerOptions { PropertyNameCaseInsensitive = true })!;
 
-var protector = new TokenProtector();
-var validator = new TranslationValidator();
 var en = CultureInfo.GetCultureInfo("en-US");
 var pt = CultureInfo.GetCultureInfo("pt-BR");
+var provider = new LocalModelProvider(runtime, null);
+var requests = corpus.Select(item => new TranslationRequestItem(item.Id, item.Text)).ToList();
 
-// Um termo de glossario que o Argos nao teria como honrar - e o ponto inteiro deste provider.
-var glossary = new List<GlossaryTerm> { new(1, "Sims", "Sims", NeverTranslate: true, CaseSensitive: false, Notes: null, ProjectId: null) };
+GlossaryTerm Term(int id, string o, string t) => new(id, o, t, false, false, null, null);
 
-var protectedByIndex = corpus.Select(item => protector.Protect(item.Text)).ToList();
-var requests = corpus.Select((item, index) => new TranslationRequestItem(item.Id, protectedByIndex[index].ProtectedText)).ToList();
-
-var watch = Stopwatch.StartNew();
-var results = await provider.TranslateBatchAsync(requests, en, pt, glossary, "Use tratamento informal.");
-watch.Stop();
-
-var byId = results.ToDictionary(result => result.Id, result => result.TranslatedProtectedText);
-var approved = 0;
-var issuesByCode = new Dictionary<string, int>();
-
-for (var index = 0; index < corpus.Count; index++)
+// Exatamente o que o usuario digitaria na tela de Glossario.
+var glossary = new List<GlossaryTerm>
 {
-    var answer = byId.GetValueOrDefault(corpus[index].Id) ?? "";
-    var restore = protector.Restore(answer, protectedByIndex[index]);
-    var issues = validator.Validate(corpus[index].Text, restore.RestoredText, restore);
-    if (issues.Count == 0) { approved++; continue; }
-    foreach (var issue in issues)
-    {
-        var key = issue.Code.ToString();
-        issuesByCode[key] = issuesByCode.GetValueOrDefault(key) + 1;
-    }
+    Term(1, "Broadcaster", "Emissor"),
+    Term(2, "Make", "Fazer"),
+    Term(3, "recipe description", "descrição da receita"),
+};
+
+async Task<Dictionary<string, string>> Run(string label, IReadOnlyList<GlossaryTerm>? terms)
+{
+    var results = await provider.TranslateBatchAsync(requests, en, pt, terms, null);
+    var map = results.ToDictionary(r => r.Id, r => r.TranslatedProtectedText ?? "");
+    var unchanged = corpus.Count(i => string.Equals(map[i.Id].Trim(), i.Text.Trim(), StringComparison.OrdinalIgnoreCase));
+    Console.WriteLine($"{label,-30} iguais ao original: {unchanged}/{corpus.Count}");
+    return map;
 }
 
-Console.WriteLine($"200 strings em {watch.Elapsed.TotalSeconds:F2}s · {approved}/200 aprovadas");
-foreach (var (code, count) in issuesByCode.OrderByDescending(p => p.Value)) Console.WriteLine($"  {code}: {count}");
-Console.WriteLine();
-for (var index = 0; index < 6; index++)
+var a = await Run("A · sem glossario", null);
+var d = await Run("D · com 3 termos", glossary);
+
+Console.WriteLine("\n=== A  ->  D ===");
+foreach (var item in corpus.Take(20))
 {
-    var answer = byId.GetValueOrDefault(corpus[index].Id) ?? "";
-    var restored = protector.Restore(answer, protectedByIndex[index]).RestoredText;
-    Console.WriteLine($"EN: {Flatten(corpus[index].Text)}");
-    Console.WriteLine($"PT: {Flatten(restored)}");
+    if (string.Equals(a[item.Id].Trim(), d[item.Id].Trim(), StringComparison.Ordinal)) continue;
+    Console.WriteLine($"EN: {item.Text}\n  antes : {a[item.Id]}\n  depois: {d[item.Id]}");
 }
 
-static string Flatten(string text)
-{
-    var single = text.ReplaceLineEndings(" \n ").Trim();
-    return single.Length <= 105 ? single : single[..105] + "…";
-}
-
-internal sealed record CorpusItem(string Id, string Text);
+internal sealed record Item(string Id, string Text);

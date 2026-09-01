@@ -264,3 +264,57 @@ A tela de Configurações mostra o estado e **avisa em amarelo quando cairia par
 o usuário final não tem e escolhe a CPU em silêncio.
 
 Falta o download automático desses dois pacotes; hoje é cópia manual para a pasta.
+
+## Por que 28 rótulos curtos voltaram iguais ao original (2026-08-31)
+
+Traduzindo `Skarrd_Perverted_Expansion_Pack_CustomDrinksAddon` (161 strings) com o motor local: 133
+traduzidas, **28 devolvidas idênticas**. Todas curtas e aparentemente triviais — `Make Penis Enlarger`,
+`Panty Heat Broadcaster`, `insta-drunk recipe description`, `Tickled Balls`.
+
+O que chamava atenção é que strings **mais difíceis** passaram: `From consuming a "Panty Heat" beverage.`
+virou `Ao consumir a bebida "Panty Heat".`, e `Penis Enlarger` sozinho virou `Aumentador de Pênis`. Mas
+`Make Penis Enlarger` não.
+
+### A causa
+
+Não é limitação de tamanho nem de dificuldade. **O modelo não reconhece o jargão como texto traduzível.**
+Sem uma frase em volta, `Panty Heat Broadcaster` parece um identificador — um nome de coisa — e um motor
+de tradução, corretamente, não traduz nomes. `Penis Enlarger` tem significado ordinário em inglês e passa;
+`Make Penis Enlarger` vira, para o modelo, "o comando Make aplicado a um produto chamado Penis Enlarger",
+e ele devolve o rótulo inteiro.
+
+Medido com as mesmas 28 strings, variando só o que o prompt diz:
+
+| Variante | Voltaram iguais |
+|---|---:|
+| A · como está hoje | 27/28 |
+| B · instrução genérica "traduza rótulos curtos mesmo com duas ou três palavras" | 25/28 |
+| **D · três termos no glossário** | **5/28** |
+
+Os três termos são o que qualquer usuário digitaria na tela de Glossário:
+
+```
+Broadcaster         -> Emissor
+Make                -> Fazer
+recipe description  -> descrição da receita
+```
+
+**Instrução genérica não resolve (27→25). Dizer o que o jargão significa resolve (27→5).**
+
+Um efeito de segunda ordem vale registrar: `Sensuously Soaked` e `Tickled Balls` passaram a ser
+traduzidos também, e não têm relação nenhuma com os três termos. O bloco de glossário no prompt sinaliza
+que, neste domínio, esse tipo de palavra **é** para traduzir — o modelo sai do modo "isto é um nome
+próprio" por inteiro.
+
+### O que isso quer dizer para o app
+
+É exatamente o caso de uso do glossário, e é a diferença estrutural entre este motor e o Argos, que
+declara `SupportsGlossary: false` e não teria como ser consertado assim.
+
+As 5 que sobram são palavras inventadas sem significado ordinário (`Instarection`, `Insta-Drunk`) —
+deixá-las como estão é defensável.
+
+**Ideia em aberto:** `Broadcaster` é vocabulário padrão de tuning do Sims 4, não uma invenção deste mod.
+Um glossário inicial com o jargão comum da plataforma, embutido no app, resolveria isso para todo mundo
+sem exigir que cada usuário descubra o problema sozinho. Precisa de curadoria, então fica registrado como
+proposta e não como feito.
