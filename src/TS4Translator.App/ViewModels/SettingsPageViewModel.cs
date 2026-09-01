@@ -481,11 +481,18 @@ public sealed partial class SettingsPageViewModel(
                 return;
             }
 
-            // Zero-configuration engines supply their own values instead of reading fields the UI hides
-            // (and which could therefore hold something stale).
+            // Zero-configuration engines supply their own endpoint instead of reading a field the UI
+            // hides (and which could therefore hold something stale).
             var (defaultEndpoint, defaultModel) = ProviderKindLabels.Defaults(kind);
             var endpoint = isZeroConfiguration ? defaultEndpoint : EditorEndpoint;
-            var model = isZeroConfiguration ? defaultModel : (modelRequired ? EditorModel : null);
+
+            // The model is decided by whether the engine *has* one, never by whether it needs an
+            // endpoint. Conflating the two silently discarded the .gguf path a user picked for
+            // ProviderKind.LocalModel - the engine hides its endpoint and key, but that path is the only
+            // setting it has, so blanking it kept the app on whatever model it happened to find first.
+            var model = ProviderKindLabels.HasModel(kind)
+                ? (string.IsNullOrWhiteSpace(EditorModel) ? null : EditorModel.Trim())
+                : defaultModel;
 
             // Empty means "leave the stored key alone" - the box is never pre-filled with the real
             // secret, so an empty box after opening the editor just means the user didn't retype it.
@@ -501,6 +508,17 @@ public sealed partial class SettingsPageViewModel(
             OnPropertyChanged(nameof(EditorCanListModels));
 
             await ReloadAsync();
+
+            // Says which file the engine will actually load. A local model saved with no path falls back
+            // to whatever .gguf the app can find, and the whole point of picking one is knowing that the
+            // pick took - silence here is how a model swap looked done and was not.
+            if (kind == ProviderKind.LocalModel)
+            {
+                RefreshLocalModelStatus();
+                StatusText = $"Motor salvo. {LocalModelStatusText}";
+                return;
+            }
+
             StatusText = "Motor salvo.";
         }
         catch (Exception exception)
