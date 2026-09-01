@@ -16,9 +16,11 @@ public static class ProviderKindLabels
     public const string DeepL = "DeepL";
     public const string GoogleTranslate = "Google Tradutor (grátis, sem configuração)";
     public const string Argos = "Argos Translate (offline, sem configuração)";
+    public const string LocalModel = "Modelo local do app (offline, roda dentro do TS4 Translator)";
 
     public static IReadOnlyList<string> All { get; } =
     [
+        LocalModel,
         Argos,
         GoogleTranslate,
         OpenAICompatible,
@@ -30,9 +32,13 @@ public static class ProviderKindLabels
 
     /// <summary>Engines that work with no endpoint, model, or API key at all.</summary>
     public static bool NeedsNoConfiguration(ProviderKind kind) =>
-        kind is ProviderKind.Argos or ProviderKind.GoogleTranslate;
+        kind is ProviderKind.Argos or ProviderKind.GoogleTranslate or ProviderKind.LocalModel;
 
-    /// <summary>Engines with no model id concept.</summary>
+    /// <summary>
+    /// Engines with no model id concept. <see cref="ProviderKind.LocalModel"/> has one, and it is a path
+    /// to a .gguf on disk rather than a remote id - optional, because the app falls back to whatever
+    /// model it manages itself.
+    /// </summary>
     public static bool HasModel(ProviderKind kind) =>
         kind is not (ProviderKind.DeepL or ProviderKind.Argos or ProviderKind.GoogleTranslate);
 
@@ -42,6 +48,7 @@ public static class ProviderKindLabels
     /// <summary>Short line explaining what this engine is for, shown under the picker while editing a profile.</summary>
     public static string Describe(ProviderKind kind) => kind switch
     {
+        ProviderKind.LocalModel => "O motor offline do próprio app: um modelo .gguf carregado dentro do TS4 Translator, sem LM Studio nem servidor nenhum. Diferente do Argos, ele entende glossário e as instruções do projeto. Precisa de GPU para ficar rápido - deixe o campo do modelo vazio para usar o que estiver na pasta do app.",
         ProviderKind.Argos => "Roda 100% na sua máquina, sem internet e sem custo. Rápido e literal - ótimo para tradução em massa, fraco em frases longas e com gênero.",
         ProviderKind.GoogleTranslate => "Endpoint público e gratuito, sem nenhuma configuração. Melhor que o Argos em naturalidade, mas o Google limita requisições por IP - use para refino, não para milhares de strings.",
         ProviderKind.OpenAICompatible => "Qualquer servidor local ou remoto que fale o protocolo do OpenAI. É aqui que entra a sua LLM local (LM Studio, Bionic) com o modelo que você escolher.",
@@ -56,6 +63,7 @@ public static class ProviderKindLabels
     public static (string Endpoint, string Model) Defaults(ProviderKind kind) => kind switch
     {
         ProviderKind.Argos => ("local://argos", "translate-en_pb-1_9"),
+        ProviderKind.LocalModel => ("local://gguf", string.Empty),
         ProviderKind.GoogleTranslate => ("https://translate.googleapis.com", string.Empty),
         ProviderKind.OpenAI => ("https://api.openai.com/v1", "gpt-4.1-mini"),
         ProviderKind.Anthropic => ("https://api.anthropic.com", "claude-sonnet-5"),
@@ -70,6 +78,7 @@ public static class ProviderKindLabels
         ProviderKind.GoogleGemini => GoogleGemini,
         ProviderKind.GoogleTranslate => GoogleTranslate,
         ProviderKind.Argos => Argos,
+        ProviderKind.LocalModel => LocalModel,
         ProviderKind.OpenAI => OpenAI,
         ProviderKind.Anthropic => Anthropic,
         _ => OpenAICompatible,
@@ -81,6 +90,7 @@ public static class ProviderKindLabels
         GoogleGemini => ProviderKind.GoogleGemini,
         GoogleTranslate => ProviderKind.GoogleTranslate,
         Argos => ProviderKind.Argos,
+        LocalModel => ProviderKind.LocalModel,
         OpenAI => ProviderKind.OpenAI,
         Anthropic => ProviderKind.Anthropic,
         _ => ProviderKind.OpenAICompatible,

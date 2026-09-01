@@ -1,6 +1,7 @@
 using TS4Translator.Core.Providers;
 using TS4Translator.Core.Translation;
 using TS4Translator.Providers.Argos;
+using TS4Translator.Providers.LocalModel;
 
 namespace TS4Translator.Providers.Tests;
 
@@ -68,7 +69,26 @@ public class ProfileProviderFactoryTests
     private static (ProfileProviderFactory Factory, FakeProfileService Profiles) Create()
     {
         var profiles = new FakeProfileService();
-        return (new ProfileProviderFactory(profiles, new HttpClient(), new FakeArgosRuntimeManager()), profiles);
+        return (new ProfileProviderFactory(profiles, new HttpClient(), new FakeArgosRuntimeManager(), new FakeLocalModelRuntime()), profiles);
+    }
+
+    /// <summary>The factory only wires the runtime in; nothing here should load a model.</summary>
+    private sealed class FakeLocalModelRuntime : ILocalModelRuntime
+    {
+        public LocalModelStatus GetStatus(string? modelPath = null) =>
+            new(LocalModelBackend.None, null, 0, "teste");
+
+        public Task<IReadOnlyList<TranslationResultItem>> TranslateAsync(
+            IReadOnlyList<TranslationRequestItem> items,
+            System.Globalization.CultureInfo sourceLocale,
+            System.Globalization.CultureInfo targetLocale,
+            IReadOnlyList<TS4Translator.Core.Glossary.GlossaryTerm>? glossaryTerms,
+            string? customInstructions,
+            string? modelPath,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 
     [Fact]
@@ -87,6 +107,7 @@ public class ProfileProviderFactoryTests
     [InlineData(ProviderKind.Argos, "argos")]
     [InlineData(ProviderKind.GoogleTranslate, "google-translate")]
     [InlineData(ProviderKind.DeepL, "deepl")]
+    [InlineData(ProviderKind.LocalModel, "local-gguf")]
     public async Task CreateForProfileAsync_BuildsTheRightEngineForEveryKind(ProviderKind kind, string expectedNamePrefix)
     {
         var (factory, profiles) = Create();

@@ -1,11 +1,15 @@
 using System.Collections.ObjectModel;
+using System.Diagnostics;
 using System.Globalization;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using Microsoft.UI.Xaml.Controls;
+using TS4Translator.App.Services;
 using TS4Translator.Core.Projects;
 using TS4Translator.Core.Providers;
 using TS4Translator.Core.Translation;
 using TS4Translator.Providers.Argos;
+using TS4Translator.Providers.LocalModel;
 
 namespace TS4Translator.App.ViewModels;
 
@@ -26,7 +30,10 @@ public sealed partial class SettingsPageViewModel(
     IProviderDirectory providerDirectory,
     ITranslationProviderFactory providerFactory,
     IProjectService projectService,
-    IArgosRuntimeManager argosRuntimeManager) : ObservableObject
+    IArgosRuntimeManager argosRuntimeManager,
+    IPathPickerService pathPicker,
+    ILocalModelRuntime localModelRuntime,
+    LocalModelOptions localModelOptions) : ObservableObject
 {
     /// <summary>Shown wherever a role may legitimately be left unset.</summary>
     public const string NoProfileOption = "(nenhum)";
@@ -96,6 +103,8 @@ public sealed partial class SettingsPageViewModel(
     public bool EditorShowsApiKey => !ProviderKindLabels.NeedsNoConfiguration(EditorKind);
 
     public bool EditorShowsArgosPanel => EditorKind == ProviderKind.Argos;
+
+    public bool EditorShowsLocalModelPanel => EditorKind == ProviderKind.LocalModel;
 
     /// <summary>Whether this engine can be asked which models the key may use. Only meaningful while the profile already exists.</summary>
     public bool EditorCanListModels => _editingProfileId is not null && providerDirectory.SupportsModelListing(EditorKind);
@@ -187,6 +196,12 @@ public sealed partial class SettingsPageViewModel(
         OnPropertyChanged(nameof(EditorShowsModel));
         OnPropertyChanged(nameof(EditorShowsApiKey));
         OnPropertyChanged(nameof(EditorShowsArgosPanel));
+        OnPropertyChanged(nameof(EditorShowsLocalModelPanel));
+
+        if (ProviderKindLabels.ToKind(value) == ProviderKind.LocalModel)
+        {
+            RefreshLocalModelStatus();
+        }
         OnPropertyChanged(nameof(EditorCanListModels));
 
         var kind = ProviderKindLabels.ToKind(value);
@@ -669,5 +684,59 @@ public sealed partial class SettingsPageViewModel(
     {
         var status = await argosRuntimeManager.GetStatusAsync();
         ArgosStatusText = status.Message;
+    }
+
+    // ---- Motor local do app (llama.cpp in-process) ----
+
+    [ObservableProperty]
+    public partial string LocalModelStatusText { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Red when the engine would silently run on the CPU. That fallback is the single most misleading
+    /// state this feature has: everything works, and it is several times slower than it should be.
+    /// </summary>
+    [ObservableProperty]
+    public partial InfoBarSeverity LocalModelSeverity { get; set; } = InfoBarSeverity.Informational;
+
+    [RelayCommand]
+    private void RefreshLocalModelStatus()
+    {
+        var status = localModelRuntime.GetStatus(string.IsNullOrWhiteSpace(EditorModel) ? null : EditorModel);
+
+        LocalModelStatusText = status.Message;
+        LocalModelSeverity = status switch
+        {
+            { IsReady: false } => InfoBarSeverity.Error,
+            { IsCpuOnly: true } => InfoBarSeverity.Warning,
+            _ => InfoBarSeverity.Success,
+        };
+    }
+
+    [RelayCommand]
+    private async Task PickLocalModelAsync()
+    {
+        var path = await pathPicker.PickModelFileAsync();
+        if (path is null)
+        {
+            return;
+        }
+
+        EditorModel = path;
+        RefreshLocalModelStatus();
+    }
+
+    /// <summary>Opens the folder the engine reads from, so the user can drop a model or the runtime in.</summary>
+    [RelayCommand]
+    private void OpenLocalModelFolder()
+    {
+        try
+        {
+            Directory.CreateDirectory(localModelOptions.ModelsDirectory);
+            Process.Start(new ProcessStartInfo(localModelOptions.RootDirectory) { UseShellExecute = true });
+        }
+        catch (Exception exception)
+        {
+            LocalModelStatusText = $"Não foi possível abrir a pasta ({exception.GetType().Name}): {exception.Message}";
+        }
     }
 }

@@ -16,4 +16,11 @@ public enum ProviderKind
     OpenAI,
     /// <summary>Anthropic's Messages API.</summary>
     Anthropic,
+
+    /// <summary>
+    /// A GGUF model running inside this app's own process through llama.cpp — offline, no server to
+    /// install or configure, and unlike <see cref="Argos"/> it honours the glossary and the project's
+    /// instructions.
+    /// </summary>
+    LocalModel,
 }

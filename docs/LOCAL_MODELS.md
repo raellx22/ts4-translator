@@ -211,9 +211,56 @@ final não vai ter.
 
 ### Como reproduzir
 
-O corpus é derivado do banco local (ignorado pelo git). Gere `corpus-200.json` com id/text das strings do
-projeto desejado, coloque ao lado do executável e rode:
+`tools/TS4Translator.LocalRuntimeProbe` virou o smoke test do provider real (`LocalModelProvider` +
+`LocalModelRuntime`, pontuado pelo `TokenProtector` e pelo `TranslationValidator` de produção). O corpus é
+derivado do banco local e ignorado pelo git: gere `corpus-200.json` com id/text das strings do projeto
+desejado, coloque ao lado do executável e rode:
 
 ```powershell
 dotnet run -c Release --project tools\TS4Translator.LocalRuntimeProbe
 ```
+
+## O provider `LocalModel` — medição do caminho real (2026-08-31)
+
+Não é mais protótipo: `ProviderKind.LocalModel` roda pelo mesmo caminho do app (perfil → factory →
+orquestrador), com **glossário e instruções do projeto no prompt**, e a pontuação vem do
+`TranslationValidator` de produção.
+
+| | Tempo | Aprovadas | Marcadores perdidos |
+|---|---:|---:|---:|
+| Protótipo (prompt mínimo, sem glossário) | 13,92 s | 177/200 | 14 |
+| **Provider real (glossário + instruções + retry)** | **18,21 s** | **184/200** | **7** |
+| LM Studio, item a item, 8 filas | 34,24 s | 195/200 | — |
+
+Das 16 que sobram, **12 são `IdenticalToSource`** em rótulos como "Desire Switch", que o
+`StringTranslatability` classifica como `Term` — ou seja, observação e não falha. Descontando essas, o
+provider fica equivalente ao LM Studio em qualidade, em metade do tempo, com glossário funcionando.
+
+O que fechou o gap de 177 para 184:
+
+1. **Regra de marcador explicando o que ele é.** "Um marcador entre duas frases significa que as frases
+   continuam separadas" — a falha dominante era o modelo fundir "Check to enable…\nUncheck to disable…"
+   numa frase só.
+2. **Retry por item.** Quem perdeu marcador vai de novo, sozinho, com a regra reforçada. Só é aceito se
+   a segunda tentativa realmente consertou; senão a primeira resposta fica e o validador marca para
+   revisão como sempre. Localmente isso custa segundos.
+3. **`ProtectedMarkers.Normalize`.** O modelo às vezes escreve quatro underscores onde o marcador pede
+   dois, e a restauração colava um `__` na palavra seguinte — "…reiniciar o jogo.\n\n__Salve e reinicie".
+   Nada sinalizava, porque os dois marcadores estavam lá. O recorte tem lookahead porque `\n\n` protege
+   como **dois marcadores adjacentes**, que legitimamente têm quatro underscores no meio; a primeira
+   versão sem lookahead fundia os dois e quebrava uma tradução correta. O teste pegou.
+
+### Instalação (hoje, manual)
+
+O runtime nativo e o modelo ficam em `%LOCALAPPDATA%\TS4Translator\Models\Local\`:
+
+```
+llama\cuda12\   as 8 DLLs (llama, ggml*, cudart64_12, cublas64_12, cublasLt64_12)  ~1,3 GB
+models\         qualquer .gguf                                                     ~1,8 GB
+```
+
+A tela de Configurações mostra o estado e **avisa em amarelo quando cairia para CPU** — o
+`LocalModelRuntime` nunca deixa isso para a autodetecção do LLamaSharp, que procura um CUDA Toolkit que
+o usuário final não tem e escolhe a CPU em silêncio.
+
+Falta o download automático desses dois pacotes; hoje é cópia manual para a pasta.

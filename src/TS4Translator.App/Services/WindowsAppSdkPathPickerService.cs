@@ -68,6 +68,21 @@ public sealed class WindowsAppSdkPathPickerService : IPathPickerService
         return file?.Path;
     }
 
+    public async Task<string?> PickModelFileAsync()
+    {
+        var picker = new FileOpenPicker
+        {
+            CommitButtonText = "Usar este modelo",
+            SuggestedStartLocation = PickerLocationId.ComputerFolder,
+            ViewMode = PickerViewMode.List,
+        };
+        picker.FileTypeFilter.Add(".gguf");
+
+        WinRT.Interop.InitializeWithWindow.Initialize(picker, App.WindowHandle);
+        var file = await picker.PickSingleFileAsync();
+        return file?.Path;
+    }
+
     public async Task<IReadOnlyList<string>> PickOpenTextFilesAsync()
     {
         var picker = new FileOpenPicker

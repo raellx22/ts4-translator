@@ -121,6 +121,22 @@
                                     Content="Instalar ou reparar Argos" />
                             </StackPanel>
 
+                            <!--  Motor local do app. O InfoBar tem severidade porque o estado perigoso
+                                  não é "não funciona", é "funciona na CPU e ninguém percebe".  -->
+                            <StackPanel Spacing="6" Visibility="{x:Bind BoolToVisibility(ViewModel.EditorShowsLocalModelPanel), Mode=OneWay}">
+                                <InfoBar
+                                    IsClosable="False"
+                                    IsOpen="True"
+                                    Message="{x:Bind ViewModel.LocalModelStatusText, Mode=OneWay}"
+                                    Severity="{x:Bind ViewModel.LocalModelSeverity, Mode=OneWay}"
+                                    Title="Motor local" />
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <Button Command="{x:Bind ViewModel.PickLocalModelCommand}" Content="Escolher modelo .gguf..." />
+                                    <Button Command="{x:Bind ViewModel.OpenLocalModelFolderCommand}" Content="Abrir pasta do motor" />
+                                    <Button Command="{x:Bind ViewModel.RefreshLocalModelStatusCommand}" Content="Verificar de novo" />
+                                </StackPanel>
+                            </StackPanel>
+
                             <StackPanel Orientation="Horizontal" Spacing="8">
                                 <Button
                                     Command="{x:Bind ViewModel.SaveProfileCommand}"

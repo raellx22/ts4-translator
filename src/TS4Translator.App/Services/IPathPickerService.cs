@@ -17,6 +17,9 @@ public interface IPathPickerService
     /// <summary>Picks where to write the plain-text bundle the user will paste into a chat model.</summary>
     Task<string?> PickSaveTextFileAsync(string suggestedFileName);
 
+    /// <summary>Picks a .gguf model file for the app-managed local engine.</summary>
+    Task<string?> PickModelFileAsync();
+
     /// <summary>Picks the text file holding a chat model's reply.</summary>
     Task<string?> PickOpenTextFileAsync();
 

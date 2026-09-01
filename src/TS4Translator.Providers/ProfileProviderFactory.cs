@@ -5,6 +5,7 @@ using TS4Translator.Providers.Argos;
 using TS4Translator.Providers.DeepL;
 using TS4Translator.Providers.GoogleGemini;
 using TS4Translator.Providers.GoogleTranslate;
+using TS4Translator.Providers.LocalModel;
 using TS4Translator.Providers.OpenAICompatible;
 
 namespace TS4Translator.Providers;
@@ -16,7 +17,8 @@ namespace TS4Translator.Providers;
 public sealed class ProfileProviderFactory(
     IProviderProfileService profileService,
     HttpClient httpClient,
-    IArgosRuntimeManager argosRuntimeManager) : ITranslationProviderFactory
+    IArgosRuntimeManager argosRuntimeManager,
+    ILocalModelRuntime localModelRuntime) : ITranslationProviderFactory
 {
     public async Task<ITranslationProvider?> CreateForProfileAsync(int profileId, CancellationToken cancellationToken = default)
     {
@@ -64,6 +66,9 @@ public sealed class ProfileProviderFactory(
             httpClient, new AnthropicProviderOptions(profile.Endpoint, profile.Model ?? "claude-sonnet-5", apiKey, profile.Temperature)),
 
         ProviderKind.Argos => new ArgosTranslateProvider(argosRuntimeManager),
+
+        // Model is a path to a .gguf here rather than a remote model id - the file is the model.
+        ProviderKind.LocalModel => new LocalModelProvider(localModelRuntime, profile.Model),
 
         ProviderKind.GoogleTranslate => new GoogleTranslateProvider(httpClient),
 
