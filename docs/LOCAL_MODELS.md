@@ -318,3 +318,58 @@ deixá-las como estão é defensável.
 Um glossário inicial com o jargão comum da plataforma, embutido no app, resolveria isso para todo mundo
 sem exigir que cada usuário descubra o problema sozinho. Precisa de curadoria, então fica registrado como
 proposta e não como feito.
+
+## Glossário embutido: o que a mineração dos 17 mods realmente mostrou
+
+Proposta anterior: embutir no app um glossário do jargão comum do Sims 4, já que `Broadcaster` parecia
+vocabulário de plataforma. `tools/GlossaryMiner` foi escrito para escolher os termos com base nos 169.390
+strings já traduzidos, e **o resultado contradisse a proposta**.
+
+### O sinal certo é retenção, não taxa de falha
+
+A primeira métrica creditava a falha de cada string a todas as suas palavras, e devolveu vocabulário
+comum — `Sex`, `Bed`, `Bar`, `Strip`. A string falhava por outro motivo e a palavra só estava junto.
+
+A métrica que funciona é **retenção**: com que frequência a palavra inglesa continua, literal, na
+tradução. Baixa = o motor traduz e não precisa de glossário. Alta = ou é jargão que ele não sabe
+traduzir, ou nome próprio que ele acerta em manter. Com um segundo filtro necessário: uma palavra que
+aparece em traduções cujo original **não** a continha é portuguesa também (`normal`, `menu`, `total`,
+`bar`), e retenção alta nessas não significa nada.
+
+### O jargão do Sims não é o problema
+
+| Termo | Usos | Mods | Voltaram iguais |
+|---|---:|---:|---:|
+| Whim | 1.274 | 9 | **0** |
+| Trait | 1.433 | 11 | 1 |
+| Moodlet | 183 | 4 | 1 |
+| Buff | 567 | 12 | 3 |
+| Aspiration | 155 | 6 | 1 |
+| Interaction | 2.236 | 11 | 22 |
+| **Broadcaster** | **27** | **2** | **8** |
+
+Os termos realmente transversais **quase nunca falham** — o motor já os traduz. E `Broadcaster`, que
+originou a ideia, aparece em **2 mods e 27 vezes**: não é vocabulário de plataforma, é vocabulário do
+Skarrd. Eu tinha generalizado a partir de um caso.
+
+Um glossário embutido com esse jargão gastaria contexto em todo lote para resolver um problema que não
+existe.
+
+### O que a mineração aponta como valioso é outra coisa
+
+Nomes próprios que o motor **corrompe** ao traduzir:
+
+| Termo | Usos | Mods | Retenção | Evidência |
+|---|---:|---:|---:|---|
+| Sims / Sim | 49.120 | 17 | 99% / 96% | 270 linhas voltaram iguais; e `Premade NPC Sims` virou `os símbolos pré-fabricados` |
+| WickedWhims | 1.175 | 4 | 64% | 36% das vezes o nome do mod foi traduzido |
+| Simoleons | 158 | 5 | 98% | moeda do jogo |
+| Sexpertise | 209 | 6 | 99% | perícia do WickedWhims |
+| WooHoo | 139 | 4 | 98% | termo do jogo |
+
+Ou seja: o glossário embutido que vale a pena é **pequeno e só de "nunca traduzir"** — meia dúzia de
+nomes próprios —, não um dicionário de jargão. Custa quase nada de contexto e evita uma falha concreta e
+feia.
+
+O jargão específico de mod (`Broadcaster`, `Insta-Drunk`, `Panty Heat`) pertence ao **glossário por
+projeto**, que é exatamente para isso.
