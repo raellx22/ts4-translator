@@ -286,7 +286,10 @@ public sealed class LocalModelRuntime(LocalModelOptions options) : ILocalModelRu
         // Spelled out because the measured failure was precisely this: the model merged
         // "Check to enable…\nUncheck to disable…" into one sentence and dropped the marker standing in
         // for the line break, which loses a real newline in the game's string table.
-        prompt.AppendLine("A placeholder is the literal text __TS4_TOKEN_ followed by four digits and two underscores. Each one stands for game code or a line break that was removed before you saw it.");
+        // Described, never spelled out. Giving the marker's literal prefix in the prompt is what a 7B
+        // model copied as its entire answer for strings it would not translate — "Ghost Unemotional"
+        // came back as the bare stem, and the validator of the day let it through as a good translation.
+        prompt.AppendLine("Some texts contain placeholders: two underscores, the letters TS4 and TOKEN joined by an underscore, another underscore, a four-digit number, then two underscores. Each one stands for game code or a line break that was removed before you saw it.");
         prompt.AppendLine("Copy every placeholder from the text into your translation exactly as-is, the same number of times, in a position that is natural for the target language. A placeholder between two sentences means those sentences stay separate.");
         prompt.AppendLine("NEVER write a placeholder that was not already in the text. If the text contains none, your translation must contain none: a number, a name or a code-like word is ordinary text.");
 

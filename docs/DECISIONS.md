@@ -1633,3 +1633,49 @@ the placeholder format but does not correspond to any protected token"*. Essa fr
 pipeline. Para quem olha a fila de revisão ela nomeia um marcador interno que a pessoa nunca viu, não
 diz que a IA o inventou e não sugere que o certo é reverter. `ValidationIssueText` traduz cada código
 para o que aconteceu e o que fazer.
+
+## DEC-037 — Uma traducao que era so o prefixo do marcador passou como boa
+
+**Contexto.** Traduzindo o `ParanormalAddon` com o Hy-MT2 **7B**, nove strings voltaram assim:
+
+```
+Ghost Unemotional          ->  __TS4_TOKEN_
+Penis Growing Even Larger! ->  __TS4_TOKEN_
+I just have deviouse...    ->  * __TS4_TOKEN_I just have deviouse intentions.
+```
+
+E o projeto reportou **"73 traduzidas, 0 para revisar"**. Nada apontava para elas.
+
+**Por que passou.** O original dessas linhas nao tem marcador nenhum, entao nada era esperado. E os dois
+padroes do `TokenProtector` nao pegavam o fragmento:
+
+- `StrictPlaceholderPattern` (`__TS4_TOKEN_\d{4}__`) exige quatro digitos e o fechamento.
+- `LoosePlaceholderPattern` (`__TS4_TOKEN_[^_]*?__`) exige um `__` de fechamento, que `__TS4_TOKEN_`
+  sozinho nao tem.
+
+Zero marcadores esperados, zero encontrados: limpo. **O pior tipo de falha** - a traducao vai para o
+package, quebra a string no jogo, e a unica forma de achar e ler o mod linha por linha.
+
+**A causa foi minha, de novo, e pela segunda vez pelo mesmo motivo.** A DEC-036 tirou do prompt o
+exemplo completo `__TS4_TOKEN_0001__` porque o modelo o copiava. O que ficou no lugar foi *"A placeholder
+is the literal text `__TS4_TOKEN_` followed by four digits"* - ou seja, eu removi os digitos e deixei o
+prefixo, e o modelo passou a copiar o prefixo. O formato agora e **descrito e nunca soletrado**, nem em
+parte: "dois underscores, as letras TS4 e TOKEN unidas por underscore, outro underscore, um numero de
+quatro digitos, dois underscores". O teste passou a proibir a substring `__TS4_TOKEN` no prompt inteiro,
+e nao so o token completo.
+
+**Deteccao, que e o que importa.** Sem exemplo no prompt algum modelo ainda vai inventar lixo, entao a
+regra virou: **todo fragmento com forma de marcador que nao seja exatamente um marcador esperado e
+defeito critico**. Implementado tirando primeiro os marcadores bem formados do texto e olhando o que
+sobra - porque qualquer padrao guloso o suficiente para pegar um marcador quebrado engole tambem o par
+legitimo que `\n\n` produz (`__TS4_TOKEN_0001____TS4_TOKEN_0002__`) e uma letra colada depois de um
+marcador valido. Os dois testes que garantem isso falharam na primeira versao e por isso existem.
+
+Fica valendo para **todos** os motores, porque mora no `TokenProtector`.
+
+**E o que ja estava gravado?** Uma traducao e validada uma vez, quando chega, e nunca mais. Um defeito
+que o validador da epoca nao via fica invisivel para sempre. O editor ganhou **"Conferir marcadores"**:
+revarre as linhas ja traduzidas, marca para revisao o que tem marcador quebrado e leva o filtro para
+"Revisar" - de onde "Marcar tudo do filtro" + "Reverter para o original" resolve em dois cliques.
+Deliberadamente so integridade de marcador: rerodar o validador inteiro num projeto pronto soterraria as
+linhas corrompidas debaixo de milhares de avisos "voltou igual ao original" em rotulos que estao certos.

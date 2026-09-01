@@ -67,4 +67,24 @@ public sealed class ProtectedMarkersTests
     [Fact]
     public void Survived_NullTranslation_IsFalse()
         => Assert.False(ProtectedMarkers.Survived("A__TS4_TOKEN_0001__B", null));
+
+    /// <summary>
+    /// The failure that shipped: a 7B model answered a token-free string with the bare marker stem.
+    /// Counting only well-formed markers made both sides zero, so nothing looked wrong and the retry
+    /// never fired.
+    /// </summary>
+    [Theory]
+    [InlineData("__TS4_TOKEN_")]
+    [InlineData("__TS4_TOKEN")]
+    [InlineData("__ts4_token_0001__")]
+    [InlineData("* __TS4_TOKEN_I just have devious intentions.")]
+    public void Survived_MangledMarkerInTheAnswer_IsFalse(string translation)
+        => Assert.False(ProtectedMarkers.Survived("Ghost Unemotional", translation));
+
+    /// <summary>Adjacent markers stay legitimate — a double line break protects as two.</summary>
+    [Fact]
+    public void Survived_TwoAdjacentMarkers_IsTrue()
+        => Assert.True(ProtectedMarkers.Survived(
+            "A__TS4_TOKEN_0001____TS4_TOKEN_0002__B",
+            "X__TS4_TOKEN_0001____TS4_TOKEN_0002__Y"));
 }

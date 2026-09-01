@@ -10,6 +10,7 @@ using TS4Translator.Core.Interchange;
 using TS4Translator.Core.Memory;
 using TS4Translator.Core.Packages;
 using TS4Translator.Core.Projects;
+using TS4Translator.Core.Tokens;
 using TS4Translator.Core.Providers;
 using TS4Translator.Core.Translation;
 using TS4Translator.Core.Validation;
@@ -26,6 +27,7 @@ public sealed partial class EditorPageViewModel(
     IProjectService projectService,
     IProjectStringService projectStringService,
     ITranslationOrchestrator translationOrchestrator,
+    ITokenProtector tokenProtector,
     IMultiEngineTranslator multiEngineTranslator,
     ITranslationProviderFactory providerFactory,
     IProviderProfileService profileService,
@@ -904,6 +906,73 @@ public sealed partial class EditorPageViewModel(
         {
             StatusText = $"Falha ao aceitar ({exception.GetType().Name}): {exception.Message}";
             return 0;
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    /// <summary>
+    /// Re-checks every stored translation for marker damage and flags what is broken.
+    /// </summary>
+    /// <remarks>
+    /// A translation is validated once, when it arrives, and never looked at again — so a defect the
+    /// validator could not see at the time stays invisible forever, stored as finished work. That is
+    /// exactly what happened when a model answered token-free strings with the bare marker stem
+    /// <c>__TS4_TOKEN_</c>: nine strings in one mod were saved as "Traduzido" with the project reporting
+    /// nothing to review, and the only way to find them was reading the whole mod.
+    ///
+    /// Deliberately narrow: only marker integrity, never the softer checks. Re-running the full
+    /// validator over a finished project would bury the corrupted lines under thousands of "voltou igual
+    /// ao original" notes on labels that are fine.
+    /// </remarks>
+    [RelayCommand]
+    private async Task CheckMarkersAsync()
+    {
+        if (_project is null)
+        {
+            return;
+        }
+
+        try
+        {
+            IsBusy = true;
+            StatusText = "Conferindo os marcadores de todas as linhas traduzidas...";
+
+            var damaged = _allRows
+                .Where(row => !string.IsNullOrEmpty(row.Translation))
+                .Select(row => (Row: row, Restore: tokenProtector.Restore(row.Translation!, tokenProtector.Protect(row.Original))))
+                .Where(pair => pair.Restore.Issues.Any(issue => issue.IsCritical))
+                .ToList();
+
+            if (damaged.Count == 0)
+            {
+                StatusText = $"Nenhum marcador quebrado em {_allRows.Count(row => !string.IsNullOrEmpty(row.Translation)):N0} linha(s) traduzida(s).";
+                return;
+            }
+
+            await projectStringService.UpdateTranslationsAsync(
+                [.. damaged.Select(pair => new ProjectStringTranslationUpdate(
+                    pair.Row.Id,
+                    pair.Row.Translation!,
+                    ProjectStringStatus.NeedsReview,
+                    ValidationIssueText.Describe(ValidationIssueCode.ModifiedPlaceholder)))]);
+
+            foreach (var (row, _) in damaged)
+            {
+                row.ApplyResult(row.Translation, ProjectStringStatus.NeedsReview,
+                    ValidationIssueText.Describe(ValidationIssueCode.ModifiedPlaceholder));
+            }
+
+            SelectedFilter = "Revisar";
+            ApplyFilter();
+            StatusText = $"{damaged.Count:N0} linha(s) com marcador quebrado foram marcadas para revisão. "
+                + "Marque tudo do filtro e use \"Reverter para o original\" - o texto quebrado fica no histórico.";
+        }
+        catch (Exception exception)
+        {
+            StatusText = $"Falha ao conferir marcadores ({exception.GetType().Name}): {exception.Message}";
         }
         finally
         {

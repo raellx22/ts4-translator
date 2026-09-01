@@ -11,6 +11,10 @@ public static partial class ProtectedMarkers
     [GeneratedRegex(@"__TS4_TOKEN_\d{4}__", RegexOptions.CultureInvariant)]
     private static partial Regex ExactPattern { get; }
 
+    /// <summary>The whole string is one well-formed marker and nothing else.</summary>
+    [GeneratedRegex(@"^__TS4_TOKEN_\d{4}__$", RegexOptions.CultureInvariant)]
+    private static partial Regex WholeMarkerPattern { get; }
+
     /// <summary>
     /// A marker followed by more underscores than it should have — but only when what follows is not
     /// another marker.
@@ -45,13 +49,32 @@ public static partial class ProtectedMarkers
     public static List<string> Extract(string? text) =>
         string.IsNullOrEmpty(text) ? [] : [.. ExactPattern.Matches(text).Select(match => match.Value)];
 
+    /// <summary>Anything that begins like a marker, however badly it ends.</summary>
+    [GeneratedRegex(@"__TS4_TOKEN[A-Za-z0-9_]*", RegexOptions.IgnoreCase)]
+    private static partial Regex MarkerLikePattern { get; }
+
     /// <summary>
     /// Whether the markers of <paramref name="source"/> all came back, the same number of times, with
-    /// none invented.
+    /// none invented and none mangled.
     /// </summary>
+    /// <remarks>
+    /// Counting only well-formed markers was not enough. A 7B model answered "Ghost Unemotional" with
+    /// the bare stem <c>__TS4_TOKEN_</c>: no well-formed marker on either side, so the counts matched,
+    /// the retry never fired, and the string shipped. Anything marker-shaped that is not exactly an
+    /// expected marker now counts as not having survived.
+    /// </remarks>
     public static bool Survived(string source, string? translation)
     {
         if (translation is null)
+        {
+            return false;
+        }
+
+        // Take the well-formed markers out first, then see what marker-shaped debris is left. Scanning
+        // without removing them cannot work: adjacent markers, and a marker followed by an ordinary
+        // letter, both get swallowed into one "malformed" blob by any pattern greedy enough to catch a
+        // mangled marker.
+        if (MarkerLikePattern.IsMatch(ExactPattern.Replace(translation, " ")))
         {
             return false;
         }

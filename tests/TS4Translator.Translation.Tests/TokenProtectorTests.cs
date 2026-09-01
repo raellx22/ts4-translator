@@ -235,4 +235,64 @@ public class TokenProtectorTests
         Assert.True(result.IsValid);
         Assert.Empty(result.Issues);
     }
+
+    // ---------- fragmentos de marcador ----------
+
+    /// <summary>
+    /// The failure this whole family of checks exists for. A 7B model answered "Ghost Unemotional" with
+    /// the bare stem, the source had no tokens so nothing was expected, the stem matched no pattern, and
+    /// the string was stored as a finished translation with the project reporting zero to review. On a
+    /// mod with thousands of strings the only way to find it is reading every line.
+    /// </summary>
+    [Theory]
+    [InlineData("__TS4_TOKEN_")]
+    [InlineData("__TS4_TOKEN")]
+    [InlineData("__TS4_TOKEN_01__")]
+    [InlineData("__ts4_token_0001__")]
+    [InlineData("* __TS4_TOKEN_I just have devious intentions.")]
+    [InlineData("Fantasma __TS4_TOKEN_abc__ sem emoção")]
+    public void Restore_SourceWithoutTokens_MarkerFragmentInTheAnswerIsRejected(string translated)
+    {
+        var protectedString = _sut.Protect("Ghost Unemotional");
+
+        var result = _sut.Restore(translated, protectedString);
+
+        Assert.False(result.IsValid);
+        Assert.Contains(result.Issues, issue => issue.Kind == TokenValidationIssueKind.ModifiedPlaceholder);
+    }
+
+    /// <summary>Extra underscores are not "close enough" — the junk would ship into the game file.</summary>
+    [Fact]
+    public void Restore_MarkerWithTrailingJunk_IsRejectedEvenThoughItContainsAValidOne()
+    {
+        var protectedString = _sut.Protect("Hi {0.SimFirstName}!");
+
+        var result = _sut.Restore("Oi __TS4_TOKEN_0001____!", protectedString);
+
+        Assert.False(result.IsValid);
+    }
+
+    /// <summary>Two markers in a row are legitimate: "\n\n" protects as two.</summary>
+    [Fact]
+    public void Restore_TwoAdjacentMarkers_AreAccepted()
+    {
+        var protectedString = _sut.Protect("Primeira.\n\nSegunda.");
+
+        var result = _sut.Restore("First.__TS4_TOKEN_0001____TS4_TOKEN_0002__Second.", protectedString);
+
+        Assert.True(result.IsValid);
+        Assert.Empty(result.Issues);
+    }
+
+    /// <summary>A clean translation of a token-carrying source must stay clean.</summary>
+    [Fact]
+    public void Restore_WellFormedMarkers_AreStillAccepted()
+    {
+        var protectedString = _sut.Protect("Hi {0.SimFirstName}, meet {1.SimFirstName}.");
+
+        var result = _sut.Restore("Oi __TS4_TOKEN_0001__, conheça __TS4_TOKEN_0002__.", protectedString);
+
+        Assert.True(result.IsValid);
+        Assert.Empty(result.Issues);
+    }
 }

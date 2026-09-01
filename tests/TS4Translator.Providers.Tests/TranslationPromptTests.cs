@@ -76,14 +76,29 @@ public sealed class TranslationPromptTests
         Assert.DoesNotMatch(CopyableToken, body);
     }
 
-    /// <summary>The rule still has to be stated, or the tokens that are real stop being copied through.</summary>
+    /// <summary>
+    /// Not even the marker's prefix may appear. A 7B model copied the bare stem as its entire answer for
+    /// strings it would not translate, and the stem was in the prompt because the earlier fix only
+    /// removed the four digits.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(ProviderNames))]
+    public async Task SystemPrompt_NeverContainsTheMarkerStemEither(string providerName)
+    {
+        var body = await RequestBodyOf(providerName);
+
+        Assert.DoesNotContain("__TS4_TOKEN", body, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>The rule still has to be stated, or the placeholders that are real stop being copied through.</summary>
     [Theory]
     [MemberData(nameof(ProviderNames))]
     public async Task SystemPrompt_StillExplainsWhatAPlaceholderIs(string providerName)
     {
         var body = await RequestBodyOf(providerName);
 
-        Assert.Contains("__TS4_TOKEN_", body, StringComparison.Ordinal);
+        Assert.Contains("placeholder", body, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("four-digit number", body, StringComparison.Ordinal);
     }
 
     /// <summary>Describing the shape is not enough on its own; inventing one has to be forbidden outright.</summary>

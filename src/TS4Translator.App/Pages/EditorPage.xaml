@@ -124,6 +124,10 @@
                     Content="Aceitar como estão"
                     IsEnabled="{x:Bind ViewModel.HasSelection, Mode=OneWay}"
                     ToolTipService.ToolTip="Mantém a tradução das linhas marcadas e tira a marcação de revisão." />
+                <Button
+                    Command="{x:Bind ViewModel.CheckMarkersCommand}"
+                    Content="Conferir marcadores"
+                    ToolTipService.ToolTip="Revarre todas as linhas já traduzidas atrás de marcadores quebrados e marca para revisão o que achar. Uma tradução só é validada quando chega - isto reconfere o que já está gravado." />
             </StackPanel>
         </StackPanel>
 

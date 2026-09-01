@@ -16,8 +16,25 @@ public sealed partial class TokenProtector : ITokenProtector
     [GeneratedRegex(@"__TS4_TOKEN_\d{4}__")]
     private static partial Regex StrictPlaceholderPattern();
 
-    [GeneratedRegex(@"__TS4_TOKEN_[^_]*?__")]
-    private static partial Regex LoosePlaceholderPattern();
+    /// <summary>A well-formed placeholder carrying extra underscores that are not another placeholder.</summary>
+    [GeneratedRegex(@"(__TS4_TOKEN_\d{4})__(_+)(?!_*TS4_TOKEN_)")]
+    private static partial Regex GluedUnderscorePattern();
+
+    /// <summary>
+    /// Anything that starts like a placeholder, however it ends.
+    /// </summary>
+    /// <remarks>
+    /// The previous pattern (<c>__TS4_TOKEN_[^_]*?__</c>) required a closing <c>__</c>, so a model that
+    /// emitted the bare stem <c>__TS4_TOKEN_</c> as its whole answer matched nothing and the translation
+    /// was accepted as good. That happened on a real run: "Ghost Unemotional" and "Penis Growing Even
+    /// Larger!" were both stored as <c>__TS4_TOKEN_</c>, status "Traduzido", with the project reporting
+    /// zero strings to review — the worst possible failure, because nothing points at it and the only way
+    /// to find it is reading a whole mod line by line.
+    ///
+    /// Case-insensitive because a model that mangles the marker also mangles its casing.
+    /// </remarks>
+    [GeneratedRegex(@"__TS4_TOKEN[A-Za-z0-9_]*", RegexOptions.IgnoreCase)]
+    private static partial Regex PlaceholderLikePattern();
 
     public ProtectedString Protect(string source)
     {
@@ -75,13 +92,24 @@ public sealed partial class TokenProtector : ITokenProtector
             }
         }
 
-        foreach (Match looseMatch in LoosePlaceholderPattern().Matches(translatedText))
+        // Take the well-formed placeholders out first, then see what placeholder-shaped debris is left.
+        // Scanning without removing them cannot work: "\n\n" protects as two adjacent placeholders, and
+        // any pattern greedy enough to catch a mangled one swallows that legitimate pair as a single
+        // malformed blob. Removing first makes adjacency a non-issue.
+        var residue = StrictPlaceholderPattern().Replace(translatedText, " ");
+        foreach (Match leftover in PlaceholderLikePattern().Matches(residue))
         {
-            if (!StrictPlaceholderPattern().IsMatch(looseMatch.Value))
-            {
-                issues.Add(new TokenValidationIssue(TokenValidationIssueKind.ModifiedPlaceholder, null,
-                    $"Text '{looseMatch.Value}' resembles a token placeholder but does not match the expected format and could not be reconciled."));
-            }
+            issues.Add(new TokenValidationIssue(TokenValidationIssueKind.ModifiedPlaceholder, null,
+                $"Text '{leftover.Value}' resembles a token placeholder but does not match the expected format and could not be reconciled."));
+        }
+
+        // A placeholder wearing extra underscores restores into the game string with the junk still
+        // attached ("...jogo.\n\n__Salve"). The lookahead is what keeps the legitimate adjacent pair,
+        // whose four underscores in the middle look identical to the defect.
+        foreach (Match glued in GluedUnderscorePattern().Matches(translatedText))
+        {
+            issues.Add(new TokenValidationIssue(TokenValidationIssueKind.ModifiedPlaceholder, null,
+                $"Placeholder '{glued.Groups[1].Value}__' is followed by stray underscores that would end up in the game text."));
         }
 
         var restored = translatedText;
