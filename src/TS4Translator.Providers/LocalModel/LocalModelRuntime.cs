@@ -32,11 +32,14 @@ namespace TS4Translator.Providers.LocalModel;
 /// </remarks>
 public sealed class LocalModelRuntime(LocalModelOptions options) : ILocalModelRuntime
 {
-    /// <summary>The Hunyuan chat template, taken from the GGUF's own <c>tokenizer.chat_template</c>.</summary>
-    private const string BeginSentence = "<｜hy_begin▁of▁sentence｜>";
-    private const string AfterSystem = "<｜hy_place▁holder▁no▁3｜>";
-    private const string UserTurn = "<｜hy_User｜>";
-    private const string AssistantTurn = "<｜hy_Assistant｜>";
+    /// <summary>
+    /// Stand-in for the item's text while the model's own chat template is rendered, so the result can be
+    /// cut into "everything before the string" and "everything after it".
+    /// </summary>
+    /// <remarks>
+    /// A short token that no game string contains and that survives tokenisation intact.
+    /// </remarks>
+    private const string ItemMarker = "TS4ITEM";
 
     /// <summary>
     /// How many sequences share a decode step. Eight is what the measurements settled on; more
@@ -102,12 +105,9 @@ public sealed class LocalModelRuntime(LocalModelOptions options) : ILocalModelRu
         try
         {
             var weights = await LoadAsync(modelPath, cancellationToken).ConfigureAwait(false);
-            var prefix = BeginSentence
-                + BuildSystemPrompt(sourceLocale, targetLocale, glossaryTerms, customInstructions)
-                + AfterSystem
-                + UserTurn;
+            var shape = RenderTemplate(weights, BuildSystemPrompt(sourceLocale, targetLocale, glossaryTerms, customInstructions));
 
-            var answers = await GenerateAsync(weights, prefix, items, cancellationToken).ConfigureAwait(false);
+            var answers = await GenerateAsync(weights, shape, items, cancellationToken).ConfigureAwait(false);
 
             // A string whose protected markers did not all survive gets one more attempt on its own,
             // with the rule restated. Locally this costs a second, and it is the failure the prototype
@@ -119,12 +119,10 @@ public sealed class LocalModelRuntime(LocalModelOptions options) : ILocalModelRu
 
             if (retries.Count > 0)
             {
-                var strictPrefix = BeginSentence
-                    + BuildSystemPrompt(sourceLocale, targetLocale, glossaryTerms, customInstructions, insist: true)
-                    + AfterSystem
-                    + UserTurn;
+                var strict = RenderTemplate(weights,
+                    BuildSystemPrompt(sourceLocale, targetLocale, glossaryTerms, customInstructions, insist: true));
 
-                var second = await GenerateAsync(weights, strictPrefix, [.. retries.Select(pair => pair.Item)], cancellationToken).ConfigureAwait(false);
+                var second = await GenerateAsync(weights, strict, [.. retries.Select(pair => pair.Item)], cancellationToken).ConfigureAwait(false);
 
                 for (var index = 0; index < retries.Count; index++)
                 {
@@ -145,6 +143,40 @@ public sealed class LocalModelRuntime(LocalModelOptions options) : ILocalModelRu
         }
     }
 
+    /// <param name="Prefix">Everything the model sees before the string being translated — shared by the whole batch.</param>
+    /// <param name="Suffix">What closes the user's turn and opens the assistant's.</param>
+    private readonly record struct PromptShape(string Prefix, string Suffix);
+
+    /// <summary>
+    /// Renders the model's <b>own</b> chat template and cuts it where the item's text goes.
+    /// </summary>
+    /// <remarks>
+    /// This is what makes the engine model-agnostic. The first version hardcoded Hunyuan's markers
+    /// (<c>&lt;｜hy_User｜&gt;</c> and friends), which meant swapping in a Gemma or a Qwen produced fluent
+    /// nonsense: the weights loaded fine and the prompt was framed in a syntax that model had never seen.
+    /// <see cref="LLamaTemplate"/> reads <c>tokenizer.chat_template</c> out of the GGUF, so whatever the
+    /// user points at is addressed the way it was trained.
+    ///
+    /// Rendering with a placeholder and splitting on it, rather than formatting by hand, keeps the prefix
+    /// byte-identical to what the template would produce — which is what lets the whole batch fork from
+    /// one cached prefill.
+    /// </remarks>
+    private static PromptShape RenderTemplate(LLamaWeights weights, string systemPrompt)
+    {
+        var template = new LLamaTemplate(weights, true);
+        template.Add("system", systemPrompt);
+        template.Add("user", ItemMarker);
+
+        var rendered = Encoding.UTF8.GetString(template.Apply());
+        var index = rendered.IndexOf(ItemMarker, StringComparison.Ordinal);
+
+        // A template that swallows the marker would leave no place to put the text; falling back to
+        // "system prompt, blank line, text" is crude but still answerable, and never silently wrong.
+        return index < 0
+            ? new PromptShape(systemPrompt + "\n\n", string.Empty)
+            : new PromptShape(rendered[..index], rendered[(index + ItemMarker.Length)..]);
+    }
+
     /// <summary>
     /// What the model actually sees for one string: the source, plus the draft when this is a revision.
     /// </summary>
@@ -162,7 +194,7 @@ public sealed class LocalModelRuntime(LocalModelOptions options) : ILocalModelRu
     /// <summary>Runs one pass over <paramref name="items"/>, decoding several sequences per step.</summary>
     private async Task<string[]> GenerateAsync(
         LLamaWeights weights,
-        string prefix,
+        PromptShape shape,
         IReadOnlyList<TranslationRequestItem> items,
         CancellationToken cancellationToken)
     {
@@ -178,9 +210,15 @@ public sealed class LocalModelRuntime(LocalModelOptions options) : ILocalModelRu
         using var executor = new BatchedExecutor(weights, parameters, null!);
         var context = executor.Context;
 
+        // Some chat templates emit the BOS token themselves (Hunyuan's does) and some leave it to the
+        // caller. Asking the tokenizer settles it instead of guessing, and a duplicated BOS is the kind
+        // of defect that degrades output without ever failing.
+        var addBeginningOfSequence = context.Tokenize(shape.Prefix, false, true) is not [var first, ..]
+            || first != weights.Vocab.BOS;
+
         // Prefilled once and forked per item: this is the cached prefix.
         using var cachedPrefix = executor.Create();
-        cachedPrefix.Prompt(prefix, true, true);
+        cachedPrefix.Prompt(shape.Prefix, addBeginningOfSequence, true);
         await executor.Infer(cancellationToken).ConfigureAwait(false);
 
         var answers = new string[items.Count];
@@ -198,7 +236,7 @@ public sealed class LocalModelRuntime(LocalModelOptions options) : ILocalModelRu
             {
                 var index = next++;
                 var conversation = cachedPrefix.Fork();
-                conversation.Prompt(BuildUserTurn(items[index]) + AssistantTurn, false, true);
+                conversation.Prompt(BuildUserTurn(items[index]) + shape.Suffix, false, true);
 
                 // A decoder rather than appending token pieces: a Portuguese accent is regularly split
                 // across two tokens, and decoding them separately produces mojibake.

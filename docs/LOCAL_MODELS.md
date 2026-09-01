@@ -373,3 +373,62 @@ feia.
 
 O jargão específico de mod (`Broadcaster`, `Insta-Drunk`, `Panty Heat`) pertence ao **glossário por
 projeto**, que é exatamente para isso.
+
+## Os erros de qualidade não são dialeto (2026-08-31)
+
+Duas traduções do Hy-MT2 levantaram a hipótese de que o modelo só conhece português europeu:
+
+```
+viagra their drink                              -> Viagra, o seu bebida.
+Drop a knock out pill in {1.SimFirstName}'s...  -> Coloque uma pílula letal no próximo bebida de...
+```
+
+### Teste do dialeto
+
+Frases escolhidas para expor as diferenças clássicas, pedindo pt-BR e depois pt-PT:
+
+| Inglês | alvo pt-BR | alvo pt-PT |
+|---|---|---|
+| She is making a drink right now. | Ela está **preparando** uma bebida agora. | Ela está **preparando** uma bebida agora. |
+| You are using the wrong screen. | Você está usando a **tela** errada. | Você está usando a **tela** errada. |
+| Check your mobile phone… | Verifique seu **celular**… | Verifique seu **celular**… |
+| He is taking the train to work. | Ele está pegando o **trem**… | Ele está pegando o **trem**… |
+
+**O modelo não dá português de Portugal.** Gerúndio, "você", "tela", "celular", "trem" — é pt-BR de
+livro. Pedir pt-PT devolve praticamente a mesma coisa, ou seja, ele **ignora o dialeto pedido**: tem um
+português só, e por sorte é o brasileiro. O locale no prompt não está fazendo nada.
+
+### O que realmente quebra
+
+O mesmo teste isolou a causa:
+
+```
+The next drink is ready.        ->  A próxima bebida está pronta.        (concordância certa)
+Put the pill in her next drink. ->  Coloque a pílula no seu próximo bebida.  (errada)
+```
+
+Mesmo substantivo. Numa frase curta e limpa ele acerta `A próxima bebida`; acrescente um possessivo e
+vira `no seu próximo bebida`. Não é vocabulário nem dialeto: é **concordância de gênero se perdendo
+quando o sintagma cresce** — falha clássica de modelo pequeno. `pílula letal` para "knock out pill" é do
+mesmo tipo: sentido errado da expressão.
+
+Um modelo maior resolve isso. Trocar o idioma-alvo, não.
+
+## Trocar de modelo pela interface
+
+O template de chat era escrito à mão com os marcadores do Hunyuan (`<｜hy_User｜>` e afins), então
+apontar um Gemma ou um Qwen carregaria os pesos e emolduraria o prompt numa sintaxe que aquele modelo
+nunca viu — produzindo texto fluente e errado, sem erro nenhum aparecendo.
+
+Agora o `LocalModelRuntime` usa `LLamaTemplate`, que lê `tokenizer.chat_template` de dentro do próprio
+GGUF. O prefixo é obtido renderizando o template com um marcador no lugar do texto e cortando ali, o que
+mantém o prefixo byte a byte igual ao que o template produziria — condição para o cache de prefixo
+continuar valendo. O BOS é decidido perguntando ao tokenizador se o template já emitiu um, em vez de
+supor: um BOS duplicado degrada a saída sem nunca falhar.
+
+**Na prática:** basta largar qualquer `.gguf` em
+`%LOCALAPPDATA%\TS4Translator\Models\Local\models\`, ou apontá-lo em "Escolher modelo .gguf..." no perfil.
+Vários perfis podem apontar modelos diferentes, e os papéis (principal, refino, revisão) escolhem entre
+eles — dá para comparar modelos no mesmo mod sem reconfigurar nada.
+
+Verificado que a mudança é neutra: o Hy-MT2 produz exatamente a mesma saída de antes.
