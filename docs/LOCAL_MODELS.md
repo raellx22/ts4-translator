@@ -139,3 +139,81 @@ instruções encontradas dentro dele devem ser traduzidas, nunca executadas ou r
 O benchmark já usa STBLs reais autorizadas e valida estrutura, placeholders e completude. Ainda falta
 uma referência humana pt-BR para pontuar terminologia, consistência e naturalidade; aprovação automática
 não equivale a revisão linguística profissional.
+
+## Rodada nativa (in-process, llama.cpp via LLamaSharp) — 2026-08-31
+
+Mesma GPU (RTX 4060 Ti 8 GB), mesmo modelo (`Hy-MT2-1.8B-Q8_0.gguf`, o arquivo que já estava na pasta do
+LM Studio), mesmos 200 strings reais do WickedWhims. A diferença é o runtime: **sem LM Studio, sem HTTP**
+— llama.cpp carregado dentro do processo .NET. Protótipo em `tools/TS4Translator.LocalRuntimeProbe`.
+
+| Configuração | Tempo | tok/s saída | Aprovadas | Prefill |
+|---|---:|---:|---:|---:|
+| A · 1 sequência, sem cache de prefixo | 64,82 s | 80 | 176/200 | 31.592 |
+| B · 8 sequências, sem cache de prefixo | 16,69 s | 309 | 177/200 | 31.592 |
+| **C · 8 sequências, com cache de prefixo** | **13,92 s** | **371** | 177/200 | **4.130** |
+| *(baseline documentado: LM Studio, item a item, 8 filas)* | *34,24 s* | — | *195/200* | — |
+
+**As duas comparações internas, sem confundidores** (A, B e C são o mesmo prompt, mesmo sampler, mesma
+build — só muda o que está sendo testado):
+
+- **Paralelismo: 3,9×** (64,82 → 16,69 s). O `BatchedExecutor` decodifica todas as sequências vivas num
+  passo só; é daí que vem o ganho.
+- **Cache de prefixo: 1,20×** (16,69 → 13,92 s), com **87% menos prefill** (31.592 → 4.130 tokens). O
+  prompt de sistema é processado uma vez para a corrida inteira em vez de uma vez por string. É
+  exatamente o que um endpoint HTTP não expõe.
+
+**Determinismo: 200/200 respostas idênticas** entre duas execuções da config C (greedy, `temperature = 0`).
+Isso o LM Studio não garantia.
+
+**Marcadores inventados: 0** em todas as configurações — contra o incidente do Gemini 3.1 Flash-Lite
+(DEC-036), que inventou 29.
+
+### Onde a comparação com o LM Studio é justa e onde não é
+
+O tempo é comparável no essencial (mesmo modelo, hardware, quantização e corpus) mas tem dois
+confundidores a favor do nativo: o protótipo usa um prompt de sistema mais curto e devolve **texto puro
+em vez do envelope JSON**, então gera menos tokens por item. Parte dos 2,46× vem disso, não do runtime.
+Os 3,9× do paralelismo e os 1,20× do cache são medidos contra si mesmos e não têm esse problema.
+
+**As 177/200 não medem qualidade do modelo, medem o prompt do protótipo.** Das 23 reprovações:
+
+- **14 `MissingToken`**: o modelo juntou "Check to enable…\nUncheck to disable…" numa frase só e perdeu a
+  quebra de linha protegida. Uma instrução, não uma limitação — o contrato real do app é mais explícito.
+- **14 `IdenticalToSource`**: rótulos como "Desire Switch" que voltaram iguais. Pelo `StringTranslatability`
+  atual isso é `Term`, ou seja, observação e não aviso.
+- **1 `UnbalancedMarkup`** em `<i><b>naughty</b></i>`.
+
+### Projeção
+
+13,92 s / 200 strings → **~7,9 minutos** para os 6.779 do WickedWhims, contra 18,5 min (LM Studio item a
+item) e 14,0 min (lotes pequenos) documentados acima. Com o contrato JSON completo do app o número sobe;
+a estimativa honesta é **8 a 11 minutos**.
+
+### O custo real de empacotamento, medido
+
+O pacote `LLamaSharp.Backend.Cuda12.Windows` **não traz o runtime CUDA**. `ggml-cuda.dll` importa
+`cudart64_12.dll`, `cublas64_12.dll` e `nvcuda.dll`; só o último vem com o driver. Numa máquina sem CUDA
+Toolkit, nada carrega — e a detecção do LLamaSharp cai silenciosamente para CPU, que foi o primeiro
+resultado errado desta investigação.
+
+| Componente | Tamanho |
+|---|---:|
+| `ggml-cuda.dll` (LLamaSharp) | 526 MB |
+| `cublasLt64_12.dll` | 643 MB |
+| `cublas64_12.dll` | 108 MB |
+| `cudart64_12.dll` | 0,5 MB |
+| Modelo `Hy-MT2-1.8B-Q8_0.gguf` | 1,8 GB |
+| **Total do caminho GPU** | **~3,1 GB** |
+
+Tem que ser download sob demanda, como o Argos já faz — nunca dentro do MSIX. E o `WithLibrary()` deve
+apontar o caminho explicitamente: a detecção automática do LLamaSharp procura um Toolkit que o usuário
+final não vai ter.
+
+### Como reproduzir
+
+O corpus é derivado do banco local (ignorado pelo git). Gere `corpus-200.json` com id/text das strings do
+projeto desejado, coloque ao lado do executável e rode:
+
+```powershell
+dotnet run -c Release --project tools\TS4Translator.LocalRuntimeProbe
+```
