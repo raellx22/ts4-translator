@@ -6,6 +6,60 @@ namespace TS4Translator.Translation.Tests;
 
 public sealed class TranslationOrchestratorRefineTests
 {
+    /// <summary>
+    /// A provider that answers one string per request cannot act on "here are the drafts for all 21
+    /// ids" in the system prompt — it needs the draft for the string in front of it.
+    /// </summary>
+    [Fact]
+    public async Task RefineAsync_SendsEachItemsDraftOnTheItemItself()
+    {
+        var (orchestrator, _) = CreateOrchestrator();
+        var provider = new FakeTranslationProvider(supportsCustomPrompt: true);
+
+        await orchestrator.RefineAsync(
+            [new RefinementSourceItem("1", "Shallow", "Rasgo"), new RefinementSourceItem("2", "Deep", "Profundo")],
+            provider,
+            English,
+            PortugueseBrazil);
+
+        var sent = provider.ObservedRequestItems;
+        Assert.Equal("Rasgo", sent.Single(item => item.Id == "1").CurrentDraft);
+        Assert.Equal("Profundo", sent.Single(item => item.Id == "2").CurrentDraft);
+    }
+
+    /// <summary>
+    /// A stored translation holds the real game tokens; the source the provider sees holds placeholders.
+    /// Sending both notations would show the model two spellings of the same thing.
+    /// </summary>
+    [Fact]
+    public async Task RefineAsync_DraftIsProtectedWithTheSourcesOwnTokens()
+    {
+        var (orchestrator, _) = CreateOrchestrator();
+        var provider = new FakeTranslationProvider(supportsCustomPrompt: true);
+
+        await orchestrator.RefineAsync(
+            [new RefinementSourceItem("1", "{0.SimFirstName} is happy.", "{0.SimFirstName} está feliz.")],
+            provider,
+            English,
+            PortugueseBrazil);
+
+        var draft = provider.ObservedRequestItems.Single().CurrentDraft!;
+        Assert.DoesNotContain("{0.SimFirstName}", draft, StringComparison.Ordinal);
+        Assert.Contains("__TS4_TOKEN_", draft, StringComparison.Ordinal);
+    }
+
+    /// <summary>A first translation has no draft, and must not grow one.</summary>
+    [Fact]
+    public async Task TranslateAsync_SendsNoDraft()
+    {
+        var (orchestrator, _) = CreateOrchestrator();
+        var provider = new FakeTranslationProvider(supportsCustomPrompt: true);
+
+        await orchestrator.TranslateAsync([new TranslationSourceItem("1", "Shallow")], provider, English, PortugueseBrazil);
+
+        Assert.Null(provider.ObservedRequestItems.Single().CurrentDraft);
+    }
+
     private static readonly CultureInfo English = CultureInfo.GetCultureInfo("en-US");
     private static readonly CultureInfo PortugueseBrazil = CultureInfo.GetCultureInfo("pt-BR");
 

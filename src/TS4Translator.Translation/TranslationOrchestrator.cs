@@ -135,7 +135,7 @@ public sealed class TranslationOrchestrator(
             try
             {
                 var instructions = BuildRefinementInstructions(batch, currentTranslations, customInstructions, provider.Capabilities.SupportsCustomPrompt);
-                return await TranslateBatchAsync(batch, provider, sourceLocale, targetLocale, glossaryTerms, instructions, cancellationToken).ConfigureAwait(false);
+                return await TranslateBatchAsync(batch, provider, sourceLocale, targetLocale, glossaryTerms, instructions, cancellationToken, currentTranslations).ConfigureAwait(false);
             }
             finally
             {
@@ -159,6 +159,31 @@ public sealed class TranslationOrchestrator(
 
         await translationMemory.SaveManyAsync(memoryEntriesToSave, cancellationToken).ConfigureAwait(false);
         return items.Select(item => outcomesById[item.Id]).ToList();
+    }
+
+    /// <summary>
+    /// Puts a stored draft into the same protected form as the source it belongs to.
+    /// </summary>
+    /// <remarks>
+    /// A stored translation holds the real game tokens, because that is what gets written to the package.
+    /// Handing it to a provider next to a source whose tokens are already placeholders would show the
+    /// model two different notations for the same thing and invite it to emit the wrong one. Re-protecting
+    /// with the source's own token map keeps both sides speaking about <c>__TS4_TOKEN_0001__</c>.
+    /// </remarks>
+    private static string? ProtectDraft(string? draft, ProtectedString source)
+    {
+        if (string.IsNullOrWhiteSpace(draft))
+        {
+            return null;
+        }
+
+        var protectedDraft = draft;
+        foreach (var token in source.Tokens)
+        {
+            protectedDraft = protectedDraft.Replace(token.OriginalValue, token.Placeholder, StringComparison.Ordinal);
+        }
+
+        return protectedDraft;
     }
 
     /// <summary>
@@ -257,11 +282,17 @@ public sealed class TranslationOrchestrator(
         CultureInfo targetLocale,
         IReadOnlyList<GlossaryTerm>? glossaryTerms,
         string? customInstructions,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IReadOnlyDictionary<string, string?>? drafts = null)
     {
         var outcomesById = new Dictionary<string, TranslationOutcome>();
         var protectedByitemId = batch.ToDictionary(item => item.Id, item => tokenProtector.Protect(item.Text));
-        var requestItems = batch.Select(item => new TranslationRequestItem(item.Id, protectedByitemId[item.Id].ProtectedText)).ToList();
+        var requestItems = batch
+            .Select(item => new TranslationRequestItem(
+                item.Id,
+                protectedByitemId[item.Id].ProtectedText,
+                ProtectDraft(drafts?.GetValueOrDefault(item.Id), protectedByitemId[item.Id])))
+            .ToList();
 
         // Only terms that actually appear somewhere in this batch's source text are sent to the
         // provider - never the whole glossary (brief section 23).

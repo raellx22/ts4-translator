@@ -145,6 +145,20 @@ public sealed class LocalModelRuntime(LocalModelOptions options) : ILocalModelRu
         }
     }
 
+    /// <summary>
+    /// What the model actually sees for one string: the source, plus the draft when this is a revision.
+    /// </summary>
+    /// <remarks>
+    /// The orchestrator also describes a revision pass in the system prompt, listing every draft in the
+    /// batch by id. That shape suits a provider that answers a whole batch as JSON; this one answers one
+    /// string at a time, so being handed twenty other ids' drafts is noise it cannot act on. The draft
+    /// that matters is the one for the string in front of it.
+    /// </remarks>
+    private static string BuildUserTurn(TranslationRequestItem item) =>
+        string.IsNullOrWhiteSpace(item.CurrentDraft)
+            ? item.ProtectedText
+            : $"{item.ProtectedText}\n\nExisting translation to improve (fix it, or repeat it if it is already right):\n{item.CurrentDraft}";
+
     /// <summary>Runs one pass over <paramref name="items"/>, decoding several sequences per step.</summary>
     private async Task<string[]> GenerateAsync(
         LLamaWeights weights,
@@ -184,7 +198,7 @@ public sealed class LocalModelRuntime(LocalModelOptions options) : ILocalModelRu
             {
                 var index = next++;
                 var conversation = cachedPrefix.Fork();
-                conversation.Prompt(items[index].ProtectedText + AssistantTurn, false, true);
+                conversation.Prompt(BuildUserTurn(items[index]) + AssistantTurn, false, true);
 
                 // A decoder rather than appending token pieces: a Portuguese accent is regularly split
                 // across two tokens, and decoding them separately produces mojibake.

@@ -44,6 +44,9 @@ public sealed class FakeTranslationProvider(
 
     public List<string?> ObservedCustomInstructions { get; } = [];
 
+    /// <summary>Every request item the provider was handed, so a test can assert on per-item fields.</summary>
+    public List<TranslationRequestItem> ObservedRequestItems { get; } = [];
+
     public async Task<IReadOnlyList<TranslationResultItem>> TranslateBatchAsync(
         IReadOnlyList<TranslationRequestItem> items, CultureInfo sourceLocale, CultureInfo targetLocale,
         IReadOnlyList<GlossaryTerm>? glossaryTerms = null, string? customInstructions = null,
@@ -69,6 +72,7 @@ public sealed class FakeTranslationProvider(
                 ObservedBatchSizes.Add(items.Count);
                 ObservedGlossaryTerms.Add(glossaryTerms);
                 ObservedCustomInstructions.Add(customInstructions);
+                ObservedRequestItems.AddRange(items);
             }
 
             var results = items
