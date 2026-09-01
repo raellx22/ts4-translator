@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using TS4Translator.App.Services;
 using TS4Translator.Core.Glossary;
 using TS4Translator.Core.Projects;
 
@@ -21,8 +22,41 @@ namespace TS4Translator.App.ViewModels;
 /// </remarks>
 public sealed partial class GlossaryPageViewModel(
     IGlossaryService glossaryService,
-    IProjectService projectService) : ObservableObject
+    IProjectService projectService,
+    GlossarySeeder glossarySeeder) : ObservableObject
 {
+    /// <summary>
+    /// Puts back the names the app ships with, for a default removed by accident.
+    /// </summary>
+    /// <remarks>
+    /// Explicit, and never automatic: removing a default is a decision, and re-adding it on the next
+    /// launch would quietly overrule the user. Only terms that are actually missing are added, so this
+    /// never duplicates or resets an edited one.
+    /// </remarks>
+    [RelayCommand]
+    private async Task RestoreDefaultsAsync()
+    {
+        try
+        {
+            IsBusy = true;
+
+            var added = await glossarySeeder.RestoreAsync();
+            await ReloadTermsAsync();
+
+            StatusText = added == 0
+                ? "Os termos padrão já estão todos aqui."
+                : $"{added} termo(s) padrão restaurado(s).";
+        }
+        catch (Exception exception)
+        {
+            StatusText = $"Falha ao restaurar ({exception.GetType().Name}): {exception.Message}";
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
     /// <summary>The scope entry that means "terms that apply everywhere".</summary>
     public const string GlobalScope = "Todos os projetos (global)";
 

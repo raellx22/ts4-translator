@@ -42,6 +42,10 @@
                 <CheckBox Content="Nunca traduzir" IsChecked="{x:Bind ViewModel.NewNeverTranslate, Mode=TwoWay}" />
                 <CheckBox Content="Diferenciar maiúsculas" IsChecked="{x:Bind ViewModel.NewCaseSensitive, Mode=TwoWay}" />
                 <Button Command="{x:Bind ViewModel.AddTermCommand}" Content="Adicionar" />
+                <Button
+                    Command="{x:Bind ViewModel.RestoreDefaultsCommand}"
+                    Content="Restaurar termos padrão"
+                    ToolTipService.ToolTip="Traz de volta os nomes próprios que o app já vem com (mods, criadores, termos do jogo). Só adiciona os que estiverem faltando." />
                 <ProgressRing
                     Width="20"
                     Height="20"

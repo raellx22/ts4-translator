@@ -1,25 +1,20 @@
 using System.Text;
 using System.Text.RegularExpressions;
 using Microsoft.Data.Sqlite;
-using TS4Translator.Core.Translation;
 
 Console.OutputEncoding = Encoding.UTF8;
 
 // ---------------------------------------------------------------------------
-// Procura o vocabulário que vale um glossário embutido, usando os mods que o
-// usuário já traduziu.
+// Procura candidatos a "nunca traduzir" nos mods que o usuário já traduziu.
 //
-// O sinal é a taxa de retenção: com que frequência uma palavra inglesa continua
-// aparecendo, literalmente, na tradução. Uma palavra que o motor traduz sempre
-// tem retenção baixa e não precisa de glossário. Uma com retenção alta é uma
-// das duas coisas que o glossário existe para resolver:
+// O sinal é retenção: com que frequência a palavra inglesa continua, literal, na
+// tradução. Alta retenção com baixa "nativa" (a palavra não é portuguesa) é a
+// assinatura de um nome próprio que o motor já reconhece como nome — e cada
+// ocorrência em que ele NÃO reteve é uma corrupção que ninguém viu.
 //
-//   - jargão que o motor não sabe traduzir  -> vira termo com tradução
-//   - nome próprio que ele acerta em manter -> vira termo "nunca traduzir"
-//
-// Uma primeira tentativa creditou a falha de cada string a todas as suas
-// palavras e devolveu vocabulário comum ("Sex", "Bed", "Bar"): a string falhava
-// por outro motivo e a palavra só estava junto. Retenção mede a palavra.
+// Uma primeira métrica creditava a falha de cada string a todas as suas palavras
+// e devolveu vocabulário comum (Sex, Bed, Bar): a string falhava por outro motivo
+// e a palavra só estava junto. Retenção mede a palavra.
 // ---------------------------------------------------------------------------
 
 var dir = @"C:\Users\israe\AppData\Local\TS4Translator\Data";
@@ -37,7 +32,7 @@ foreach (var name in new[] { "ts4translator.db", "ts4translator.db-wal", "ts4tra
 using var connection = new SqliteConnection($"Data Source={Path.Combine(snapshot, "ts4translator.db")}");
 connection.Open();
 
-var rows = new List<Row>();
+var rows = new List<(string Project, string Original, string Translated)>();
 using (var command = connection.CreateCommand())
 {
     command.CommandText = """
@@ -48,137 +43,116 @@ using (var command = connection.CreateCommand())
     using var reader = command.ExecuteReader();
     while (reader.Read())
     {
-        rows.Add(new Row(reader.GetString(0), reader.GetString(1), reader.GetString(2)));
+        rows.Add((reader.GetString(0), reader.GetString(1), reader.GetString(2)));
     }
 }
 
 // Marcadores e markup são copiados literalmente por definição; contá-los mediria a mecânica do
-// TokenProtector, não o vocabulário. Foi o que fez "font" e "color" aparecerem na primeira tentativa.
+// TokenProtector, não o vocabulário — foi o que fez "font" e "color" aparecerem numa tentativa anterior.
 var noise = new Regex(@"\{[^{}]*\}|<[^<>]+>", RegexOptions.CultureInvariant);
-static IEnumerable<string> Words(string text) =>
-    Regex.Matches(text, @"[A-Za-z][A-Za-z'-]{2,}", RegexOptions.CultureInvariant).Select(match => match.Value);
+static IEnumerable<Match> WordMatches(string text) =>
+    Regex.Matches(text, @"[A-Za-z][A-Za-z0-9'’-]{2,}", RegexOptions.CultureInvariant);
 
 var stats = new Dictionary<string, Term>(StringComparer.OrdinalIgnoreCase);
-var nativeCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+var native = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
 
-foreach (var row in rows)
+foreach (var (project, rawOriginal, rawTranslated) in rows)
 {
-    var original = noise.Replace(row.Original, " ");
-    var translated = noise.Replace(row.Translated, " ");
+    var original = noise.Replace(rawOriginal, " ");
+    var translated = noise.Replace(rawTranslated, " ");
 
-    // Uma tradução idêntica ao original não diz nada sobre palavra nenhuma - a linha inteira falhou.
     if (string.Equals(original.Trim(), translated.Trim(), StringComparison.OrdinalIgnoreCase))
     {
         continue;
     }
 
-    var translatedWords = new HashSet<string>(Words(translated), StringComparer.OrdinalIgnoreCase);
-    var originalWords = new HashSet<string>(Words(original), StringComparer.OrdinalIgnoreCase);
-    // Uma palavra que aparece em traduções cujo original não a continha é portuguesa também
-    // ("normal", "total", "menu", "bar"). Retenção alta nessas não significa nada, e sem este
-    // discriminador elas dominam a lista. Contado à parte porque o termo pode ainda não existir em
-    // `stats` quando a primeira ocorrência nativa aparece.
+    var originalWords = new HashSet<string>(WordMatches(original).Select(m => m.Value), StringComparer.OrdinalIgnoreCase);
+    var translatedWords = new HashSet<string>(WordMatches(translated).Select(m => m.Value), StringComparer.OrdinalIgnoreCase);
+
+    // Palavra que surge numa tradução sem estar no original é portuguesa também ("normal", "menu",
+    // "total"). Retenção alta nessas não diz nada, e sem este filtro elas dominam a lista.
     foreach (var word in translatedWords.Where(word => !originalWords.Contains(word)))
     {
-        nativeCounts[word] = nativeCounts.GetValueOrDefault(word) + 1;
+        native[word] = native.GetValueOrDefault(word) + 1;
     }
 
-    var isLabel = StringTranslatability.Classify(row.Original) == StringKind.Term;
-
-    foreach (var word in Words(original).Distinct(StringComparer.OrdinalIgnoreCase))
+    foreach (var match in WordMatches(original).DistinctBy(m => m.Value, StringComparer.OrdinalIgnoreCase))
     {
+        var word = match.Value;
         if (!stats.TryGetValue(word, out var term))
         {
             stats[word] = term = new Term(word);
         }
 
         term.Total++;
-        term.Projects.Add(row.Project);
+        term.Projects.Add(project);
+
+        // Maiúscula no meio da frase é o sinal clássico de nome próprio em inglês. Sozinho não decide,
+        // mas separa "Sims" de "settings" quando os dois têm retenção alta.
+        if (match.Index > 0 && char.IsUpper(word[0]) && !IsSentenceStart(original, match.Index))
+        {
+            term.CapitalizedMidSentence++;
+        }
 
         if (translatedWords.Contains(word))
         {
             term.Kept++;
-            if (isLabel && term.KeptExamples.Count < 3 && row.Original.Length < 50)
-            {
-                term.KeptExamples.Add((row.Original, row.Translated));
-            }
         }
-        else if (term.TranslatedExamples.Count < 3 && row.Original.Length < 50)
+        else if (term.CorruptionExamples.Count < 2 && rawOriginal.Length < 70)
         {
-            term.TranslatedExamples.Add((row.Original, row.Translated));
+            term.CorruptionExamples.Add((rawOriginal, rawTranslated));
         }
     }
 }
 
 foreach (var term in stats.Values)
 {
-    term.AppearedNatively = nativeCounts.GetValueOrDefault(term.Word);
+    term.Native = native.GetValueOrDefault(term.Word);
 }
 
-var ranked = stats.Values
-    .Where(term => term.Projects.Count >= 4 && term.Total >= 30 && term.KeepRate >= 0.55 && term.NativeRatio < 0.05)
-    .OrderByDescending(term => term.KeepRate * Math.Log(term.Total))
-    .Take(45)
+static bool IsSentenceStart(string text, int index)
+{
+    for (var i = index - 1; i >= 0; i--)
+    {
+        if (char.IsWhiteSpace(text[i]))
+        {
+            continue;
+        }
+
+        return text[i] is '.' or '!' or '?' or ':' or '\n';
+    }
+
+    return true;
+}
+
+var candidates = stats.Values
+    .Where(term => term.Total >= 40
+        && term.KeepRate >= 0.55
+        && term.NativeRatio < 0.03
+        && term.CapitalizedRate >= 0.5)
+    .OrderByDescending(term => term.Corrupted)
     .ToList();
 
-Console.WriteLine($"{rows.Count:N0} strings traduzidas em {rows.Select(r => r.Project).Distinct().Count()} mods\n");
-Console.WriteLine("termo                 mods    usos  mantido    taxa   nativa");
-Console.WriteLine(new string('-', 60));
-foreach (var term in ranked)
+Console.WriteLine($"{rows.Count:N0} strings traduzidas em {rows.Select(r => r.Project).Distinct().Count()} mods");
+Console.WriteLine($"{candidates.Count} candidatos a \"nunca traduzir\"\n");
+Console.WriteLine($"{"termo",-22} {"usos",7} {"mods",5} {"retenção",9} {"corrompidas",12} {"maiúsc.",8}");
+Console.WriteLine(new string('-', 72));
+
+foreach (var term in candidates.Take(45))
 {
-    Console.WriteLine($"{term.Word,-20} {term.Projects.Count,5} {term.Total,7} {term.Kept,8} {term.KeepRate,6:P0} {term.NativeRatio,7:P1}");
+    Console.WriteLine($"{term.Word,-22} {term.Total,7} {term.Projects.Count,5} {term.KeepRate,8:P0} {term.Corrupted,12} {term.CapitalizedRate,7:P0}");
 }
 
-// Ponto cego da métrica acima: ela só olha linhas que foram traduzidas, e o jargão mais problemático
-// está justamente nas que voltaram inteiras em inglês. "Broadcaster" não aparecia por isso.
-var refused = new Dictionary<string, Refused>(StringComparer.OrdinalIgnoreCase);
-foreach (var row in rows.Where(row =>
-    string.Equals(noise.Replace(row.Original, " ").Trim(), noise.Replace(row.Translated, " ").Trim(), StringComparison.OrdinalIgnoreCase)))
+Console.WriteLine("\n=== evidência de corrupção (as vezes em que NÃO reteve) ===");
+foreach (var term in candidates.Where(term => term.Corrupted >= 5).Take(18))
 {
-    foreach (var word in Words(noise.Replace(row.Original, " ")).Distinct(StringComparer.OrdinalIgnoreCase))
+    Console.WriteLine($"\n## {term.Word} — {term.Corrupted} de {term.Total}");
+    foreach (var (original, translated) in term.CorruptionExamples)
     {
-        if (!refused.TryGetValue(word, out var entry))
-        {
-            refused[word] = entry = new Refused(word);
-        }
-
-        entry.Count++;
-        entry.Projects.Add(row.Project);
-        if (entry.Examples.Count < 3 && row.Original.Length < 45)
-        {
-            entry.Examples.Add(row.Original);
-        }
+        Console.WriteLine($"   {original}");
+        Console.WriteLine($"     -> {translated}");
     }
 }
-
-Console.WriteLine("\n\n=== palavras nas linhas que voltaram 100% em inglês ===");
-Console.WriteLine("(o jargão que o motor se recusa a traduzir - onde o glossário mais rende)\n");
-Console.WriteLine("termo                 mods  linhas   exemplo");
-Console.WriteLine(new string('-', 78));
-foreach (var entry in refused.Values
-    .Where(entry => entry.Projects.Count >= 3 && entry.Count >= 8 && nativeCounts.GetValueOrDefault(entry.Word) < 5)
-    .OrderByDescending(entry => entry.Count)
-    .Take(30))
-{
-    Console.WriteLine($"{entry.Word,-20} {entry.Projects.Count,5} {entry.Count,7}   {entry.Examples.FirstOrDefault()}");
-}
-
-Console.WriteLine("\n=== evidência, para curadoria ===");
-foreach (var term in ranked.Take(20))
-{
-    Console.WriteLine($"\n## {term.Word} — {term.KeepRate:P0} mantido em {term.Projects.Count} mods");
-    foreach (var (original, translated) in term.KeptExamples)
-    {
-        Console.WriteLine($"   MANTEVE : {original}  ->  {translated}");
-    }
-
-    foreach (var (original, translated) in term.TranslatedExamples.Take(2))
-    {
-        Console.WriteLine($"   TRADUZIU: {original}  ->  {translated}");
-    }
-}
-
-internal sealed record Row(string Project, string Original, string Translated);
 
 internal sealed class Term(string word)
 {
@@ -188,27 +162,19 @@ internal sealed class Term(string word)
 
     public int Kept { get; set; }
 
+    public int Native { get; set; }
+
+    public int CapitalizedMidSentence { get; set; }
+
     public HashSet<string> Projects { get; } = new(StringComparer.OrdinalIgnoreCase);
 
-    public List<(string Original, string Translated)> KeptExamples { get; } = [];
+    public List<(string Original, string Translated)> CorruptionExamples { get; } = [];
 
-    public List<(string Original, string Translated)> TranslatedExamples { get; } = [];
-
-    public int AppearedNatively { get; set; }
+    public int Corrupted => Total - Kept;
 
     public double KeepRate => Total == 0 ? 0 : (double)Kept / Total;
 
-    /// <summary>Quantas vezes a palavra surgiu numa traducao sem estar no original - sinal de que e portuguesa.</summary>
-    public double NativeRatio => Total == 0 ? 0 : (double)AppearedNatively / Total;
-}
+    public double NativeRatio => Total == 0 ? 0 : (double)Native / Total;
 
-internal sealed class Refused(string word)
-{
-    public string Word { get; } = word;
-
-    public int Count { get; set; }
-
-    public HashSet<string> Projects { get; } = new(StringComparer.OrdinalIgnoreCase);
-
-    public List<string> Examples { get; } = [];
+    public double CapitalizedRate => Total == 0 ? 0 : (double)CapitalizedMidSentence / Total;
 }

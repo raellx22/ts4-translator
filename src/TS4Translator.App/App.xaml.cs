@@ -58,6 +58,7 @@ public partial class App : Application
                 new LocalModelOptions(Path.Combine(AppDataPaths.Models, "Local")))
             .AddSingleton<IPathPickerService, WindowsAppSdkPathPickerService>()
             .AddSingleton<ExportManifestStore>()
+            .AddSingleton<GlossarySeeder>()
             .AddTransient<HomePageViewModel>()
             .AddTransient<EditorPageViewModel>()
             .AddTransient<SettingsPageViewModel>()

@@ -36,7 +36,8 @@ public sealed partial class HomePageViewModel : ObservableObject
         IProjectStringService projectStringService,
         IPackageService packageService,
         IStringTableService stringTableService,
-        IPathPickerService pathPicker)
+        IPathPickerService pathPicker,
+        GlossarySeeder glossarySeeder)
     {
         _projectService = projectService;
         _projectStringService = projectStringService;
@@ -45,6 +46,9 @@ public sealed partial class HomePageViewModel : ObservableObject
         _pathPicker = pathPicker;
         StatusText = "Importe um ou mais arquivos .package para começar (ou arraste-os aqui).";
         ImportPackagesCommand = new AsyncRelayCommand(ImportViaPickerAsync);
+        // A tela inicial e o unico ponto por onde todo mundo passa, e o seed precisa existir antes da
+        // primeira traducao - nao so para quem abre a pagina de Glossario.
+        _ = glossarySeeder.EnsureSeededAsync();
         _ = LoadRecentProjectsAsync();
     }
 
