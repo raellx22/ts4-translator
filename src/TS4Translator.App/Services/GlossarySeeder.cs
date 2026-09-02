@@ -1,3 +1,4 @@
+using System.Globalization;
 using TS4Translator.Core.Glossary;
 using TS4Translator.Infrastructure;
 
@@ -16,44 +17,97 @@ public sealed class GlossarySeeder(IGlossaryService glossaryService)
 {
     private static string MarkerPath => Path.Combine(AppDataPaths.Data, "glossary-seeded");
 
-    /// <summary>Seeds the defaults once. Safe to call on every launch.</summary>
+    /// <summary>
+    /// Seeds whatever this build adds that the install has not seen. Safe to call on every launch.
+    /// </summary>
+    /// <remarks>
+    /// The marker now records a <b>version</b> rather than just existing. A plain "have I ever seeded"
+    /// flag meant an install that ran once could never receive a later default — and the round that
+    /// added <see cref="DefaultTermGlossary"/> put 390 measured terms in, which every existing install
+    /// would have missed. Recording the version applied lets a new block reach them while a term the
+    /// user deleted from an older block stays deleted, which is the promise below.
+    /// </remarks>
     /// <returns>How many terms were added.</returns>
     public async Task<int> EnsureSeededAsync(CancellationToken cancellationToken = default)
     {
-        if (File.Exists(MarkerPath))
+        var seeded = await ReadSeededVersionAsync(cancellationToken).ConfigureAwait(false);
+        if (seeded >= DefaultTermGlossary.Version)
         {
             return 0;
         }
 
-        var added = await AddMissingAsync(cancellationToken).ConfigureAwait(false);
-        await File.WriteAllTextAsync(MarkerPath, DateTimeOffset.Now.ToString("O"), cancellationToken).ConfigureAwait(false);
+        // Only what this version introduced: names came in with version 1, so an install that already
+        // has them (and may have pruned some) is left alone and receives the term block only.
+        var added = await AddMissingAsync(includeNames: seeded < 1, includeTerms: true, cancellationToken).ConfigureAwait(false);
+        await File.WriteAllTextAsync(MarkerPath, DefaultTermGlossary.Version.ToString(CultureInfo.InvariantCulture), cancellationToken).ConfigureAwait(false);
         return added;
     }
 
     /// <summary>
     /// Puts back any default the user removed. Explicit, because it undoes their earlier decision.
     /// </summary>
-    public Task<int> RestoreAsync(CancellationToken cancellationToken = default) => AddMissingAsync(cancellationToken);
+    public Task<int> RestoreAsync(CancellationToken cancellationToken = default) =>
+        AddMissingAsync(includeNames: true, includeTerms: true, cancellationToken);
 
-    private async Task<int> AddMissingAsync(CancellationToken cancellationToken)
+    /// <summary>
+    /// The version already applied. A marker written before versioning existed holds a timestamp, and
+    /// that install has the names but not the terms — which is exactly version 1.
+    /// </summary>
+    private static async Task<int> ReadSeededVersionAsync(CancellationToken cancellationToken)
+    {
+        if (!File.Exists(MarkerPath))
+        {
+            return 0;
+        }
+
+        var content = (await File.ReadAllTextAsync(MarkerPath, cancellationToken).ConfigureAwait(false)).Trim();
+        return int.TryParse(content, CultureInfo.InvariantCulture, out var version) ? version : 1;
+    }
+
+    private async Task<int> AddMissingAsync(bool includeNames, bool includeTerms, CancellationToken cancellationToken)
     {
         var existing = await glossaryService.GetTermsAsync(projectId: null, cancellationToken).ConfigureAwait(false);
         var known = existing.Select(term => term.Original).ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         var added = 0;
-        foreach (var term in DefaultGlossary.Terms.Where(term => !known.Contains(term.Original)))
+
+        if (includeNames)
         {
-            // Case-sensitive: these are names, and matching is by substring. "CAS" must not fire on
-            // "cases", and "Sims" must not fire on lowercase prose.
-            await glossaryService.AddTermAsync(
-                term.Original,
-                term.Original,
-                neverTranslate: true,
-                caseSensitive: true,
-                notes: term.Notes,
-                projectId: null,
-                cancellationToken).ConfigureAwait(false);
-            added++;
+            foreach (var term in DefaultGlossary.Terms.Where(term => !known.Contains(term.Original)))
+            {
+                // Case-sensitive: these are names. "CAS" must not fire on "cas" in prose, and "Sims"
+                // must not fire on a lowercase sentence.
+                await glossaryService.AddTermAsync(
+                    term.Original,
+                    term.Original,
+                    neverTranslate: true,
+                    caseSensitive: true,
+                    notes: term.Notes,
+                    projectId: null,
+                    cancellationToken).ConfigureAwait(false);
+                known.Add(term.Original);
+                added++;
+            }
+        }
+
+        if (includeTerms)
+        {
+            foreach (var term in DefaultTermGlossary.Terms.Where(term => !known.Contains(term.Original)))
+            {
+                // Case-insensitive, unlike the names: a mod writes the same label as "Body Selector",
+                // "body selector" and "BODY SELECTOR", and the rule is about the word either way. Safe
+                // now that matching is on word boundaries rather than substrings.
+                await glossaryService.AddTermAsync(
+                    term.Original,
+                    term.Translation,
+                    neverTranslate: false,
+                    caseSensitive: false,
+                    notes: "Padrão medido: dobrou o acerto exato dos motores locais no corpus real (DEC-043).",
+                    projectId: null,
+                    cancellationToken).ConfigureAwait(false);
+                known.Add(term.Original);
+                added++;
+            }
         }
 
         return added;
