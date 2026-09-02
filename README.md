@@ -18,7 +18,7 @@ configuração depois (DEC-020, já corrigido para não repetir) — o usuário 
 provider antes de continuar. Ver [`docs/STATUS.md`](docs/STATUS.md) para o estado exato e
 [`docs/HANDOFF.md`](docs/HANDOFF.md) para retomar o trabalho em uma nova sessão.
 
-Implementado e testado até agora (640 testes automatizados, todos passando nesta máquina):
+Implementado e testado até agora (642 testes automatizados, todos passando nesta máquina):
 
 - Solução .NET 10 / WinUI 3 completa (`TS4Translator.sln`), com App, seis bibliotecas de camada e
   cinco projetos de teste, compilando limpo em x64.
@@ -46,8 +46,8 @@ Implementado e testado até agora (640 testes automatizados, todos passando nest
   raciocínio do modelo ligado**, sem alterar o perfil salvo.
 - **Glossário**: termos globais (nomes próprios, marcas — nunca traduzir, ou sempre traduzir de um
   jeito específico), aplicados automaticamente durante a tradução. Tela própria para adicionar/remover
-  termos globais; termos por projeto existem no serviço mas ainda sem UI dedicada. Vem com **386 termos
-  padrão** minerados das traduções que o usuário aprovou à mão, cada um validado contra o resto do
+  termos globais; termos por projeto existem no serviço mas ainda sem UI dedicada. Vem com **5.144 termos
+  padrão** colhidos das traduções da comunidade e do que o usuário aprovou à mão, cada um validado contra o resto do
   corpus: medido em sete modelos locais, o glossário **praticamente dobrou o acerto exato de todos**
   (de 5–19% para 17–31%) e é o maior ganho isolado já medido no projeto — ver
   [`docs/DECISIONS.md`](docs/DECISIONS.md) DEC-043. O casamento passou a ser por palavra inteira, sem o

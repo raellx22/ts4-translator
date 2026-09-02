@@ -2270,3 +2270,50 @@ traducao de outra pessoa, e o usuario tem de poder limpar tudo de uma vez se dis
 **Ainda nao feito:** os 7.185 rotulos como termos de glossario. Precisa da regra de consenso entre mods
 (termo que varios traduzem igual vira padrao; termo em que dois discordam vira decisao do usuario) e da
 trava que ja existe de nunca contradizer traducao aprovada. E o proximo passo, e agora tem de onde sair.
+
+## DEC-048 — O glossario padrao vai de 386 para 5.144 termos, colhidos das traducoes da comunidade
+
+A DEC-047 colheu 18.635 pares alinhados por KeyHash. Deles, 5.536 sao rotulos curtos - material de
+glossario. Esta decisao e sobre transformar isso no padrao que o app **ja vem sabendo**, sem o usuario
+importar nada.
+
+**Por que so os termos, e nao as frases.** A secao 44 do brief e explicita: nenhum conteudo de mod de
+terceiro no repositorio. As 12.070 frases sao trabalho autoral de tradutores nomeados, e embarca-las
+redistribuiria a traducao inteira deles. Um rotulo e outra coisa: `John -> Cliente` e terminologia, nao
+texto criativo. E, para o objetivo declarado - que **mods ineditos** saiam melhor -, a terminologia e
+justamente a parte que transfere: uma frase completa so ajuda se a frase exata reaparecer. As frases
+continuam disponiveis pelo import da tela de Memoria, que le da maquina do usuario e nao do repositorio.
+
+**Os quatro filtros, cada um respondendo a um jeito de a lista ficar pior que lista nenhuma:**
+
+| filtro | descartou | exemplo |
+|---|---:|---|
+| auto-consistencia no corpus | 358 | `Black -> Preto` concorda com 13% das 111 linhas que usam "Black" |
+| contradiz o usuario | 89 | (mais 211 sobrepostos, onde o padrao dele venceu) |
+| portugues de Portugal | 2 | `--------- Settings ---------` -> `--------- Definições ---------` |
+| regras que brigam entre si | 114 | curta dispara dentro da longa e manda coisa diferente |
+
+O primeiro e o que mais importa. `Leave -> Sair` concorda com 27% de 45 linhas, `Have Sex -> Fazer sexo`
+com 42% de 73: sao palavras cujo sentido muda com o contexto, e virar regra e repetir o erro em todo mod.
+
+O terceiro so existe porque o Sims 4 tem **um unico byte de locale para portugues** - uma traducao feita
+em Portugal chega marcada como pt-BR. Dois pacotes dos 46 sao europeus. O filtro e por termo, com
+casamento no inicio da palavra, senao "Definiç" reprova "Redefinição", que e pt-BR perfeitamente normal.
+
+O quarto mudou de criterio: antes caia sempre a regra curta; agora **cai a da comunidade**, porque o
+padrao que o usuario aprovou e a autoridade final. E o que preserva `Settings -> Configurações` contra
+um titulo que dizia `Definições`.
+
+**Guardado como TSV embutido**, nao como cinco mil literais em C#. E dado, tem de ler e diferenciar como
+dado, e o `DefaultTermGlossaryTests` reconfere todas as invariantes acima a cada build - foi ele que
+provou a lista inteira de uma vez.
+
+**Teto de 80 termos por prompt.** Medido em 3.000 strings reais: um lote de 100 casa 44 termos em media
+e 100 no pior caso; 80 cobre 99%. O teto existe porque, com 387 termos, um modelo ja respondeu
+traduzindo as *instrucoes* (DEC-045) - o `PromptEcho` pega isso hoje, mas um prompt que nao pode inchar
+e melhor que um pego depois de inchar. Ordenado do mais longo para o mais curto, porque o termo que
+nomeia o rotulo inteiro vale mais a linha de prompt que a palavra dentro dele.
+
+**Ainda nao medido:** o efeito disto na qualidade. A DEC-043 mediu 386 termos dobrando o acerto exato;
+5.144 termos podem dobrar de novo, ou saturar. E a proxima medicao, e agora ela pode ser feita no app
+de verdade em vez de numa suite de scratchpad.

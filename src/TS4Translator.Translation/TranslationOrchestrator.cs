@@ -29,6 +29,24 @@ public sealed class TranslationOrchestrator(
     /// </summary>
     private const double FuzzyReuseThreshold = 0.97;
 
+    /// <summary>
+    /// How many glossary terms one batch may carry into the prompt.
+    /// </summary>
+    /// <remarks>
+    /// A ceiling, not a target, and it exists because the glossary grew from 386 terms to 5.144 when it
+    /// started being harvested from community translations. Measured over 3.000 real strings, a batch of
+    /// 100 matches 44 terms on average and 100 at the worst; 80 covers 99% of what any batch would send.
+    ///
+    /// The reason for a ceiling at all is a failure already observed: at 387 terms, translategemma-4b
+    /// answered three of 120 strings by translating the <i>instructions</i> instead of the text
+    /// (DEC-045). <see cref="Providers.LocalModel.PromptEcho"/> catches that now, but a prompt that
+    /// cannot balloon is better than one that is caught after ballooning.
+    ///
+    /// Longest first, because a longer term is the more specific rule: given both "Sex" and
+    /// "Sex Autonomy Settings", the one that names the whole label is the one worth the prompt line.
+    /// </remarks>
+    private const int MaximumGlossaryTerms = 80;
+
 
     public async Task<IReadOnlyList<TranslationOutcome>> TranslateAsync(
         IReadOnlyList<TranslationSourceItem> items,
@@ -302,9 +320,14 @@ public sealed class TranslationOrchestrator(
             .ToList();
 
         // Only terms that actually appear somewhere in this batch's source text are sent to the
-        // provider - never the whole glossary (brief section 23).
+        // provider - never the whole glossary (brief section 23) - and at most MaximumGlossaryTerms of
+        // those, longest first.
         var relevantTerms = glossaryTerms is { Count: > 0 }
-            ? glossaryTerms.Where(term => batch.Any(item => term.AppearsIn(item.Text))).ToList()
+            ? glossaryTerms
+                .Where(term => batch.Any(item => term.AppearsIn(item.Text)))
+                .OrderByDescending(term => term.Original.Length)
+                .Take(MaximumGlossaryTerms)
+                .ToList()
             : null;
 
         var results = await provider.TranslateBatchAsync(requestItems, sourceLocale, targetLocale, relevantTerms, customInstructions, cancellationToken).ConfigureAwait(false);

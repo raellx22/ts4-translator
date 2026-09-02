@@ -1,9 +1,15 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
   </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Os termos padrao do glossario. Dado, nao codigo: cinco mil literais em C# nao se leem nem se
+         revisam, e este arquivo faz diff linha a linha. -->
+    <EmbeddedResource Include="Glossary\default-terms.tsv" />
+  </ItemGroup>
 
 </Project>

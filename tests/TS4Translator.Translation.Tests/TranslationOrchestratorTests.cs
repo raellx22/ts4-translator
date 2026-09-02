@@ -65,6 +65,50 @@ public class TranslationOrchestratorTests
         Assert.Equal(1, Assert.Single(provider.ObservedBatchSizes));
     }
 
+    /// <summary>
+    /// The glossary grew past five thousand terms once it started being harvested from community
+    /// translations, so a batch can no longer be allowed to carry everything that matches: at 387 terms
+    /// a model was already answering with a translation of the instructions instead of the text.
+    /// </summary>
+    [Fact]
+    public async Task TranslateAsync_MoreMatchingTermsThanTheCeiling_SendsOnlyTheCeiling()
+    {
+        var glossary = Enumerable.Range(0, 200)
+            .Select(index => new GlossaryTerm(index, $"termo{index:D3} comum", $"traduzido{index:D3}", false, false, null, null))
+            .ToList();
+
+        // One source string containing every term, so all 200 are "relevant".
+        var text = string.Join(' ', glossary.Select(term => term.Original));
+        var provider = new FakeTranslationProvider();
+
+        await _sut.TranslateAsync([new TranslationSourceItem("1", text)], provider, English, PortugueseBrazil, glossary);
+
+        var sent = Assert.Single(provider.ObservedGlossaryTerms);
+        Assert.NotNull(sent);
+        Assert.Equal(80, sent.Count);
+    }
+
+    /// <summary>Longest first: the term that names the whole label beats the word inside it.</summary>
+    [Fact]
+    public async Task TranslateAsync_TooManyTerms_KeepsTheMostSpecificOnes()
+    {
+        var glossary = new List<GlossaryTerm>
+        {
+            new(1, "Sex", "Sexo", false, false, null, null),
+            new(2, "Sex Autonomy Settings", "Configurações de Autonomia Sexual", false, false, null, null),
+        };
+        glossary.AddRange(Enumerable.Range(0, 100)
+            .Select(index => new GlossaryTerm(index + 10, $"enchimento{index:D3}", $"filler{index:D3}", false, false, null, null)));
+
+        var text = "Sex Autonomy Settings " + string.Join(' ', glossary.Skip(2).Select(term => term.Original));
+        var provider = new FakeTranslationProvider();
+
+        await _sut.TranslateAsync([new TranslationSourceItem("1", text)], provider, English, PortugueseBrazil, glossary);
+
+        var sent = Assert.Single(provider.ObservedGlossaryTerms)!;
+        Assert.Contains(sent, term => term.Original == "Sex Autonomy Settings");
+    }
+
     /// <summary>A fresh run still teaches the memory — that is what replaces the entry it disagreed with.</summary>
     [Fact]
     public async Task TranslateAsync_ReuseDisabled_StillWritesTheNewResultToMemory()
