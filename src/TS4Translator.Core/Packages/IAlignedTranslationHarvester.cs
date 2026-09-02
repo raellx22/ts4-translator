@@ -4,7 +4,15 @@ namespace TS4Translator.Core.Packages;
 
 /// <param name="OriginalText">The source-language string, from a mod's own STBL.</param>
 /// <param name="TranslatedText">What a translator rendered it as, from a translation package.</param>
-public sealed record AlignedTranslation(string OriginalText, string TranslatedText);
+/// <param name="SourcePackage">
+/// The translation package this came from, without extension — the name a translator published under.
+/// </param>
+/// <remarks>
+/// <paramref name="SourcePackage"/> is carried per pair rather than summarised once, because it has two
+/// jobs that a header list cannot do: it credits the translator on the row itself, wherever that row
+/// later shows up, and it makes one translator's contribution removable without disturbing the rest.
+/// </remarks>
+public sealed record AlignedTranslation(string OriginalText, string TranslatedText, string SourcePackage);
 
 /// <param name="PackagesScanned">How many `.package` files were opened across both sides.</param>
 /// <param name="SourceStrings">Distinct source-language strings indexed.</param>

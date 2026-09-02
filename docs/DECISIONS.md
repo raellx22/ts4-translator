@@ -2317,3 +2317,47 @@ nomeia o rotulo inteiro vale mais a linha de prompt que a palavra dentro dele.
 **Ainda nao medido:** o efeito disto na qualidade. A DEC-043 mediu 386 termos dobrando o acerto exato;
 5.144 termos podem dobrar de novo, ou saturar. E a proxima medicao, e agora ela pode ser feita no app
 de verdade em vez de numa suite de scratchpad.
+
+## DEC-049 — Pacote de traducoes: portatil, creditado, e destacavel
+
+**Correcao de rota, primeiro.** Na DEC-048 eu invoquei a "secao 44 do brief" para nao embarcar as frases
+da comunidade. Fui conferir a pedido do usuario: **todas** as referencias a secao 44 no repositorio sao
+sobre teste - fixture sintetico em vez de `.package` de terceiro, e nenhum servidor real em teste de
+provider. E regra de higiene de teste, nao regra sobre o dado que o app carrega. Estiquei a regra alem do
+que ela diz, e a decisao que ela sustentava estava mal fundamentada.
+
+O que **de fato** distingue os dois casos nao e regra do projeto: e que uma lista de terminologia
+(`John -> Cliente`) e outra coisa que um paragrafo de dialogo traduzido, e que a questao so existe
+**quando o app for distribuido** - na maquina do usuario o import ja entrega tudo, e sempre entregou.
+
+**O que ficou decidido.** As frases nao entram no repositorio como recurso embutido; elas viram um
+**pacote**: um arquivo TSV que o app le e escreve, que viaja ao lado do instalador ou entre pessoas, e
+que pode ser removido sem tocar em mais nada.
+
+**A atribuicao e por linha, nao um cabecalho.** Cada par diz de qual pacote de traducao veio, e esse
+nome sobrevive ate a memoria de traducao como o `ProfileName` da entrada - que a tela de Memoria mostra
+ao lado da origem. Isso da tres coisas que uma lista de creditos no topo do arquivo nao da: o tradutor
+fica creditado na linha, onde quer que ela reapareca; o usuario ve de quem veio aquela traducao; e a
+contribuicao de um tradutor especifico pode ser achada e removida sem mexer na de ninguem mais.
+
+**O pacote gerado da biblioteca deste usuario:**
+
+| | |
+|---|---:|
+| pacotes lidos | 15.362 |
+| traducoes | **18.731** |
+| tradutores creditados | **123** |
+| recusadas por colisao de hash | 1.884 |
+| tamanho | 3,6 MB |
+
+**Formato: TSV com comentarios `#`.** Tres megabytes nao sao nada, e um arquivo que a pessoa abre, le,
+diferencia e edita a mao vale mais aqui que um compacto. O cabecalho lista os 123 creditos para quem
+abrir o arquivo fora do app; o leitor, porem, deriva tudo que importa das linhas, entao cabecalho e
+conteudo nao tem como divergir.
+
+Escapes de `\n`, `\r`, `\t` e `\` porque o formato e por linha e uma string de jogo carrega quebra de
+linha de verdade - perder uma funde duas frases, que e exatamente o dano que este projeto gasta a maior
+parte do esforco detectando.
+
+**Na tela de Memoria**, "Pacote de traduções...": importar um `.tsv`, ou gerar um a partir das pastas do
+usuario. O import direto por pastas continua, para quem tem os dois lados na maquina.

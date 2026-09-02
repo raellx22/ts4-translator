@@ -71,6 +71,20 @@
                 Content="Importar traduções da comunidade..."
                 Style="{StaticResource AccentButtonStyle}"
                 ToolTipService.ToolTip="Escolha a pasta dos mods instalados e depois a pasta com os pacotes de tradução. O app casa os dois pelo identificador de cada string e guarda tudo na memória." />
+            <!--  O pacote e a forma portatil e creditada: cada linha diz de qual traducao veio, e esse
+                  credito acompanha a entrada dentro do app.  -->
+            <Button VerticalAlignment="Bottom" Content="Pacote de traduções...">
+                <Button.Flyout>
+                    <MenuFlyout>
+                        <MenuFlyoutItem
+                            Command="{x:Bind ViewModel.ImportCommunityPackCommand}"
+                            Text="Importar um pacote (.tsv)..." />
+                        <MenuFlyoutItem
+                            Command="{x:Bind ViewModel.ExportCommunityPackCommand}"
+                            Text="Gerar um pacote a partir das minhas pastas..." />
+                    </MenuFlyout>
+                </Button.Flyout>
+            </Button>
             <Button
                 VerticalAlignment="Bottom"
                 Click="ClearProvider_Click"

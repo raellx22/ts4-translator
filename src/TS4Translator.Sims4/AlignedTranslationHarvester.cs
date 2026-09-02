@@ -25,11 +25,14 @@ public sealed class AlignedTranslationHarvester(
 
         var scanned = 0;
 
+        // Which package each translated hash came from, so the pair can credit its translator.
+        var origins = new Dictionary<uint, string>();
+
         progress?.Report($"Lendo os textos em {sourceLocale.Name}...");
         var source = await IndexAsync(sourceFolders, sourceLocale, count => scanned += count, progress, cancellationToken).ConfigureAwait(false);
 
         progress?.Report($"Lendo as traduções em {targetLocale.Name}...");
-        var translated = await IndexAsync(translatedFolders, targetLocale, count => scanned += count, progress, cancellationToken).ConfigureAwait(false);
+        var translated = await IndexAsync(translatedFolders, targetLocale, count => scanned += count, progress, cancellationToken, origins).ConfigureAwait(false);
 
         var pairs = new List<AlignedTranslation>();
         var seen = new HashSet<string>(StringComparer.Ordinal);
@@ -65,7 +68,7 @@ public sealed class AlignedTranslationHarvester(
 
             if (seen.Add(original))
             {
-                pairs.Add(new AlignedTranslation(original, translation));
+                pairs.Add(new AlignedTranslation(original, translation, origins.GetValueOrDefault(hash, string.Empty)));
             }
         }
 
@@ -79,12 +82,16 @@ public sealed class AlignedTranslationHarvester(
     /// The value is a set rather than a string precisely so a collision is visible to the caller instead
     /// of being silently overwritten by whichever package happened to be read last.
     /// </remarks>
+    /// <param name="origins">
+    /// When given, records which package each hash was first seen in — the translator's credit.
+    /// </param>
     private async Task<Dictionary<uint, HashSet<string>>> IndexAsync(
         IReadOnlyList<string> folders,
         CultureInfo locale,
         Action<int> countScanned,
         IProgress<string>? progress,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Dictionary<uint, string>? origins = null)
     {
         var index = new Dictionary<uint, HashSet<string>>();
         var files = folders
@@ -133,6 +140,7 @@ public sealed class AlignedTranslationHarvester(
                         }
 
                         texts.Add(entry.Value.Trim());
+                        origins?.TryAdd(entry.KeyHash, Path.GetFileNameWithoutExtension(file));
                     }
                 }
             }

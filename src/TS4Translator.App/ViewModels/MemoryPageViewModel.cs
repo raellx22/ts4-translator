@@ -3,6 +3,7 @@ using System.Globalization;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using TS4Translator.App.Services;
+using TS4Translator.Core.Interchange;
 using TS4Translator.Core.Memory;
 using TS4Translator.Core.Packages;
 using TS4Translator.Core.Projects;
@@ -329,27 +330,10 @@ public sealed partial class MemoryPageViewModel(
             var harvest = await harvester.HarvestAsync(
                 [modsFolder], [translationsFolder], DefaultSourceLocale, DefaultTargetLocale, progress);
 
-            var entries = new List<TranslationMemoryEntry>();
-            var skipped = 0;
-            foreach (var pair in harvest.Pairs)
-            {
-                if (!TranslationMemoryPolicy.ShouldRemember(pair.OriginalText, pair.TranslatedText))
-                {
-                    skipped++;
-                    continue;
-                }
-
-                entries.Add(new TranslationMemoryEntry(
-                    pair.OriginalText, DefaultSourceLocale, DefaultTargetLocale, pair.TranslatedText,
-                    TranslationMemoryPolicy.CommunityProvider, ProfileName: null, DateTimeOffset.UtcNow));
-            }
-
-            await translationMemory.SaveManyAsync(entries);
-            await LoadProviderOptionsAsync();
-            await SearchAsync();
+            var (saved, skipped) = await StoreAsync(harvest.Pairs);
 
             CommunityImportSummary =
-                $"{harvest.PackagesScanned:N0} pacote(s) lidos · {entries.Count:N0} tradução(ões) importada(s)"
+                $"{harvest.PackagesScanned:N0} pacote(s) lidos · {saved:N0} tradução(ões) importada(s)"
                 + (skipped > 0 ? $" · {skipped:N0} descartada(s) por serem identificadores ou não terem sido traduzidas" : string.Empty)
                 + (harvest.AmbiguousKeys > 0 ? $" · {harvest.AmbiguousKeys:N0} recusada(s) por ambiguidade entre mods" : string.Empty)
                 + ".";
@@ -364,6 +348,122 @@ public sealed partial class MemoryPageViewModel(
         {
             IsBusy = false;
         }
+    }
+
+    /// <summary>
+    /// Writes what is on this machine into a portable, attributed pack file.
+    /// </summary>
+    /// <remarks>
+    /// Harvesting needs the mods and the translations on the same disk. A pack is the result on its own,
+    /// so it can be shipped beside an installer or handed to someone who has neither — and because every
+    /// row names the package it came from, the translators stay credited wherever it ends up.
+    /// </remarks>
+    [RelayCommand]
+    private async Task ExportCommunityPackAsync()
+    {
+        try
+        {
+            CommunityImportSummary = "Escolha a pasta dos mods instalados (de onde vem o texto em inglês)...";
+            var modsFolder = await pathPicker.PickFolderAsync();
+            if (modsFolder is null) { CommunityImportSummary = string.Empty; return; }
+
+            CommunityImportSummary = "Agora a pasta com os pacotes de tradução...";
+            var translationsFolder = await pathPicker.PickFolderAsync();
+            if (translationsFolder is null) { CommunityImportSummary = string.Empty; return; }
+
+            var target = await pathPicker.PickSaveTextFileAsync("traducoes-da-comunidade.tsv");
+            if (target is null) { CommunityImportSummary = string.Empty; return; }
+
+            IsBusy = true;
+            var progress = new Progress<string>(message => StatusText = message);
+
+            var harvest = await harvester.HarvestAsync(
+                [modsFolder], [translationsFolder], DefaultSourceLocale, DefaultTargetLocale, progress);
+
+            var pack = new TranslationPack(DefaultSourceLocale, DefaultTargetLocale, DateTimeOffset.UtcNow, harvest.Pairs);
+            await TranslationPackFile.WriteAsync(target, pack);
+
+            CommunityImportSummary =
+                $"Pacote gerado com {pack.Pairs.Count:N0} tradução(ões) de {pack.Credits.Count:N0} tradutor(es): {target}";
+            StatusText = CommunityImportSummary;
+        }
+        catch (Exception exception)
+        {
+            CommunityImportSummary = $"Falha ao gerar o pacote ({exception.GetType().Name}): {exception.Message}";
+            StatusText = CommunityImportSummary;
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    /// <summary>Loads a pack file straight into memory, keeping each row's credit.</summary>
+    [RelayCommand]
+    private async Task ImportCommunityPackAsync()
+    {
+        try
+        {
+            var file = await pathPicker.PickOpenTextFileAsync();
+            if (file is null) { return; }
+
+            IsBusy = true;
+            StatusText = "Lendo o pacote...";
+
+            var pack = await TranslationPackFile.ReadAsync(file);
+            var (saved, skipped) = await StoreAsync(pack.Pairs);
+
+            var credits = pack.Credits;
+            CommunityImportSummary =
+                $"{saved:N0} tradução(ões) importada(s) de {credits.Count:N0} tradutor(es)"
+                + (skipped > 0 ? $" · {skipped:N0} descartada(s) pela política da memória" : string.Empty)
+                + (credits.Count > 0 ? $". Créditos: {string.Join(", ", credits.Take(8))}{(credits.Count > 8 ? $" e mais {credits.Count - 8}" : string.Empty)}." : ".");
+            StatusText = CommunityImportSummary;
+        }
+        catch (Exception exception)
+        {
+            CommunityImportSummary = $"Falha ao ler o pacote ({exception.GetType().Name}): {exception.Message}";
+            StatusText = CommunityImportSummary;
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    /// <summary>
+    /// Puts harvested pairs into memory, keeping the translator's name on every entry.
+    /// </summary>
+    /// <remarks>
+    /// The credit rides in <see cref="TranslationMemoryEntry.ProfileName"/>, which the Memória list
+    /// shows beside the origin. That is what makes the attribution real rather than decorative: the user
+    /// can see whose translation a line came from, and search or clear by it.
+    /// </remarks>
+    private async Task<(int Saved, int Skipped)> StoreAsync(IReadOnlyList<AlignedTranslation> pairs)
+    {
+        var entries = new List<TranslationMemoryEntry>(pairs.Count);
+        var skipped = 0;
+
+        foreach (var pair in pairs)
+        {
+            if (!TranslationMemoryPolicy.ShouldRemember(pair.OriginalText, pair.TranslatedText))
+            {
+                skipped++;
+                continue;
+            }
+
+            entries.Add(new TranslationMemoryEntry(
+                pair.OriginalText, DefaultSourceLocale, DefaultTargetLocale, pair.TranslatedText,
+                TranslationMemoryPolicy.CommunityProvider,
+                string.IsNullOrWhiteSpace(pair.SourcePackage) ? null : pair.SourcePackage,
+                DateTimeOffset.UtcNow));
+        }
+
+        await translationMemory.SaveManyAsync(entries);
+        await LoadProviderOptionsAsync();
+        await SearchAsync();
+
+        return (entries.Count, skipped);
     }
 
     private static readonly CultureInfo DefaultSourceLocale = CultureInfo.GetCultureInfo("en-US");
@@ -411,7 +511,7 @@ public sealed partial class MemoryEntryViewModel(TranslationMemoryEntry entry) :
     public partial string? Translation { get; set; } = entry.TranslatedText;
 
     [ObservableProperty]
-    public partial string Origin { get; set; } = Describe(entry.Provider, entry.CreatedAtUtc);
+    public partial string Origin { get; set; } = Describe(entry.Provider, entry.CreatedAtUtc, entry.ProfileName);
 
     private string _persisted = entry.TranslatedText;
 
@@ -426,6 +526,12 @@ public sealed partial class MemoryEntryViewModel(TranslationMemoryEntry entry) :
     /// <summary>Puts back what is stored, for an edit the page refused to accept.</summary>
     public void RevertEdit() => Translation = _persisted;
 
-    private static string Describe(string provider, DateTimeOffset when) =>
-        $"{provider} · {when.ToLocalTime():dd/MM/yyyy}";
+    /// <summary>
+    /// Who this entry came from. The profile name carries the translator's package for anything
+    /// harvested from the community, which is the whole point of keeping the credit per row.
+    /// </summary>
+    private static string Describe(string provider, DateTimeOffset when, string? profileName = null) =>
+        string.IsNullOrWhiteSpace(profileName)
+            ? $"{provider} · {when.ToLocalTime():dd/MM/yyyy}"
+            : $"{provider} · {profileName} · {when.ToLocalTime():dd/MM/yyyy}";
 }
