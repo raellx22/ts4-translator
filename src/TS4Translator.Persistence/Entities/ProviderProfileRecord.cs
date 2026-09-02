@@ -20,4 +20,7 @@ internal sealed class ProviderProfileRecord
     public double Temperature { get; set; }
 
     public bool HasApiKey { get; set; }
+
+    /// <summary>Stored as its enum name, for the same readability reason <see cref="Kind"/> is.</summary>
+    public ReasoningMode Reasoning { get; set; }
 }

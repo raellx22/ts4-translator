@@ -6,6 +6,7 @@ using LLama.Common;
 using LLama.Native;
 using LLama.Sampling;
 using TS4Translator.Core.Glossary;
+using TS4Translator.Core.Providers;
 using TS4Translator.Core.Translation;
 
 namespace TS4Translator.Providers.LocalModel;
@@ -47,14 +48,50 @@ public sealed class LocalModelRuntime(LocalModelOptions options) : ILocalModelRu
     /// </summary>
     private const int Parallelism = 8;
 
-    private const int ContextSize = 8192;
+    /// <summary>
+    /// Fewer lanes when the model is thinking. Every live sequence holds its own KV cache for everything
+    /// it has generated, and a reasoning answer is several times longer than a translation - eight of
+    /// those at once is how the context fills up and answers start getting truncated mid-thought.
+    /// </summary>
+    private const int ReasoningParallelism = 4;
+
+    private const uint ContextSize = 8192;
+
+    /// <summary>Doubled for reasoning, for the same reason the lane count is halved.</summary>
+    private const uint ReasoningContextSize = 16_384;
 
     /// <summary>A hard stop per string, so one runaway generation cannot hang a whole mod's translation.</summary>
     private const int MaximumTokensPerItem = 512;
 
+    /// <summary>
+    /// The same stop, raised for thinking. A translation is a sentence; the reasoning in front of it is
+    /// commonly a few hundred tokens, and cutting it off means the answer never arrives at all.
+    /// </summary>
+    private const int ReasoningMaximumTokensPerItem = 2048;
+
+    /// <summary>
+    /// Prefills an empty thinking block so the model resumes past it.
+    /// </summary>
+    /// <remarks>
+    /// The same text Qwen3's own chat template writes for <c>enable_thinking=false</c>. Putting it at the
+    /// start of the assistant turn is a hard switch rather than a request: the block is already closed
+    /// before the model writes a token, so there is nothing to opt out of. Only ever appended for a model
+    /// whose template deals in <c>&lt;think&gt;</c> - injected into a model that has never seen the tag, it
+    /// would be so much noise for it to copy.
+    /// </remarks>
+    private const string EmptyThinkingBlock = "<think>\n\n</think>\n\n";
+
     private readonly SemaphoreSlim _gate = new(1, 1);
     private LLamaWeights? _weights;
     private string? _loadedModelPath;
+
+    /// <summary>What the loaded file's header said, kept beside the weights it belongs to.</summary>
+    /// <remarks>
+    /// Cached for the same reason the weights are. A mod is dozens of batches and every one of them asks
+    /// the same question of the same file; re-reading the header each time is cheap but pointless work
+    /// against the disk, and this is read on the translation path rather than a settings screen.
+    /// </remarks>
+    private GgufModelInfo? _loadedModelInfo;
     private static bool _nativeConfigured;
     private static readonly Lock NativeConfigLock = new();
 
@@ -66,20 +103,24 @@ public sealed class LocalModelRuntime(LocalModelOptions options) : ILocalModelRu
         if (resolvedModel is null)
         {
             return new LocalModelStatus(backend, null, 0,
-                $"{backendMessage} Nenhum modelo .gguf configurado - aponte um no perfil ou coloque um em {options.ModelsDirectory}.");
+                $"{backendMessage} Nenhum modelo .gguf configurado - aponte um no perfil ou coloque um em {options.ModelsDirectory}.", null);
         }
 
         var size = new FileInfo(resolvedModel).Length;
         var readable = $"{size / 1024d / 1024d / 1024d:F2} GB";
 
+        // Read from the file's own header rather than loaded, so a settings screen can say whether this
+        // model reasons without putting several gigabytes on the GPU to find out.
+        var info = GgufMetadata.TryRead(resolvedModel);
+
         return backend switch
         {
             LocalModelBackend.None => new LocalModelStatus(backend, resolvedModel, size,
-                $"Modelo encontrado ({readable}), mas {backendMessage}"),
+                $"Modelo encontrado ({readable}), mas {backendMessage}", info),
             LocalModelBackend.Cpu => new LocalModelStatus(backend, resolvedModel, size,
-                $"Pronto na CPU, sem aceleração de GPU - várias vezes mais lento. {backendMessage} Modelo: {Path.GetFileName(resolvedModel)} ({readable})."),
+                $"Pronto na CPU, sem aceleração de GPU - várias vezes mais lento. {backendMessage} Modelo: {Path.GetFileName(resolvedModel)} ({readable}).", info),
             _ => new LocalModelStatus(backend, resolvedModel, size,
-                $"Pronto com aceleração CUDA. Modelo: {Path.GetFileName(resolvedModel)} ({readable})."),
+                $"Pronto com aceleração CUDA. Modelo: {Path.GetFileName(resolvedModel)} ({readable}).", info),
         };
     }
 
@@ -90,6 +131,7 @@ public sealed class LocalModelRuntime(LocalModelOptions options) : ILocalModelRu
         IReadOnlyList<GlossaryTerm>? glossaryTerms,
         string? customInstructions,
         string? modelPath,
+        ReasoningMode reasoning = ReasoningMode.Off,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(items);
@@ -105,9 +147,15 @@ public sealed class LocalModelRuntime(LocalModelOptions options) : ILocalModelRu
         try
         {
             var weights = await LoadAsync(modelPath, cancellationToken).ConfigureAwait(false);
-            var shape = RenderTemplate(weights, BuildSystemPrompt(sourceLocale, targetLocale, glossaryTerms, customInstructions));
 
-            var answers = await GenerateAsync(weights, shape, items, cancellationToken).ConfigureAwait(false);
+            // The setting says what the user wants; the file says what is possible. A model with no
+            // thinking template is left exactly as it was before this option existed, whichever value is
+            // stored against the profile.
+            var plan = ReasoningPlan.For(reasoning, _loadedModelInfo);
+            var shape = RenderTemplate(
+                weights, BuildSystemPrompt(sourceLocale, targetLocale, glossaryTerms, customInstructions, plan), plan);
+
+            var answers = await GenerateAsync(weights, shape, items, plan, cancellationToken).ConfigureAwait(false);
 
             // A string whose protected markers did not all survive gets one more attempt on its own,
             // with the rule restated. Locally this costs a second, and it is the failure the prototype
@@ -120,9 +168,9 @@ public sealed class LocalModelRuntime(LocalModelOptions options) : ILocalModelRu
             if (retries.Count > 0)
             {
                 var strict = RenderTemplate(weights,
-                    BuildSystemPrompt(sourceLocale, targetLocale, glossaryTerms, customInstructions, insist: true));
+                    BuildSystemPrompt(sourceLocale, targetLocale, glossaryTerms, customInstructions, plan, insist: true), plan);
 
-                var second = await GenerateAsync(weights, strict, [.. retries.Select(pair => pair.Item)], cancellationToken).ConfigureAwait(false);
+                var second = await GenerateAsync(weights, strict, [.. retries.Select(pair => pair.Item)], plan, cancellationToken).ConfigureAwait(false);
 
                 for (var index = 0; index < retries.Count; index++)
                 {
@@ -148,6 +196,51 @@ public sealed class LocalModelRuntime(LocalModelOptions options) : ILocalModelRu
     private readonly record struct PromptShape(string Prefix, string Suffix);
 
     /// <summary>
+    /// What the profile's <see cref="ReasoningMode"/> actually turns into for this particular model.
+    /// </summary>
+    /// <param name="AllowsThinking">Whether the run is budgeted and prompted for a model that thinks.</param>
+    /// <param name="PrefillEmptyThinkingBlock">Whether the assistant turn opens with a closed, empty thinking block.</param>
+    /// <param name="SoftSwitch">Qwen3's in-prompt directive, or null for a model whose template has no such switch.</param>
+    /// <remarks>
+    /// Resolving the setting against the file once, here, is what keeps the rest of the engine free of
+    /// "if this model can think" branches — and what guarantees that a model with no thinking template
+    /// behaves identically to how it did before the option existed, whatever the profile happens to say.
+    /// </remarks>
+    private readonly record struct ReasoningPlan(
+        bool AllowsThinking,
+        bool PrefillEmptyThinkingBlock,
+        string? SoftSwitch)
+    {
+        public int Parallelism => AllowsThinking ? ReasoningParallelism : LocalModelRuntime.Parallelism;
+
+        /// <summary>Unsigned to match <see cref="ModelParams.ContextSize"/>, which is a <c>uint?</c>.</summary>
+        public uint ContextSize => AllowsThinking ? ReasoningContextSize : LocalModelRuntime.ContextSize;
+
+        public int MaximumTokensPerItem => AllowsThinking ? ReasoningMaximumTokensPerItem : LocalModelRuntime.MaximumTokensPerItem;
+
+        public static ReasoningPlan For(ReasoningMode mode, GgufModelInfo? model)
+        {
+            // Nothing to switch on or off. Everything below would be prompt noise at best.
+            if (model?.SupportsReasoning != true)
+            {
+                return new ReasoningPlan(AllowsThinking: false, PrefillEmptyThinkingBlock: false, SoftSwitch: null);
+            }
+
+            var switchable = model.HasEnableThinkingSwitch;
+
+            return mode switch
+            {
+                ReasoningMode.On => new ReasoningPlan(true, false, switchable ? "/think" : null),
+                ReasoningMode.Off => new ReasoningPlan(false, true, switchable ? "/no_think" : null),
+
+                // Whatever the template does unprompted, with the budget to finish it - a model left to
+                // reason on a 512-token cap gets cut off mid-thought and returns nothing usable.
+                _ => new ReasoningPlan(true, false, null),
+            };
+        }
+    }
+
+    /// <summary>
     /// Renders the model's <b>own</b> chat template and cuts it where the item's text goes.
     /// </summary>
     /// <remarks>
@@ -161,9 +254,16 @@ public sealed class LocalModelRuntime(LocalModelOptions options) : ILocalModelRu
     /// byte-identical to what the template would produce — which is what lets the whole batch fork from
     /// one cached prefill.
     /// </remarks>
-    private static PromptShape RenderTemplate(LLamaWeights weights, string systemPrompt)
+    private static PromptShape RenderTemplate(LLamaWeights weights, string systemPrompt, ReasoningPlan plan)
     {
-        var template = new LLamaTemplate(weights, true);
+        // The bool in the constructor is `strict` (throw when the GGUF has no template) - it is NOT
+        // "add the assistant prefix", which is this property and defaults to false. Without it the
+        // rendered prompt ends at the user turn's <|im_end|> and the model is asked to carry on writing
+        // text rather than to answer, which is a different task and it performs it faithfully: bare
+        // labels come back unchanged, answers start with a stray newline or half a word, and with
+        // thinking enabled it wanders off into another language entirely. Measured on Qwen3-8B: the
+        // rendered suffix was "<|im_end|>\n\n" and nothing else.
+        var template = new LLamaTemplate(weights, true) { AddAssistant = true };
         template.Add("system", systemPrompt);
         template.Add("user", ItemMarker);
 
@@ -172,9 +272,15 @@ public sealed class LocalModelRuntime(LocalModelOptions options) : ILocalModelRu
 
         // A template that swallows the marker would leave no place to put the text; falling back to
         // "system prompt, blank line, text" is crude but still answerable, and never silently wrong.
-        return index < 0
+        var shape = index < 0
             ? new PromptShape(systemPrompt + "\n\n", string.Empty)
             : new PromptShape(rendered[..index], rendered[(index + ItemMarker.Length)..]);
+
+        // Appended after the template's own assistant opener, which is exactly where the model's first
+        // token would have gone - so it starts already past a thinking block that is closed and empty.
+        return plan.PrefillEmptyThinkingBlock
+            ? shape with { Suffix = shape.Suffix + EmptyThinkingBlock }
+            : shape;
     }
 
     /// <summary>
@@ -196,11 +302,12 @@ public sealed class LocalModelRuntime(LocalModelOptions options) : ILocalModelRu
         LLamaWeights weights,
         PromptShape shape,
         IReadOnlyList<TranslationRequestItem> items,
+        ReasoningPlan plan,
         CancellationToken cancellationToken)
     {
         var parameters = new ModelParams(_loadedModelPath!)
         {
-            ContextSize = ContextSize,
+            ContextSize = plan.ContextSize,
             GpuLayerCount = 99,
             FlashAttention = true,
             BatchSize = 2048,
@@ -232,7 +339,7 @@ public sealed class LocalModelRuntime(LocalModelOptions options) : ILocalModelRu
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            while (slots.Count < Parallelism && next < items.Count)
+            while (slots.Count < plan.Parallelism && next < items.Count)
             {
                 var index = next++;
                 var conversation = cachedPrefix.Fork();
@@ -250,11 +357,25 @@ public sealed class LocalModelRuntime(LocalModelOptions options) : ILocalModelRu
                 var slot = slots[slotIndex];
                 var token = slot.Sampler.Sample(context.NativeHandle, slot.Conversation.GetSampleIndex(0));
 
-                if (token.IsEndOfGeneration(weights.Vocab) || slot.Steps >= MaximumTokensPerItem)
+                if (token.IsEndOfGeneration(weights.Vocab) || slot.Steps >= plan.MaximumTokensPerItem)
                 {
-                        // Trimmed here, before anyone sees it: the restore downstream would otherwise glue a
-                    // stray "__" onto the next word.
-                    answers[slot.Index] = ProtectedMarkers.Normalize(slot.Decoder.Read().Trim());
+                    // Three passes, in this order. The thinking comes off first, always - even with
+                    // reasoning switched off, because a model that reasons can open a block anyway and
+                    // the whole monologue would otherwise be stored as the translation. Then the chat
+                    // decoration the model added and the source never had (markdown emphasis, wrapping
+                    // quotes). Then the marker trim, before anyone sees it: the restore downstream would
+                    // otherwise glue a stray "__" onto the next word.
+                    var raw = ReasoningText.Strip(slot.Decoder.Read()).Trim();
+                    var cleaned = ProtectedMarkers.Normalize(AnswerArtifacts.Strip(raw, items[slot.Index].ProtectedText));
+
+                    // Last gate, and the only one that throws an answer away rather than repairing it:
+                    // a model that translated the instructions instead of the string produced fluent,
+                    // marker-free, plausibly-sized Portuguese about a glossary, which every other check
+                    // in this app would wave through and into the game. Blanked so the validator reports
+                    // an empty translation and the string goes to review, which is what it deserves.
+                    answers[slot.Index] = PromptEcho.IsEcho(cleaned, shape.Prefix, items[slot.Index].ProtectedText)
+                        ? string.Empty
+                        : cleaned;
                     slot.Conversation.Dispose();
                     slots.RemoveAt(slotIndex);
                     continue;
@@ -274,9 +395,18 @@ public sealed class LocalModelRuntime(LocalModelOptions options) : ILocalModelRu
         CultureInfo targetLocale,
         IReadOnlyList<GlossaryTerm>? glossaryTerms,
         string? customInstructions,
+        ReasoningPlan plan,
         bool insist = false)
     {
         var prompt = new StringBuilder();
+
+        // Qwen3 and its relatives read these two lines out of the prompt itself. Belt and braces next to
+        // the prefilled empty block, and only ever written for a model whose template declares the
+        // switch - to anything else they are a stray line of text to be copied.
+        if (plan.SoftSwitch is string softSwitch)
+        {
+            prompt.AppendLine(softSwitch);
+        }
         prompt.AppendLine(CultureInfo.InvariantCulture,
             $"You are a translation engine translating video game UI text from {sourceLocale.EnglishName} to {targetLocale.EnglishName}.");
         prompt.AppendLine("Reply with ONLY the translation of the text you are given. No commentary, no quotes, no explanation, no repetition of the source.");
@@ -296,6 +426,16 @@ public sealed class LocalModelRuntime(LocalModelOptions options) : ILocalModelRu
         if (insist)
         {
             prompt.AppendLine("The previous attempt at this text lost or invented a placeholder. Reproduce every placeholder exactly, and add none.");
+        }
+
+        // Said out loud because "reply with only the translation" is now ambiguous for a model that is
+        // also being allowed to think: without this it reads the two instructions as a contradiction and
+        // resolves it by answering with the reasoning too.
+        if (plan.AllowsThinking)
+        {
+            prompt.AppendLine();
+            prompt.AppendLine("You may reason before answering. Keep it short, and use it for what actually needs judgement: a game-specific term (a buff, a trait, an interaction name) that must survive the translation instead of being smoothed away, an idiom, or a word whose sense depends on the rest of the sentence.");
+            prompt.AppendLine("When the reasoning ends, write the translation and nothing else after it - no restatement of your reasoning, no notes, no alternatives.");
         }
 
         if (glossaryTerms is { Count: > 0 })
@@ -335,6 +475,7 @@ public sealed class LocalModelRuntime(LocalModelOptions options) : ILocalModelRu
 
         _weights?.Dispose();
         _loadedModelPath = resolved;
+        _loadedModelInfo = GgufMetadata.TryRead(resolved);
 
         var parameters = new ModelParams(resolved)
         {

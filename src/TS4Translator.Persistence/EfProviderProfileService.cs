@@ -39,6 +39,7 @@ public sealed class EfProviderProfileService(IDbContextFactory<TranslatorDbConte
         string? model,
         double temperature,
         string? apiKey,
+        ReasoningMode reasoning = ReasoningMode.Off,
         CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
@@ -80,6 +81,7 @@ public sealed class EfProviderProfileService(IDbContextFactory<TranslatorDbConte
         record.Endpoint = endpoint;
         record.Model = model;
         record.Temperature = temperature;
+        record.Reasoning = reasoning;
 
         // Saved before touching the secret store: a brand-new profile has no id until this point, and
         // the id is what namespaces its key.
@@ -247,5 +249,5 @@ public sealed class EfProviderProfileService(IDbContextFactory<TranslatorDbConte
     private static string SecretName(int profileId) => $"provider-profile:{profileId}";
 
     private static ProviderProfile ToProfile(ProviderProfileRecord record) =>
-        new(record.Id, record.Name, record.Kind, record.Endpoint, record.Model, record.Temperature, record.HasApiKey);
+        new(record.Id, record.Name, record.Kind, record.Endpoint, record.Model, record.Temperature, record.HasApiKey, record.Reasoning);
 }

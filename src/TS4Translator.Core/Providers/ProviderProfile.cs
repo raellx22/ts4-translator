@@ -13,6 +13,10 @@ namespace TS4Translator.Core.Providers;
 /// <param name="Model">Model id, when the engine has that concept (DeepL and Google Translate do not).</param>
 /// <param name="Temperature">Sampling temperature for generative engines.</param>
 /// <param name="HasApiKey">Whether a key is stored for this profile — the key itself never travels in this record.</param>
+/// <param name="Reasoning">
+/// Whether this engine should think before answering. Only <see cref="ProviderKind.LocalModel"/> acts on
+/// it today; for every other kind it is stored and ignored.
+/// </param>
 public sealed record ProviderProfile(
     int Id,
     string Name,
@@ -20,4 +24,5 @@ public sealed record ProviderProfile(
     string Endpoint,
     string? Model,
     double Temperature,
-    bool HasApiKey);
+    bool HasApiKey,
+    ReasoningMode Reasoning = ReasoningMode.Off);

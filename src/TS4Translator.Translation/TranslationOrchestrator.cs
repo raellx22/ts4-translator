@@ -37,6 +37,7 @@ public sealed class TranslationOrchestrator(
         CultureInfo targetLocale,
         IReadOnlyList<GlossaryTerm>? glossaryTerms = null,
         string? customInstructions = null,
+        bool reuseTranslationMemory = true,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(items);
@@ -47,16 +48,21 @@ public sealed class TranslationOrchestrator(
         var outcomesById = new Dictionary<string, TranslationOutcome>();
         var itemsNeedingTranslation = new List<TranslationSourceItem>();
 
-        var memoryMatches = await translationMemory.FindBestMatchesAsync(
-            items.Select(item => item.Text).ToList(), sourceLocale, targetLocale, FuzzyReuseThreshold, cancellationToken).ConfigureAwait(false);
+        // Not even queried when reuse is off: the lookup is a full scan of this locale pair's entries,
+        // and every answer it could give would be discarded.
+        var memoryMatches = reuseTranslationMemory
+            ? await translationMemory.FindBestMatchesAsync(
+                items.Select(item => item.Text).ToList(), sourceLocale, targetLocale, FuzzyReuseThreshold, cancellationToken).ConfigureAwait(false)
+            : null;
 
         for (var index = 0; index < items.Count; index++)
         {
             var item = items[index];
-            var memoryMatch = memoryMatches[index];
+            var memoryMatch = memoryMatches?[index];
             if (memoryMatch is { Similarity: 1.0 })
             {
-                outcomesById[item.Id] = new TranslationOutcome(item.Id, item.Text, memoryMatch.Entry.TranslatedText, Success: true, Issues: []);
+                outcomesById[item.Id] = new TranslationOutcome(
+                    item.Id, item.Text, memoryMatch.Entry.TranslatedText, Success: true, Issues: [], ReusedFromMemory: true);
                 continue;
             }
 
@@ -64,7 +70,8 @@ public sealed class TranslationOrchestrator(
             {
                 var issue = new ValidationIssue(ValidationIssueCode.FuzzyMatchReused, ValidationSeverity.Warning,
                     $"Reused from a {memoryMatch.Similarity:P0} similar previous translation - please review.");
-                outcomesById[item.Id] = new TranslationOutcome(item.Id, item.Text, memoryMatch.Entry.TranslatedText, Success: false, Issues: [issue]);
+                outcomesById[item.Id] = new TranslationOutcome(
+                    item.Id, item.Text, memoryMatch.Entry.TranslatedText, Success: false, Issues: [issue], ReusedFromMemory: true);
                 continue;
             }
 

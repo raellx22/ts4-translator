@@ -53,6 +53,36 @@ public sealed class ProviderProfileTests : IDisposable
         }
     }
 
+    /// <summary>
+    /// The reasoning switch has to survive a round trip through the database, or it is a control that
+    /// appears to work and is forgotten the moment the editor closes — the same way the local engine's
+    /// .gguf path once was.
+    /// </summary>
+    [Theory]
+    [InlineData(ReasoningMode.On)]
+    [InlineData(ReasoningMode.ModelDefault)]
+    [InlineData(ReasoningMode.Off)]
+    public async Task SaveAsync_KeepsTheReasoningModeOfALocalModelProfile(ReasoningMode mode)
+    {
+        var saved = await _sut.SaveAsync(null, "Qwen3 local", ProviderKind.LocalModel, "local://gguf", "C:/models/qwen3.gguf", 0.0, null, mode);
+
+        Assert.Equal(mode, saved.Reasoning);
+        Assert.Equal(mode, (await _sut.GetAsync(saved.Id))!.Reasoning);
+    }
+
+    /// <summary>
+    /// Everything saved before the column existed reads back as "Off", which is what the engine did
+    /// anyway. The generated migration defaulted the column to an empty string instead — not the name of
+    /// any enum member, so every pre-existing profile would have failed to load at all.
+    /// </summary>
+    [Fact]
+    public async Task SaveAsync_WithoutSayingAnythingAboutReasoning_DefaultsToOff()
+    {
+        var saved = await _sut.SaveAsync(null, "Argos", ProviderKind.Argos, "local://argos", null, 0.0, null);
+
+        Assert.Equal(ReasoningMode.Off, (await _sut.GetAsync(saved.Id))!.Reasoning);
+    }
+
     /// <summary>The reason profiles exist at all: two setups of the same engine, side by side.</summary>
     [Fact]
     public async Task SaveAsync_TwoProfilesOfTheSameKind_BothSurviveWithTheirOwnKeys()

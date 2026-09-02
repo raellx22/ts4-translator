@@ -3,6 +3,7 @@ using System.Globalization;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using TS4Translator.App.Services;
+using TS4Translator.Core.Memory;
 using TS4Translator.Core.Packages;
 using TS4Translator.Core.Projects;
 
@@ -24,6 +25,7 @@ public sealed partial class HomePageViewModel : ObservableObject
     private readonly IPackageService _packageService;
     private readonly IStringTableService _stringTableService;
     private readonly IPathPickerService _pathPicker;
+    private readonly ITranslationMemory _translationMemory;
 
     [ObservableProperty]
     public partial bool IsBusy { get; set; }
@@ -37,6 +39,7 @@ public sealed partial class HomePageViewModel : ObservableObject
         IPackageService packageService,
         IStringTableService stringTableService,
         IPathPickerService pathPicker,
+        ITranslationMemory translationMemory,
         GlossarySeeder glossarySeeder)
     {
         _projectService = projectService;
@@ -44,6 +47,7 @@ public sealed partial class HomePageViewModel : ObservableObject
         _packageService = packageService;
         _stringTableService = stringTableService;
         _pathPicker = pathPicker;
+        _translationMemory = translationMemory;
         StatusText = "Importe um ou mais arquivos .package para começar (ou arraste-os aqui).";
         ImportPackagesCommand = new AsyncRelayCommand(ImportViaPickerAsync);
         // A tela inicial e o unico ponto por onde todo mundo passa, e o seed precisa existir antes da
@@ -75,16 +79,33 @@ public sealed partial class HomePageViewModel : ObservableObject
     /// this is irreversible: the strings, their revision history and any per-project engine settings go
     /// with it (all by database cascade). The imported `.package` files themselves are never touched.
     /// </summary>
-    public async Task DeleteProjectAsync(ProjectCardViewModel card)
+    /// <param name="forgetInTranslationMemory">
+    /// Also removes this project's translations from translation memory.
+    /// </param>
+    /// <remarks>
+    /// The memory is deliberately global and keyed by source text alone, so it is *not* stored under the
+    /// project and does not go with it. That surprised the user in the worst possible way: deleting a
+    /// project whose translation had come out badly, re-importing the same mod and translating again
+    /// returned the rejected translations verbatim, with no engine ever being called — the app looked
+    /// broken and the second model looked exactly as bad as the first. Offering the removal here is what
+    /// makes "apagar e começar de novo" actually mean that.
+    /// </remarks>
+    public async Task DeleteProjectAsync(ProjectCardViewModel card, bool forgetInTranslationMemory = false)
     {
         ArgumentNullException.ThrowIfNull(card);
 
         try
         {
             IsBusy = true;
+
+            // Read before the delete: afterwards the strings are gone and there is nothing left to
+            // address the memory entries by.
+            var forgotten = forgetInTranslationMemory ? await ForgetInTranslationMemoryAsync(card.Id) : 0;
+
             await _projectService.DeleteAsync(card.Id);
             await LoadRecentProjectsAsync();
-            StatusText = $"Projeto \"{card.Name}\" apagado ({card.Progress.Total:N0} string(s) removidas).";
+            StatusText = $"Projeto \"{card.Name}\" apagado ({card.Progress.Total:N0} string(s) removidas)."
+                + (forgetInTranslationMemory ? $" {forgotten:N0} entrada(s) também saíram da memória de tradução." : string.Empty);
         }
         catch (Exception exception)
         {
@@ -94,6 +115,19 @@ public sealed partial class HomePageViewModel : ObservableObject
         {
             IsBusy = false;
         }
+    }
+
+    private async Task<int> ForgetInTranslationMemoryAsync(Guid projectId)
+    {
+        var project = await _projectService.GetAsync(projectId);
+        if (project is null)
+        {
+            return 0;
+        }
+
+        var strings = await _projectStringService.GetStringsAsync(projectId);
+        return await _translationMemory.DeleteManyAsync(
+            [.. strings.Select(entry => entry.OriginalText)], project.SourceLocale, project.TargetLocale);
     }
 
     private Task ImportViaPickerAsync() => RunImportAsync(async () =>

@@ -66,6 +66,17 @@ public sealed partial class EditorPageViewModel(
     [ObservableProperty]
     public partial int ProgressTotal { get; set; }
 
+    /// <summary>Whether "Traduzir pendentes" may answer from translation memory instead of calling an engine.</summary>
+    /// <remarks>
+    /// On by default — reuse is what makes re-translating an updated mod cheap. It is exposed here
+    /// because it is also the reason a bad run appears to be permanent: the memory is global and outlives
+    /// the project, so deleting the project, re-importing the mod and translating again gives back the
+    /// same translations without the engine being called once. Anyone comparing two models needs to be
+    /// able to say "ignore what you already know and answer again".
+    /// </remarks>
+    [ObservableProperty]
+    public partial bool ReuseTranslationMemory { get; set; } = true;
+
     /// <summary>
     /// Which saved profile the per-row refine button uses. Defaults to whatever Settings assigned to the
     /// refinement role, but stays overridable here so the user can try a different engine on one line
@@ -115,8 +126,14 @@ public sealed partial class EditorPageViewModel(
     /// <summary>Named here rather than inline so the filter and the export summary cannot drift apart.</summary>
     private const string IdentifiersFilter = "Identificadores internos";
 
+    /// <summary>
+    /// Traduções que passaram por boas mas parecem ter perdido pedaço do original — ver
+    /// <see cref="TranslationSuspicion"/>.
+    /// </summary>
+    private const string SuspectFilter = "Suspeitas (motor pode ter simplificado)";
+
     public IReadOnlyList<string> FilterOptions { get; } =
-        [AllFilter, "Pendentes", "Traduzidas", "Revisar", "Refinadas", "Editadas manualmente", IdentifiersFilter];
+        [AllFilter, "Pendentes", "Traduzidas", "Revisar", SuspectFilter, "Refinadas", "Editadas manualmente", IdentifiersFilter];
 
     public ObservableCollection<string> RefineProfileOptions { get; } = [];
 
@@ -170,6 +187,11 @@ public sealed partial class EditorPageViewModel(
             "Revisar" => filtered.Where(r => r.Status == ProjectStringStatus.NeedsReview),
             "Refinadas" => filtered.Where(r => r.Status == ProjectStringStatus.Refined),
             "Editadas manualmente" => filtered.Where(r => r.Status == ProjectStringStatus.ManuallyEdited),
+
+            // The queue this whole feature exists for. Not a status: these rows are stored as finished
+            // work and most of them passed validation - the suspicion is computed from the text, so the
+            // list stays correct the moment a row is repaired, with nothing to re-scan or migrate.
+            SuspectFilter => filtered.Where(r => r.Suspicion.IsSuspect),
 
             // Visible on purpose: a mod carries hundreds of tuning identifiers that will sit at
             // "Pendente" forever, and a pending count that can never reach zero is its own small lie.
@@ -492,52 +514,6 @@ public sealed partial class EditorPageViewModel(
     }
 
     /// <summary>
-    /// Sends one string back through the chosen engine to improve its existing translation — the
-    /// per-row refine button and context menu.
-    /// </summary>
-    public async Task RefineRowAsync(StringRowViewModel row)
-    {
-        ArgumentNullException.ThrowIfNull(row);
-
-        if (_project is null || row.IsRefining)
-        {
-            return;
-        }
-
-        var profileId = IdOf(SelectedRefineProfileName);
-        if (profileId is null)
-        {
-            StatusText = "Escolha um motor de refino no seletor acima (ou crie um perfil em Configurações).";
-            return;
-        }
-
-        try
-        {
-            row.IsRefining = true;
-            var before = row.Translation;
-            var refined = await RefineRowsAsync([row], profileId.Value, SelectedRefineProfileName, CancellationToken.None);
-
-            // "Came back identical" and "came back with nothing" are different outcomes and the user
-            // has to be able to tell them apart: the first means the engine simply agreed with the
-            // existing translation (very common when refining Argos with Argos), the second means it
-            // failed. Reporting both as "não retornou nada" reads as a bug when it is not one.
-            StatusText = refined > 0
-                ? $"Refinado com {SelectedRefineProfileName}."
-                : string.Equals(before, row.Translation, StringComparison.Ordinal)
-                    ? $"{SelectedRefineProfileName} devolveu exatamente a mesma tradução - nada a melhorar aqui. Experimente outro motor no seletor acima."
-                    : $"{SelectedRefineProfileName} não retornou uma versão utilizável para esta string.";
-        }
-        catch (Exception exception)
-        {
-            StatusText = $"Falha ao refinar ({exception.GetType().Name}): {exception.Message}";
-        }
-        finally
-        {
-            row.IsRefining = false;
-        }
-    }
-
-    /// <summary>
     /// Sweeps every string flagged for review through the engine assigned to the review role — a
     /// deliberately different setting from the per-row refiner, so a slow expensive model can be used
     /// for a handful of clicks without also being turned loose on hundreds of strings.
@@ -611,10 +587,251 @@ public sealed partial class EditorPageViewModel(
         }
     }
 
-    /// <summary>The shared body of both refinement paths. Returns how many rows actually came back improved.</summary>
-    private async Task<int> RefineRowsAsync(IReadOnlyList<StringRowViewModel> rows, int profileId, string profileName, CancellationToken cancellationToken)
+    /// <summary>How many rows the suspicion queue currently holds, for the button that empties it.</summary>
+    public int SuspectCount => _allRows.Count(row => row.Suspicion.IsSuspect);
+
+    /// <summary>
+    /// Translates one suspect row again from the source alone, discarding the damaged draft.
+    /// </summary>
+    /// <remarks>
+    /// <b>Deliberately not a refinement, and this was measured rather than reasoned about.</b> The first
+    /// version of this button did call <see cref="ITranslationOrchestrator.RefineAsync"/> — it is the
+    /// obvious choice, the machinery already existed, and it does not work. Run against sixteen real rows
+    /// from this project with Qwen3-8B, refinement fixed <b>zero</b> of the eight damaged ones: shown a
+    /// draft, the model reproduced it. <c>---------- Settings ----------</c> came back as
+    /// <c>- Não, não, não. Configurações...</c>, character for character, and one translation that was
+    /// already fine was made worse. Translating the same rows from scratch fixed all eight.
+    ///
+    /// The reason is the premise. Refinement exists for a draft that is mostly right and needs polish,
+    /// and it puts that draft in front of the model on purpose. The suspicion queue is the exact opposite
+    /// population: these drafts are wrong by omission, so showing one is teaching the model the wrong
+    /// answer and asking it not to stray far from it. "Refinar" stays as it is, for the case it was built
+    /// for. Repensar throws the draft away — the old text is kept as a revision, as always.
+    /// </remarks>
+    public Task RethinkRowAsync(StringRowViewModel row) => RetranslateOneRowAsync(row, ReasoningMode.On);
+
+    /// <summary>Sends one string back through the chosen engine as it is configured.</summary>
+    public Task RefineRowAsync(StringRowViewModel row) => RefineOneRowAsync(row, reasoningOverride: null, "Refinado");
+
+    /// <summary>
+    /// Runs every suspect row through the refine engine with reasoning on.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately the refine profile rather than the review one: the review sweep is for what the
+    /// validator flagged, and this queue is the opposite case - rows that validated cleanly and are
+    /// wrong anyway. The user picks the engine in the same box either way, so a paid API can take this
+    /// pass while the local model keeps the bulk work, which is the cheap version of "spend the good
+    /// model only where it matters".
+    /// </remarks>
+    /// <param name="useReasoning">
+    /// Forces the model to think for every row. Off by default, and that default is measured rather than
+    /// assumed: on this queue's actual population - content the engine dropped - Qwen3-8B repaired every
+    /// case with reasoning off, and reasoning bought nothing for twenty times the clock (docs/LOCAL_MODELS.md,
+    /// "Qwen3-8B"). Reasoning earns its cost on the other failure, a short label whose sense is ambiguous,
+    /// which is what the per-row button is for.
+    /// </param>
+    public async Task RethinkSuspectsAsync(bool useReasoning)
     {
-        var provider = await providerFactory.CreateForProfileAsync(profileId, cancellationToken);
+        if (_project is null)
+        {
+            return;
+        }
+
+        var profileId = IdOf(SelectedRefineProfileName);
+        if (profileId is null)
+        {
+            StatusText = "Escolha um motor no seletor \"Refinar linha a linha com\" — é ele que vai repensar as suspeitas.";
+            return;
+        }
+
+        var targets = _allRows.Where(row => row.Suspicion.IsSuspect && row.CanRefine).ToList();
+        if (targets.Count == 0)
+        {
+            StatusText = "Nenhuma tradução suspeita neste projeto. Nada a repensar.";
+            return;
+        }
+
+        _translateCts = new CancellationTokenSource();
+        var cancellationToken = _translateCts.Token;
+        var improved = 0;
+
+        try
+        {
+            IsBusy = true;
+            IsTranslating = true;
+            ProgressTotal = targets.Count;
+            ProgressCurrent = 0;
+
+            // Same checkpointing as every other long run here: a cancelled pass keeps what it already
+            // fixed. It matters more than usual with reasoning on, because each string costs real time.
+            // Null, not ReasoningMode.Off: leaving the override unset lets a profile the user deliberately
+            // set to "ligado" stay that way, instead of this pass quietly overruling it in the other
+            // direction.
+            var reasoningOverride = useReasoning ? ReasoningMode.On : (ReasoningMode?)null;
+            var reasoningNote = useReasoning ? ", raciocínio ligado" : string.Empty;
+
+            foreach (var chunk in targets.Chunk(TranslationChunkSize))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                StatusText = $"Repensando com {SelectedRefineProfileName}{reasoningNote}... {ProgressCurrent}/{ProgressTotal}";
+
+                improved += await RetranslateRowsAsync(chunk, profileId.Value, SelectedRefineProfileName, cancellationToken, reasoningOverride);
+                ProgressCurrent += chunk.Length;
+                ApplyFilter();
+            }
+
+            var remaining = SuspectCount;
+            StatusText = $"Repensadas: {improved} de {targets.Count} linha(s) mudaram com {SelectedRefineProfileName}. "
+                + (remaining == 0
+                    ? "A fila de suspeitas está vazia."
+                    : $"Ainda restam {remaining:N0} na fila - as que o motor devolveu igual continuam marcadas.");
+        }
+        catch (OperationCanceledException)
+        {
+            StatusText = $"Repensar cancelado em {ProgressCurrent}/{ProgressTotal} - o que já melhorou está salvo ({improved} linha(s)).";
+        }
+        catch (Exception exception)
+        {
+            StatusText = $"Falha ao repensar ({exception.GetType().Name}): {exception.Message}";
+        }
+        finally
+        {
+            IsBusy = false;
+            IsTranslating = false;
+            _translateCts?.Dispose();
+            _translateCts = null;
+        }
+    }
+
+    private Task RefineOneRowAsync(StringRowViewModel row, ReasoningMode? reasoningOverride, string doneVerb) =>
+        RunOnOneRowAsync(row, doneVerb, (rows, profileId, name, token) =>
+            RefineRowsAsync(rows, profileId, name, token, reasoningOverride));
+
+    private Task RetranslateOneRowAsync(StringRowViewModel row, ReasoningMode? reasoningOverride) =>
+        RunOnOneRowAsync(row, "Repensado", (rows, profileId, name, token) =>
+            RetranslateRowsAsync(rows, profileId, name, token, reasoningOverride));
+
+    private async Task RunOnOneRowAsync(
+        StringRowViewModel row,
+        string doneVerb,
+        Func<IReadOnlyList<StringRowViewModel>, int, string, CancellationToken, Task<int>> run)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+
+        if (_project is null || row.IsRefining)
+        {
+            return;
+        }
+
+        var profileId = IdOf(SelectedRefineProfileName);
+        if (profileId is null)
+        {
+            StatusText = "Escolha um motor de refino no seletor acima (ou crie um perfil em Configurações).";
+            return;
+        }
+
+        try
+        {
+            row.IsRefining = true;
+            var before = row.Translation;
+            var refined = await run([row], profileId.Value, SelectedRefineProfileName, CancellationToken.None);
+
+            // "Came back identical" and "came back with nothing" are different outcomes and the user
+            // has to be able to tell them apart: the first means the engine simply agreed with the
+            // existing translation (very common when refining Argos with Argos), the second means it
+            // failed. Reporting both as "não retornou nada" reads as a bug when it is not one.
+            StatusText = refined > 0
+                ? $"{doneVerb} com {SelectedRefineProfileName}."
+                : string.Equals(before, row.Translation, StringComparison.Ordinal)
+                    ? $"{SelectedRefineProfileName} devolveu exatamente a mesma tradução - nada a melhorar aqui. Experimente outro motor no seletor acima."
+                    : $"{SelectedRefineProfileName} não retornou uma versão utilizável para esta string.";
+        }
+        catch (Exception exception)
+        {
+            StatusText = $"Falha ao refinar ({exception.GetType().Name}): {exception.Message}";
+        }
+        finally
+        {
+            row.IsRefining = false;
+        }
+    }
+
+    /// <summary>
+    /// Translates rows again from the source alone. The engine never sees what is stored.
+    /// </summary>
+    /// <remarks>
+    /// The body of "Repensar". Translation memory is bypassed for the same reason the draft is withheld:
+    /// the damaged text is in there too (the bulk run wrote it), so consulting memory would hand back the
+    /// very translation being thrown away — the same trap as DEC-038, one layer down.
+    /// </remarks>
+    private async Task<int> RetranslateRowsAsync(
+        IReadOnlyList<StringRowViewModel> rows,
+        int profileId,
+        string profileName,
+        CancellationToken cancellationToken,
+        ReasoningMode? reasoningOverride = null)
+    {
+        var provider = await providerFactory.CreateForProfileAsync(profileId, reasoningOverride, cancellationToken);
+        if (provider is null)
+        {
+            StatusText = $"O perfil \"{profileName}\" não existe mais. Recarregue a página ou revise Configurações.";
+            return 0;
+        }
+
+        var glossaryTerms = await glossaryService.GetTermsAsync(_project!.Id, cancellationToken);
+        var items = rows
+            .Select(row => new TranslationSourceItem(row.Id.ToString(CultureInfo.InvariantCulture), row.Original))
+            .ToList();
+
+        var outcomes = await translationOrchestrator.TranslateAsync(
+            items, provider, _project.SourceLocale, _project.TargetLocale, glossaryTerms, _project.CustomInstructions,
+            reuseTranslationMemory: false, cancellationToken);
+
+        var updates = new List<ProjectStringTranslationUpdate>();
+        var rowsById = rows.ToDictionary(row => row.Id);
+
+        foreach (var outcome in outcomes)
+        {
+            var stringId = int.Parse(outcome.Id, CultureInfo.InvariantCulture);
+            if (outcome.TranslatedText is null)
+            {
+                continue;
+            }
+
+            // Byte-identical means the engine independently arrived at what was already stored, which is
+            // not a change and must not flip the row's status or write a pointless revision.
+            if (rowsById.TryGetValue(stringId, out var row) && string.Equals(row.Translation, outcome.TranslatedText, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            var status = outcome.Success ? ProjectStringStatus.Refined : ProjectStringStatus.NeedsReview;
+            updates.Add(new ProjectStringTranslationUpdate(
+                stringId, outcome.TranslatedText, status, ValidationIssueText.Summarize(outcome.Issues)));
+        }
+
+        await projectStringService.UpdateTranslationsAsync(updates, cancellationToken);
+
+        foreach (var update in updates)
+        {
+            if (rowsById.TryGetValue(update.StringEntryId, out var row))
+            {
+                row.ApplyResult(update.TranslatedText, update.Status, update.IssueSummary);
+            }
+        }
+
+        return updates.Count;
+    }
+
+    /// <summary>The shared body of every refinement path. Returns how many rows actually came back improved.</summary>
+    private async Task<int> RefineRowsAsync(
+        IReadOnlyList<StringRowViewModel> rows,
+        int profileId,
+        string profileName,
+        CancellationToken cancellationToken,
+        ReasoningMode? reasoningOverride = null)
+    {
+        var provider = await providerFactory.CreateForProfileAsync(profileId, reasoningOverride, cancellationToken);
         if (provider is null)
         {
             StatusText = $"O perfil \"{profileName}\" não existe mais. Recarregue a página ou revise Configurações.";
@@ -1458,20 +1675,35 @@ public sealed partial class EditorPageViewModel(
             .Select(row => row.Id)
             .ToHashSet();
 
+        // Every label already translated somewhere in this project is a label the app can explain: the
+        // engine has produced Portuguese for those words before, so they are not the ones it gives up
+        // on. Read from the rows rather than from translation memory to keep this a lookup over data
+        // already in hand - the routing plan is built for tens of thousands of strings at once.
+        var knownLabels = _allRows
+            .Where(row => !string.IsNullOrWhiteSpace(row.Translation) && StringDifficulty.IsBareLabel(row.Original))
+            .Select(row => row.Original.Trim())
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
         return
         [
             .. pending.Select(entry => new RoutableItem(
                 new TranslationSourceItem(entry.Id.ToString(CultureInfo.InvariantCulture), entry.OriginalText),
                 new StringRiskContext(
                     PreviouslyFlaggedForReview: previouslyFlagged.Contains(entry.Id),
-                    HasGlossaryTerm: glossaryTerms.Any(term => term.AppearsIn(entry.OriginalText))))),
+                    HasGlossaryTerm: glossaryTerms.Any(term => term.AppearsIn(entry.OriginalText)),
+
+                    // A bare label the glossary does not cover and this project has never translated.
+                    // That combination, not shortness, is what the weak engine chokes on.
+                    IsUncoveredLabel: StringDifficulty.IsBareLabel(entry.OriginalText)
+                        && !glossaryTerms.Any(term => term.AppearsIn(entry.OriginalText))
+                        && !knownLabels.Contains(entry.OriginalText.Trim())))),
         ];
     }
 
     /// <summary>Builds the lane plan from the pipeline settings, or null (after setting a status) if an engine is missing.</summary>
     private async Task<RoutingPlan?> BuildRoutingPlanAsync(int primaryId, CancellationToken cancellationToken)
     {
-        var primaryProvider = await providerFactory.CreateForProfileAsync(primaryId, cancellationToken);
+        var primaryProvider = await providerFactory.CreateForProfileAsync(primaryId, reasoningOverride: null, cancellationToken);
         if (primaryProvider is null)
         {
             StatusText = "O perfil de tradução principal não existe mais. Revise Configurações.";
@@ -1494,7 +1726,7 @@ public sealed partial class EditorPageViewModel(
                     continue;
                 }
 
-                var provider = await providerFactory.CreateForProfileAsync(id, cancellationToken);
+                var provider = await providerFactory.CreateForProfileAsync(id, reasoningOverride: null, cancellationToken);
                 if (provider is null)
                 {
                     StatusText = "Um dos motores de roteamento não existe mais. Revise Configurações.";
@@ -1525,7 +1757,9 @@ public sealed partial class EditorPageViewModel(
     }
 
     [RelayCommand]
-    private async Task TranslateAsync()
+    private Task TranslateAsync() => RunTranslationAsync(ReuseTranslationMemory);
+
+    private async Task RunTranslationAsync(bool reuseTranslationMemory)
     {
         if (_project is null)
         {
@@ -1538,6 +1772,7 @@ public sealed partial class EditorPageViewModel(
         var succeeded = 0;
         var needsReview = 0;
         var failed = 0;
+        var reused = 0;
 
         try
         {
@@ -1583,6 +1818,11 @@ public sealed partial class EditorPageViewModel(
                 ? $"Traduzindo {pending.Count} string(s) com {preview.Lanes[0].Name}"
                 : "Traduzindo em paralelo: " + string.Join(", ", preview.Lanes.Select(lane => $"{lane.ItemCount} com {lane.Name}"));
 
+            if (!reuseTranslationMemory)
+            {
+                engineLine += " (sem reaproveitar a memória)";
+            }
+
             // Chunk size is scaled by the primary engine's own recommended concurrency, so a local
             // server that likes two queues still gets them.
             var checkpointSize = TranslationChunkSize * Math.Clamp(plan.Lanes[^1].Provider.Capabilities.RecommendedConcurrency, 1, 8);
@@ -1605,6 +1845,11 @@ public sealed partial class EditorPageViewModel(
                         {
                             failed++;
                             continue;
+                        }
+
+                        if (outcome.ReusedFromMemory)
+                        {
+                            reused++;
                         }
 
                         var status = outcome.Success ? ProjectStringStatus.Translated : ProjectStringStatus.NeedsReview;
@@ -1639,9 +1884,15 @@ public sealed partial class EditorPageViewModel(
                         ApplyFilter();
                     });
                 },
+                reuseTranslationMemory,
                 cancellationToken);
 
-            StatusText = $"Tradução concluída: {succeeded} traduzida(s), {needsReview} para revisar, {failed} sem resposta do motor.";
+            // The reuse count is stated out loud because it used to be invisible: a run that answered
+            // every string out of memory and never called an engine reported exactly the same
+            // "N traduzidas" as one that did all the work, which is how a discarded translation kept
+            // coming back looking freshly made.
+            StatusText = $"Tradução concluída: {succeeded} traduzida(s), {needsReview} para revisar, {failed} sem resposta do motor."
+                + (reused > 0 ? $" {reused} vieram da memória de tradução, sem passar por nenhum motor." : string.Empty);
         }
         catch (OperationCanceledException)
         {
@@ -1658,6 +1909,83 @@ public sealed partial class EditorPageViewModel(
             _translateCts?.Dispose();
             _translateCts = null;
         }
+    }
+
+    /// <summary>How many rows a restart would discard, and how many of those the user typed themselves.</summary>
+    public (int Total, int ManuallyEdited) CountRestartImpact()
+    {
+        var translated = _allRows.Where(row => !string.IsNullOrEmpty(row.Translation)).ToList();
+        return (translated.Count, translated.Count(row => row.Status is ProjectStringStatus.ManuallyEdited or ProjectStringStatus.Refined));
+    }
+
+    /// <summary>
+    /// Throws this project's translations away and translates every string again, from nothing.
+    /// </summary>
+    /// <remarks>
+    /// The missing answer to "this run came out badly, let me try another model". Everything the app had
+    /// for doing that over worked against it: reverting the lines puts them back to pending, but the next
+    /// run answers most of them straight out of translation memory, with the discarded text — and even
+    /// deleting the whole project from Home does not help, because the memory is keyed by source text and
+    /// survives the project that filled it. The result was an app that looked like it was re-translating
+    /// and was in fact replaying a translation the user had already rejected.
+    ///
+    /// So this does all three parts in one gesture: clear the translations (kept as revisions), forget
+    /// what they taught the memory for this locale pair, and run the pipeline with reuse switched off so
+    /// nothing else can answer for the engine.
+    /// </remarks>
+    /// <param name="keepManualEdits">
+    /// Leaves lines a human typed or refined untouched. On by default in the UI: those are the most
+    /// expensive lines in the project and they are rarely what a bad machine run damaged.
+    /// </param>
+    public async Task RestartTranslationAsync(bool keepManualEdits)
+    {
+        if (_project is null || IsTranslating)
+        {
+            return;
+        }
+
+        try
+        {
+            IsBusy = true;
+            StatusText = "Descartando as traduções anteriores...";
+
+            var doomed = _allRows
+                .Where(row => !string.IsNullOrEmpty(row.Translation))
+                .Where(row => !keepManualEdits || row.Status is not (ProjectStringStatus.ManuallyEdited or ProjectStringStatus.Refined))
+                .ToList();
+
+            if (doomed.Count == 0)
+            {
+                StatusText = "Não há tradução para descartar - o projeto já está todo pendente.";
+                return;
+            }
+
+            var cleared = await projectStringService.ClearTranslationsAsync([.. doomed.Select(row => row.Id)]);
+
+            foreach (var row in doomed)
+            {
+                row.ApplyResult(null, ProjectStringStatus.Pending, issueSummary: null);
+            }
+
+            // Without this the memory would still hold every discarded line, and the very next ordinary
+            // "Traduzir pendentes" (which does reuse it) would put them all back.
+            var forgotten = await translationMemory.DeleteManyAsync(
+                [.. doomed.Select(row => row.Original)], _project.SourceLocale, _project.TargetLocale);
+
+            ApplyFilter();
+            StatusText = $"{cleared:N0} tradução(ões) descartada(s) e {forgotten:N0} entrada(s) esquecida(s) na memória. Retraduzindo do zero...";
+        }
+        catch (Exception exception)
+        {
+            StatusText = $"Falha ao reiniciar ({exception.GetType().Name}): {exception.Message}";
+            return;
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+
+        await RunTranslationAsync(reuseTranslationMemory: false);
     }
 
     [RelayCommand]

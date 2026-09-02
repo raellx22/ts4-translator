@@ -46,6 +46,7 @@ public sealed class MultiEngineTranslator(ITranslationOrchestrator orchestrator)
         string? customInstructions,
         int chunkSize,
         Func<IReadOnlyList<TranslationOutcome>, string, CancellationToken, Task> onChunkCompleted,
+        bool reuseTranslationMemory = true,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(items);
@@ -76,6 +77,7 @@ public sealed class MultiEngineTranslator(ITranslationOrchestrator orchestrator)
                     targetLocale,
                     glossaryTerms,
                     customInstructions,
+                    reuseTranslationMemory,
                     cancellationToken).ConfigureAwait(false);
 
                 await persistenceLock.WaitAsync(cancellationToken).ConfigureAwait(false);

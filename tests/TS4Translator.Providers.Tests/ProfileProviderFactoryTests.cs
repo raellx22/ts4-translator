@@ -25,9 +25,15 @@ public class ProfileProviderFactoryTests
         private readonly Dictionary<int, string> _keys = [];
         private TranslationPipelineSettings _settings = new();
 
-        public ProviderProfile Add(int id, ProviderKind kind, string model = "m", string? apiKey = null, string endpoint = "https://example.test")
+        public ProviderProfile Add(
+            int id,
+            ProviderKind kind,
+            string model = "m",
+            string? apiKey = null,
+            string endpoint = "https://example.test",
+            ReasoningMode reasoning = ReasoningMode.Off)
         {
-            var profile = new ProviderProfile(id, $"perfil-{id}", kind, endpoint, model, 0.0, apiKey is not null);
+            var profile = new ProviderProfile(id, $"perfil-{id}", kind, endpoint, model, 0.0, apiKey is not null, reasoning);
             _profiles[id] = profile;
             if (apiKey is not null)
             {
@@ -45,7 +51,7 @@ public class ProfileProviderFactoryTests
         public Task<ProviderProfile?> GetAsync(int profileId, CancellationToken cancellationToken = default) =>
             Task.FromResult(_profiles.GetValueOrDefault(profileId));
 
-        public Task<ProviderProfile> SaveAsync(int? profileId, string name, ProviderKind kind, string endpoint, string? model, double temperature, string? apiKey, CancellationToken cancellationToken = default) =>
+        public Task<ProviderProfile> SaveAsync(int? profileId, string name, ProviderKind kind, string endpoint, string? model, double temperature, string? apiKey, ReasoningMode reasoning = ReasoningMode.Off, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
 
         public Task DeleteAsync(int profileId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
@@ -75,6 +81,9 @@ public class ProfileProviderFactoryTests
     /// <summary>The factory only wires the runtime in; nothing here should load a model.</summary>
     private sealed class FakeLocalModelRuntime : ILocalModelRuntime
     {
+        /// <summary>What the last translation call was told to do about reasoning.</summary>
+        public ReasoningMode? ObservedReasoning { get; private set; }
+
         public LocalModelStatus GetStatus(string? modelPath = null) =>
             new(LocalModelBackend.None, null, 0, "teste");
 
@@ -85,8 +94,13 @@ public class ProfileProviderFactoryTests
             IReadOnlyList<TS4Translator.Core.Glossary.GlossaryTerm>? glossaryTerms,
             string? customInstructions,
             string? modelPath,
-            CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException();
+            ReasoningMode reasoning = ReasoningMode.Off,
+            CancellationToken cancellationToken = default)
+        {
+            ObservedReasoning = reasoning;
+            return Task.FromResult<IReadOnlyList<TranslationResultItem>>(
+                [.. items.Select(item => new TranslationResultItem(item.Id, item.ProtectedText))]);
+        }
 
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
@@ -161,5 +175,54 @@ public class ProfileProviderFactoryTests
         profiles.Add(1, ProviderKind.Argos);
 
         Assert.NotNull(await factory.CreateForProfileAsync(1));
+    }
+
+    /// <summary>
+    /// The reasoning switch is stored on the profile and has to reach the engine that honours it —
+    /// a setting saved in Configurações and dropped on the way to llama.cpp would look exactly like a
+    /// model that ignores it.
+    /// </summary>
+    [Theory]
+    [InlineData(ReasoningMode.Off)]
+    [InlineData(ReasoningMode.On)]
+    [InlineData(ReasoningMode.ModelDefault)]
+    public async Task CreateForProfileAsync_LocalModel_CarriesTheProfilesReasoningModeToTheRuntime(ReasoningMode mode)
+    {
+        var profiles = new FakeProfileService();
+        var runtime = new FakeLocalModelRuntime();
+        var factory = new ProfileProviderFactory(profiles, new HttpClient(), new FakeArgosRuntimeManager(), runtime);
+        profiles.Add(1, ProviderKind.LocalModel, model: "C:/models/whatever.gguf", reasoning: mode);
+
+        var provider = await factory.CreateForProfileAsync(1);
+        await provider!.TranslateBatchAsync(
+            [new TranslationRequestItem("1", "Hello.")],
+            System.Globalization.CultureInfo.GetCultureInfo("en-US"),
+            System.Globalization.CultureInfo.GetCultureInfo("pt-BR"));
+
+        Assert.Equal(mode, runtime.ObservedReasoning);
+    }
+
+    /// <summary>
+    /// "Repensar" spends reasoning on a handful of damaged lines without the user having to go and flip
+    /// the profile — and, more importantly, without the flip being left on for the next whole mod.
+    /// </summary>
+    [Fact]
+    public async Task CreateForProfileAsync_ReasoningOverride_WinsForThisRunAndDoesNotTouchTheProfile()
+    {
+        var profiles = new FakeProfileService();
+        var runtime = new FakeLocalModelRuntime();
+        var factory = new ProfileProviderFactory(profiles, new HttpClient(), new FakeArgosRuntimeManager(), runtime);
+        profiles.Add(1, ProviderKind.LocalModel, model: "C:/models/qwen3.gguf", reasoning: ReasoningMode.Off);
+
+        var provider = await factory.CreateForProfileAsync(1, ReasoningMode.On);
+        await provider!.TranslateBatchAsync(
+            [new TranslationRequestItem("1", "Attractiveness Tuner")],
+            System.Globalization.CultureInfo.GetCultureInfo("en-US"),
+            System.Globalization.CultureInfo.GetCultureInfo("pt-BR"));
+
+        Assert.Equal(ReasoningMode.On, runtime.ObservedReasoning);
+
+        // The stored profile is untouched, so the next ordinary run is back to what the user configured.
+        Assert.Equal(ReasoningMode.Off, (await profiles.GetAsync(1))!.Reasoning);
     }
 }

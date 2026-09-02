@@ -15,6 +15,7 @@ public interface IProviderProfileService
     /// Creates a profile, or updates the one whose id is <paramref name="profileId"/>.
     /// </summary>
     /// <param name="apiKey">Null leaves a previously stored key untouched; an empty string clears it.</param>
+    /// <param name="reasoning">Whether the engine should think before answering, where it can.</param>
     Task<ProviderProfile> SaveAsync(
         int? profileId,
         string name,
@@ -23,6 +24,7 @@ public interface IProviderProfileService
         string? model,
         double temperature,
         string? apiKey,
+        ReasoningMode reasoning = ReasoningMode.Off,
         CancellationToken cancellationToken = default);
 
     /// <summary>Deletes a profile and its stored key, and clears it from any pipeline role it held.</summary>

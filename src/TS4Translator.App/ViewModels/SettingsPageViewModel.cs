@@ -89,6 +89,38 @@ public sealed partial class SettingsPageViewModel(
     [ObservableProperty]
     public partial string EditorModelsStatus { get; set; } = string.Empty;
 
+    /// <summary>Whether this engine thinks before answering — see <see cref="ReasoningMode"/>.</summary>
+    [ObservableProperty]
+    public partial string EditorReasoningLabel { get; set; } = ReasoningModeLabels.Off;
+
+    public IReadOnlyList<string> ReasoningOptions { get; } = ReasoningModeLabels.All;
+
+    /// <summary>Explains the selected choice, and whether this particular .gguf can honour it at all.</summary>
+    public string EditorReasoningDescription
+    {
+        get
+        {
+            var description = ReasoningModeLabels.Describe(EditorReasoning);
+
+            // Said plainly, because the alternative is a switch that silently does nothing: the mode is
+            // a request to the model's own chat template, and most translation GGUFs have no thinking in
+            // them to switch on. The file's header answers this without loading a single tensor.
+            return _editorModelSupportsReasoning switch
+            {
+                true => description,
+                false => $"{description}\n\nEste modelo .gguf não tem raciocínio - o template de chat dele não menciona <think>, então qualquer opção aqui dá no mesmo.",
+                null => $"{description}\n\nEscolha um arquivo .gguf para o app conferir se ele tem raciocínio.",
+            };
+        }
+    }
+
+    private ReasoningMode EditorReasoning => ReasoningModeLabels.ToMode(EditorReasoningLabel);
+
+    /// <summary>Null until a model file has been read; then whether its chat template deals in thinking.</summary>
+    private bool? _editorModelSupportsReasoning;
+
+    partial void OnEditorReasoningLabelChanged(string value) => OnPropertyChanged(nameof(EditorReasoningDescription));
+
     private int? _editingProfileId;
 
     /// <summary>Disambiguated display name per profile id — see <see cref="ReloadAsync"/>.</summary>
@@ -379,6 +411,7 @@ public sealed partial class SettingsPageViewModel(
         EditorKindDescription = ProviderKindLabels.Describe(ProviderKind.Argos);
         EditorModelOptions.Clear();
         EditorModelsStatus = string.Empty;
+        EditorReasoningLabel = ReasoningModeLabels.Off;
         OnPropertyChanged(nameof(EditorCanListModels));
         IsEditingProfile = true;
     }
@@ -403,8 +436,14 @@ public sealed partial class SettingsPageViewModel(
         EditorKindDescription = ProviderKindLabels.Describe(profile.Kind);
         EditorModelOptions.Clear();
         EditorModelsStatus = string.Empty;
+        EditorReasoningLabel = ReasoningModeLabels.ToLabel(profile.Reasoning);
         OnPropertyChanged(nameof(EditorCanListModels));
         IsEditingProfile = true;
+
+        if (profile.Kind == ProviderKind.LocalModel)
+        {
+            RefreshLocalModelStatus();
+        }
     }
 
     [RelayCommand]
@@ -498,7 +537,8 @@ public sealed partial class SettingsPageViewModel(
             // secret, so an empty box after opening the editor just means the user didn't retype it.
             var apiKey = string.IsNullOrEmpty(EditorApiKey) ? null : EditorApiKey;
 
-            var saved = await profileService.SaveAsync(_editingProfileId, EditorName, kind, endpoint, model, temperature: 0.0, isZeroConfiguration ? null : apiKey);
+            var saved = await profileService.SaveAsync(
+                _editingProfileId, EditorName, kind, endpoint, model, temperature: 0.0, isZeroConfiguration ? null : apiKey, EditorReasoning);
 
             // Kept open on a brand-new profile so "Buscar modelos" becomes usable immediately - it needs
             // a stored key, which only exists once the profile has been saved at least once.
@@ -721,13 +761,38 @@ public sealed partial class SettingsPageViewModel(
     {
         var status = localModelRuntime.GetStatus(string.IsNullOrWhiteSpace(EditorModel) ? null : EditorModel);
 
-        LocalModelStatusText = status.Message;
+        // Read out of the .gguf's own header, so the reasoning picker below can say whether it would do
+        // anything for this file instead of leaving the user to find out over a whole mod.
+        _editorModelSupportsReasoning = status.ModelPath is null ? null : status.SupportsReasoning;
+        OnPropertyChanged(nameof(EditorReasoningDescription));
+
+        LocalModelStatusText = status.Model is { } model
+            ? $"{status.Message} {Describe(model)}"
+            : status.Message;
+
         LocalModelSeverity = status switch
         {
             { IsReady: false } => InfoBarSeverity.Error,
             { IsCpuOnly: true } => InfoBarSeverity.Warning,
             _ => InfoBarSeverity.Success,
         };
+    }
+
+    private static string Describe(GgufModelInfo model)
+    {
+        var parts = new List<string>(3);
+        if (!string.IsNullOrWhiteSpace(model.Name))
+        {
+            parts.Add(model.Name);
+        }
+
+        if (!string.IsNullOrWhiteSpace(model.Architecture))
+        {
+            parts.Add(model.Architecture);
+        }
+
+        parts.Add(model.SupportsReasoning ? "com raciocínio" : "sem raciocínio");
+        return $"({string.Join(" · ", parts)})";
     }
 
     [RelayCommand]

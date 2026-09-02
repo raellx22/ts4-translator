@@ -30,6 +30,10 @@ public interface IMultiEngineTranslator
     /// that produced them. Persistence stays the caller's job — that is what lets a cancelled run keep
     /// everything already done. Implementations must never invoke it from two lanes concurrently.
     /// </param>
+    /// <param name="reuseTranslationMemory">
+    /// Forwarded to <see cref="ITranslationOrchestrator.TranslateAsync"/>; false makes every lane call
+    /// its engine even for strings the memory already answers.
+    /// </param>
     Task TranslateAsync(
         IReadOnlyList<RoutableItem> items,
         RoutingPlan plan,
@@ -39,6 +43,7 @@ public interface IMultiEngineTranslator
         string? customInstructions,
         int chunkSize,
         Func<IReadOnlyList<TranslationOutcome>, string, CancellationToken, Task> onChunkCompleted,
+        bool reuseTranslationMemory = true,
         CancellationToken cancellationToken = default);
 }
 

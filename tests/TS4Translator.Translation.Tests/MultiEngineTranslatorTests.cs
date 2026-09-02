@@ -196,7 +196,7 @@ public sealed class MultiEngineTranslatorTests
                     await cts.CancelAsync();
                     ct.ThrowIfCancellationRequested();
                 },
-                cts.Token);
+                cancellationToken: cts.Token);
         });
     }
 }

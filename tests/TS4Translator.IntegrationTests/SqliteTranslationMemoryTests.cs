@@ -251,6 +251,38 @@ public sealed class SqliteTranslationMemoryTests : IDisposable
     }
 
     /// <summary>
+    /// What "apagar o projeto e refazer do zero" needs: the lines of one mod forgotten in one pass,
+    /// without touching anything else the memory holds.
+    /// </summary>
+    [Fact]
+    public async Task DeleteManyAsync_ForgetsOnlyTheGivenTextsForThatLocalePair()
+    {
+        await SeedAsync(("Shallow", "Raso", "argos"), ("Average Hips", "Quadril médio", "argos"), ("Deep", "Fundo", "argos"));
+        await _sut.SaveAsync(new TranslationMemoryEntry("Shallow", English, French, "Peu profond", "argos", null, DateTimeOffset.UtcNow));
+
+        var removed = await _sut.DeleteManyAsync(["Shallow", "Deep", "Nunca existiu"], English, PortugueseBrazil);
+
+        Assert.Equal(2, removed);
+        Assert.Null(await _sut.FindExactAsync("Shallow", English, PortugueseBrazil));
+        Assert.Null(await _sut.FindExactAsync("Deep", English, PortugueseBrazil));
+        Assert.NotNull(await _sut.FindExactAsync("Average Hips", English, PortugueseBrazil));
+        // Another locale pair is another entry entirely, and is none of this call's business.
+        Assert.NotNull(await _sut.FindExactAsync("Shallow", English, French));
+    }
+
+    /// <summary>Chunked internally to stay under SQLite's parameter cap — a real mod is thousands of lines.</summary>
+    [Fact]
+    public async Task DeleteManyAsync_MoreTextsThanOneStatementHolds_RemovesThemAll()
+    {
+        var texts = Enumerable.Range(0, 1200).Select(index => $"Line {index}").ToList();
+        await _sut.SaveManyAsync(
+            [.. texts.Select(text => new TranslationMemoryEntry(text, English, PortugueseBrazil, $"Linha {text}", "argos", null, DateTimeOffset.UtcNow))]);
+
+        Assert.Equal(1200, await _sut.DeleteManyAsync(texts, English, PortugueseBrazil));
+        Assert.Equal(0, (await _sut.SearchAsync(null, null, 0, 50)).TotalMatches);
+    }
+
+    /// <summary>
     /// A human correction has to win over the machine entry it replaces — same key, so it overwrites
     /// rather than piling up a second answer for the same source text.
     /// </summary>

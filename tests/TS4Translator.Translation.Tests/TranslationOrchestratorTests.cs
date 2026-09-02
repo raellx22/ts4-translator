@@ -42,7 +42,40 @@ public class TranslationOrchestratorTests
         var outcomes = await _sut.TranslateAsync(items, provider, English, PortugueseBrazil);
 
         Assert.Equal("Olá.", outcomes[0].TranslatedText);
+        Assert.True(outcomes[0].ReusedFromMemory);
         Assert.Empty(provider.ObservedBatchSizes);
+    }
+
+    /// <summary>
+    /// The escape hatch behind "Retraduzir do zero". Without it a rejected translation is permanent: the
+    /// memory outlives the project that produced it, so re-importing the mod and translating again
+    /// replays the same text and the engine is never asked.
+    /// </summary>
+    [Fact]
+    public async Task TranslateAsync_ReuseDisabled_CallsProviderEvenForAnExactMemoryHit()
+    {
+        await _memory.SaveAsync(new Core.Memory.TranslationMemoryEntry("Hello there.", English, PortugueseBrazil, "Olá.", "manual", null, DateTimeOffset.UtcNow));
+        var provider = new FakeTranslationProvider();
+        var items = new[] { new TranslationSourceItem("1", "Hello there.") };
+
+        var outcomes = await _sut.TranslateAsync(items, provider, English, PortugueseBrazil, reuseTranslationMemory: false);
+
+        Assert.Equal("[fake] Hello there.", outcomes[0].TranslatedText);
+        Assert.False(outcomes[0].ReusedFromMemory);
+        Assert.Equal(1, Assert.Single(provider.ObservedBatchSizes));
+    }
+
+    /// <summary>A fresh run still teaches the memory — that is what replaces the entry it disagreed with.</summary>
+    [Fact]
+    public async Task TranslateAsync_ReuseDisabled_StillWritesTheNewResultToMemory()
+    {
+        await _memory.SaveAsync(new Core.Memory.TranslationMemoryEntry("Hello there.", English, PortugueseBrazil, "Olá.", "manual", null, DateTimeOffset.UtcNow));
+        var items = new[] { new TranslationSourceItem("1", "Hello there.") };
+
+        await _sut.TranslateAsync(items, new FakeTranslationProvider(), English, PortugueseBrazil, reuseTranslationMemory: false);
+
+        var stored = await _memory.FindExactAsync("Hello there.", English, PortugueseBrazil);
+        Assert.Equal("[fake] Hello there.", stored?.TranslatedText);
     }
 
     [Fact]

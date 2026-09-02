@@ -1,5 +1,6 @@
 using System.Globalization;
 using TS4Translator.Core.Glossary;
+using TS4Translator.Core.Providers;
 using TS4Translator.Core.Translation;
 
 namespace TS4Translator.Providers.LocalModel;
@@ -21,6 +22,10 @@ public interface ILocalModelRuntime : IAsyncDisposable
     /// Translates a batch. Parallelism happens inside: the engine decodes several sequences per step,
     /// so callers must not invoke this concurrently.
     /// </summary>
+    /// <param name="reasoning">
+    /// Whether this model should think before answering. Ignored, harmlessly, by a model whose chat
+    /// template knows nothing about thinking — the mode cannot add a capability the weights do not have.
+    /// </param>
     Task<IReadOnlyList<TranslationResultItem>> TranslateAsync(
         IReadOnlyList<TranslationRequestItem> items,
         CultureInfo sourceLocale,
@@ -28,5 +33,6 @@ public interface ILocalModelRuntime : IAsyncDisposable
         IReadOnlyList<GlossaryTerm>? glossaryTerms,
         string? customInstructions,
         string? modelPath,
+        ReasoningMode reasoning = ReasoningMode.Off,
         CancellationToken cancellationToken = default);
 }

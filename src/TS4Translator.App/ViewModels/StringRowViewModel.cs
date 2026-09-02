@@ -1,5 +1,7 @@
 using CommunityToolkit.Mvvm.ComponentModel;
+using Microsoft.UI.Xaml;
 using TS4Translator.Core.Projects;
+using TS4Translator.Core.Translation;
 
 namespace TS4Translator.App.ViewModels;
 
@@ -50,6 +52,23 @@ public sealed partial class StringRowViewModel(ProjectStringEntry entry) : Obser
     public bool CanRefine => !string.IsNullOrWhiteSpace(Translation);
 
     /// <summary>
+    /// What the stored translation looks like it lost, computed once and kept until the row changes.
+    /// </summary>
+    /// <remarks>
+    /// Cached because the editor holds every row of the project — a hundred and forty nine thousand of
+    /// them for WickedWhims — and the suspicion filter would otherwise re-score all of them on every
+    /// keystroke in the search box.
+    /// </remarks>
+    public SuspicionAssessment Suspicion => _suspicion ??= TranslationSuspicion.Assess(Original, Translation);
+
+    private SuspicionAssessment? _suspicion;
+
+    /// <summary>Plain-language "what is missing here", empty when nothing is.</summary>
+    public string SuspicionText => Suspicion.IsSuspect ? SuspicionReasonText.Summarize(Suspicion) : string.Empty;
+
+    public Visibility SuspicionVisibility => Suspicion.IsSuspect ? Visibility.Visible : Visibility.Collapsed;
+
+    /// <summary>
     /// The translation as it is currently stored. The editor's translation box saves on LostFocus, so
     /// without this every click into a box and back out again would be persisted as a manual edit and
     /// flip a perfectly good machine translation to "Editado manualmente" — losing the real status and
@@ -66,7 +85,15 @@ public sealed partial class StringRowViewModel(ProjectStringEntry entry) : Obser
         Status = status;
         WasEverFlaggedForReview |= status == ProjectStringStatus.NeedsReview;
         StatusText = Describe(status, issueSummary);
+
+        // The translation changed, so what it was missing is no longer known - re-scored on next read.
+        // Forgetting this is how a row would stay in the suspicion queue after being repaired.
+        _suspicion = null;
+
         OnPropertyChanged(nameof(CanRefine));
+        OnPropertyChanged(nameof(Suspicion));
+        OnPropertyChanged(nameof(SuspicionText));
+        OnPropertyChanged(nameof(SuspicionVisibility));
     }
 
     private static string Describe(ProjectStringStatus status, string? issueSummary) => status switch

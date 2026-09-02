@@ -1,5 +1,6 @@
 using System.Globalization;
 using TS4Translator.Core.Glossary;
+using TS4Translator.Core.Providers;
 using TS4Translator.Core.Translation;
 
 namespace TS4Translator.Providers.LocalModel;
@@ -14,7 +15,10 @@ namespace TS4Translator.Providers.LocalModel;
 /// translating game UI, and no amount of configuration changes that. This one is instruction-following,
 /// so everything the app knows about a string reaches the engine that translates it.
 /// </remarks>
-public sealed class LocalModelProvider(ILocalModelRuntime runtime, string? modelPath) : ITranslationProvider
+public sealed class LocalModelProvider(
+    ILocalModelRuntime runtime,
+    string? modelPath,
+    ReasoningMode reasoning = ReasoningMode.Off) : ITranslationProvider
 {
     public string Name => "local-gguf";
 
@@ -44,5 +48,5 @@ public sealed class LocalModelProvider(ILocalModelRuntime runtime, string? model
         IReadOnlyList<GlossaryTerm>? glossaryTerms = null,
         string? customInstructions = null,
         CancellationToken cancellationToken = default)
-        => runtime.TranslateAsync(items, sourceLocale, targetLocale, glossaryTerms, customInstructions, modelPath, cancellationToken);
+        => runtime.TranslateAsync(items, sourceLocale, targetLocale, glossaryTerms, customInstructions, modelPath, reasoning, cancellationToken);
 }

@@ -192,6 +192,10 @@ namespace TS4Translator.Persistence.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("Reasoning")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
                     b.Property<double>("Temperature")
                         .HasColumnType("REAL");
 

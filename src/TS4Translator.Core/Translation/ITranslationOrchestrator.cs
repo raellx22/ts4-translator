@@ -20,6 +20,16 @@ public interface ITranslationOrchestrator
     /// provider unchanged on every batch of this run - unlike <paramref name="glossaryTerms"/>, this is
     /// not content-dependent, so there is nothing to filter per batch.
     /// </param>
+    /// <param name="reuseTranslationMemory">
+    /// False sends every item to <paramref name="provider"/> even when memory already holds an answer.
+    /// </param>
+    /// <remarks>
+    /// Reuse is on by default and is the whole point of the memory — but it is also why a bad run is so
+    /// hard to get rid of: the memory outlives the project it was produced in, so deleting the project
+    /// and importing the mod again replays the same wrong translations without touching an engine. Any
+    /// "do this over" or "try another model" path has to be able to switch it off, and results are still
+    /// written back afterwards, so a fresh run replaces what it disagreed with.
+    /// </remarks>
     Task<IReadOnlyList<TranslationOutcome>> TranslateAsync(
         IReadOnlyList<TranslationSourceItem> items,
         ITranslationProvider provider,
@@ -27,6 +37,7 @@ public interface ITranslationOrchestrator
         CultureInfo targetLocale,
         IReadOnlyList<GlossaryTerm>? glossaryTerms = null,
         string? customInstructions = null,
+        bool reuseTranslationMemory = true,
         CancellationToken cancellationToken = default);
 
     /// <summary>

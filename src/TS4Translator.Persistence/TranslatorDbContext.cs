@@ -63,9 +63,11 @@ public sealed class TranslatorDbContext(DbContextOptions<TranslatorDbContext> op
         // Stored as the enum's name ("DeepL", not 1) so the column stays readable and stable even if
         // ProviderKind's members are ever reordered. Deliberately NOT unique per kind: having two
         // profiles of the same engine (a local server and a remote one, two Gemini keys) is the point.
-        modelBuilder.Entity<ProviderProfileRecord>()
-            .Property(r => r.Kind)
-            .HasConversion<string>();
+        modelBuilder.Entity<ProviderProfileRecord>(entity =>
+        {
+            entity.Property(r => r.Kind).HasConversion<string>();
+            entity.Property(r => r.Reasoning).HasConversion<string>();
+        });
 
         modelBuilder.Entity<TranslationPipelineRecord>(entity =>
         {

@@ -79,6 +79,41 @@ public interface ITranslationMemory
     /// <returns>How many entries were removed.</returns>
     Task<int> DeleteByProviderAsync(string provider, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Forgets every one of <paramref name="originalTexts"/> for this locale pair.
+    /// </summary>
+    /// <remarks>
+    /// What "start this mod over" actually needs. The memory is keyed by source text alone, so a project
+    /// deleted from Home leaves behind everything it taught: re-importing the same `.package` and asking
+    /// for a translation hands back the exact run the user threw away, without the engine ever being
+    /// called. Addressing the removal by the project's own source texts is the only scope that means
+    /// anything here — there is deliberately no project column to filter on, because a line translated
+    /// once should serve every mod that repeats it.
+    ///
+    /// Overlap with other projects is real and accepted: a shared line forgotten here is simply
+    /// translated again next time it comes up.
+    /// </remarks>
+    /// <returns>How many entries were removed.</returns>
+    async Task<int> DeleteManyAsync(
+        IReadOnlyList<string> originalTexts,
+        CultureInfo sourceLocale,
+        CultureInfo targetLocale,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(originalTexts);
+
+        var removed = 0;
+        foreach (var text in originalTexts)
+        {
+            if (await DeleteAsync(text, sourceLocale, targetLocale, cancellationToken).ConfigureAwait(false))
+            {
+                removed++;
+            }
+        }
+
+        return removed;
+    }
+
     /// <summary>Stores a completed provider batch transactionally when the backing store supports it.</summary>
     async Task SaveManyAsync(IReadOnlyList<TranslationMemoryEntry> entries, CancellationToken cancellationToken = default)
     {

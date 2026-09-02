@@ -30,9 +30,21 @@
             Orientation="Horizontal"
             Spacing="12">
             <Button Command="{x:Bind ViewModel.TranslateCommand}" Content="Traduzir pendentes" IsEnabled="{x:Bind Not(ViewModel.IsTranslating), Mode=OneWay}" />
+            <!--  Existe porque reverter as linhas nao bastava: a memoria e global e sobrevive ao projeto,
+                  entao a rodada seguinte devolvia a mesma traducao descartada sem chamar motor nenhum.  -->
+            <Button
+                Click="RestartTranslation_Click"
+                Content="Retraduzir do zero..."
+                IsEnabled="{x:Bind Not(ViewModel.IsTranslating), Mode=OneWay}"
+                ToolTipService.ToolTip="Descarta as traduções deste projeto, esquece o que elas ensinaram à memória e traduz tudo de novo pelo motor. Serve para testar outro modelo no mesmo mod." />
             <Button Command="{x:Bind ViewModel.CancelTranslateCommand}" Content="Cancelar" Visibility="{x:Bind BoolToVisibility(ViewModel.IsTranslating), Mode=OneWay}" />
             <Button Command="{x:Bind ViewModel.EstimateCommand}" Content="Estimar custo" />
             <Button Command="{x:Bind ViewModel.ExportCommand}" Content="Exportar" />
+            <CheckBox
+                VerticalAlignment="Center"
+                Content="Reaproveitar a memória"
+                IsChecked="{x:Bind ViewModel.ReuseTranslationMemory, Mode=TwoWay}"
+                ToolTipService.ToolTip="Ligado, uma frase que o app já traduziu antes volta da memória sem passar por motor nenhum — rápido e de graça, mas repete o resultado antigo. Desligue para obrigar o motor escolhido a responder tudo de novo." />
             <ProgressRing
                 Width="20"
                 Height="20"
@@ -55,6 +67,14 @@
                 Command="{x:Bind ViewModel.RefineNeedsReviewCommand}"
                 Content="Revisar as marcadas (em lote)"
                 IsEnabled="{x:Bind Not(ViewModel.IsTranslating), Mode=OneWay}" />
+            <!--  A fila oposta a "Revisar": estas passaram na validacao e estao erradas assim mesmo.
+                  Gasta raciocinio so aqui, que e onde ele paga.  -->
+            <Button
+                VerticalAlignment="Bottom"
+                Click="RethinkSuspects_Click"
+                Content="Repensar as suspeitas"
+                IsEnabled="{x:Bind Not(ViewModel.IsTranslating), Mode=OneWay}"
+                ToolTipService.ToolTip="Manda de volta ao motor escolhido, com o raciocínio do modelo ligado, só as traduções que parecem ter perdido pedaço do original." />
         </StackPanel>
 
         <!--  Ida e volta por arquivo de texto para um chat de IA externo. O alcance é uma escolha
@@ -297,6 +317,13 @@
                                 IsEnabled="{x:Bind CanRefine, Mode=OneWay}"
                                 Tag="{x:Bind}"
                                 ToolTipService.ToolTip="Refinar esta tradução com o motor escolhido acima" />
+                            <Button
+                                Click="RethinkRow_Click"
+                                Content="&#xE9CE;"
+                                FontFamily="{StaticResource SymbolThemeFontFamily}"
+                                IsEnabled="{x:Bind CanRefine, Mode=OneWay}"
+                                Tag="{x:Bind}"
+                                ToolTipService.ToolTip="Repensar: manda de volta ao mesmo motor, mas com o raciocínio do modelo ligado. Para as frases curtas com pegadinha que o motor simplificou." />
                             <ProgressRing
                                 Width="16"
                                 Height="16"
@@ -315,6 +342,14 @@
                                 Opacity="0.5"
                                 Text="{x:Bind SourceModName}"
                                 TextWrapping="Wrap" />
+                            <!--  Diz o que sumiu, nao que regra disparou - e o suficiente para julgar a
+                                  linha de relance, sem reler os dois textos lado a lado.  -->
+                            <TextBlock
+                                FontSize="11"
+                                Foreground="{ThemeResource SystemFillColorCautionBrush}"
+                                Text="{x:Bind SuspicionText, Mode=OneWay}"
+                                TextWrapping="Wrap"
+                                Visibility="{x:Bind SuspicionVisibility, Mode=OneWay}" />
                         </StackPanel>
 
                         <!--  Right-click anywhere on the row. Tag carries the row itself: binding a
@@ -335,6 +370,10 @@
                                     Click="RefineRow_Click"
                                     Tag="{x:Bind}"
                                     Text="Refinar esta tradução" />
+                                <MenuFlyoutItem
+                                    Click="RethinkRow_Click"
+                                    Tag="{x:Bind}"
+                                    Text="Repensar (com raciocínio ligado)" />
                                 <MenuFlyoutItem
                                     Click="AddToGlossary_Click"
                                     Tag="{x:Bind}"

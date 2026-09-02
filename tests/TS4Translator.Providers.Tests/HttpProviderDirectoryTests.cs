@@ -16,7 +16,7 @@ public sealed class HttpProviderDirectoryTests
         public Task<string?> GetApiKeyAsync(int profileId, CancellationToken cancellationToken = default) =>
             Task.FromResult(apiKey);
 
-        public Task<ProviderProfile> SaveAsync(int? profileId, string name, ProviderKind kind, string endpoint, string? model, double temperature, string? key, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<ProviderProfile> SaveAsync(int? profileId, string name, ProviderKind kind, string endpoint, string? model, double temperature, string? key, ReasoningMode reasoning = ReasoningMode.Off, CancellationToken cancellationToken = default) => throw new NotSupportedException();
 
         public Task DeleteAsync(int profileId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
 

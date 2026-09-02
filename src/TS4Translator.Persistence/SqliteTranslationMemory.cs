@@ -203,6 +203,48 @@ public sealed class SqliteTranslationMemory(IDbContextFactory<TranslatorDbContex
         return removed > 0;
     }
 
+    /// <summary>
+    /// Deletes by hash in chunks, rather than one statement per text as the interface's default does.
+    /// </summary>
+    /// <remarks>
+    /// The caller here is "forget this project": a real mod is several thousand strings, and the default
+    /// implementation would open a transaction per string. The chunk size stays well under SQLite's
+    /// 999-parameter limit for a single statement.
+    /// </remarks>
+    public async Task<int> DeleteManyAsync(
+        IReadOnlyList<string> originalTexts,
+        CultureInfo sourceLocale,
+        CultureInfo targetLocale,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(originalTexts);
+        ArgumentNullException.ThrowIfNull(sourceLocale);
+        ArgumentNullException.ThrowIfNull(targetLocale);
+
+        if (originalTexts.Count == 0)
+        {
+            return 0;
+        }
+
+        await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+
+        var source = sourceLocale.Name;
+        var target = targetLocale.Name;
+        var removed = 0;
+
+        foreach (var chunk in originalTexts.Select(ComputeHash).Distinct(StringComparer.Ordinal).Chunk(500))
+        {
+            removed += await dbContext.TranslationMemory
+                .Where(record => chunk.Contains(record.OriginalHash)
+                    && record.SourceLocale == source
+                    && record.TargetLocale == target)
+                .ExecuteDeleteAsync(cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        return removed;
+    }
+
     public async Task<int> DeleteByProviderAsync(string provider, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(provider);

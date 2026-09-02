@@ -41,6 +41,16 @@ public sealed partial class HomePage : Page
             return;
         }
 
+        // A memória de tradução não é do projeto: ela é global, guardada por texto original, e continua
+        // ali depois que o projeto some. Sem dizer isso aqui, apagar o projeto e reimportar o mesmo mod
+        // devolvia exatamente as traduções que o usuário tinha jogado fora, sem chamar motor nenhum -
+        // e não havia nada na tela que explicasse por quê.
+        var forget = new CheckBox
+        {
+            Content = "Esquecer também estas traduções na memória",
+            IsChecked = false,
+        };
+
         // Deleting a project throws away every translation in it - on the user's real WickedWhims
         // project that is a hundred and forty nine thousand rows and hours of engine time. It is not
         // undoable, so it does not happen on one stray click.
@@ -48,7 +58,28 @@ public sealed partial class HomePage : Page
         {
             XamlRoot = XamlRoot,
             Title = "Apagar este projeto?",
-            Content = $"\"{card.Name}\" e todas as suas {card.Progress.Total:N0} string(s) traduzidas serão apagadas. Os arquivos .package originais não são tocados, mas o trabalho de tradução não tem como ser recuperado.",
+            Content = new StackPanel
+            {
+                Spacing = 12,
+                Children =
+                {
+                    new TextBlock
+                    {
+                        Text = $"\"{card.Name}\" e todas as suas {card.Progress.Total:N0} string(s) traduzidas serão apagadas. "
+                            + "Os arquivos .package originais não são tocados, mas o trabalho de tradução não tem como ser recuperado.",
+                        TextWrapping = TextWrapping.Wrap,
+                    },
+                    forget,
+                    new TextBlock
+                    {
+                        Text = "A memória de tradução é global e não vai junto: sem marcar isto, reimportar o mesmo mod e mandar "
+                            + "traduzir devolve estas mesmas traduções sem passar por nenhum motor. Marque se elas ficaram ruins e "
+                            + "você quer refazer com outro modelo; deixe desmarcado para não perder linhas que outros mods também usam.",
+                        TextWrapping = TextWrapping.Wrap,
+                        Opacity = 0.75,
+                    },
+                },
+            },
             PrimaryButtonText = "Apagar",
             CloseButtonText = "Cancelar",
             DefaultButton = ContentDialogButton.Close,
@@ -56,7 +87,7 @@ public sealed partial class HomePage : Page
 
         if (await dialog.ShowAsync() == ContentDialogResult.Primary)
         {
-            await ViewModel.DeleteProjectAsync(card);
+            await ViewModel.DeleteProjectAsync(card, forget.IsChecked == true);
         }
     }
 

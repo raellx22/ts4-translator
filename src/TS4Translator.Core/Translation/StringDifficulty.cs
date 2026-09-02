@@ -87,10 +87,29 @@ public static partial class StringDifficulty
             {
                 score += 10;
             }
+
+            // The heaviest single factor, and the only one large enough to lift a bare label over a
+            // routing threshold on its own. Measured: every string the small engine handed back
+            // untranslated was a label of this kind, and their average score without this was 14 - well
+            // under any usable threshold - while the prose the engine handled comfortably averaged 24.
+            // Weighted to clear the default threshold of 35 from a typical short label's base of ~13,
+            // because a label the app cannot explain is precisely the string a weak engine gives up on.
+            if (context.IsUncoveredLabel)
+            {
+                score += 30;
+            }
         }
 
         return Math.Clamp(score, 0, 100);
     }
+
+    /// <summary>
+    /// Whether <paramref name="text"/> is a bare UI label — the shape that decides
+    /// <see cref="StringRiskContext.IsUncoveredLabel"/>, exposed so callers apply the same test the
+    /// score does instead of inventing a second definition of "short".
+    /// </summary>
+    public static bool IsBareLabel(string? text) =>
+        !string.IsNullOrWhiteSpace(text) && IsShortAndContextless(text);
 
     /// <summary>
     /// Three words or fewer, short, and with no sentence punctuation — a UI label rather than prose.

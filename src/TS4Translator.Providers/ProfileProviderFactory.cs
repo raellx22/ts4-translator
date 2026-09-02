@@ -20,7 +20,10 @@ public sealed class ProfileProviderFactory(
     IArgosRuntimeManager argosRuntimeManager,
     ILocalModelRuntime localModelRuntime) : ITranslationProviderFactory
 {
-    public async Task<ITranslationProvider?> CreateForProfileAsync(int profileId, CancellationToken cancellationToken = default)
+    public async Task<ITranslationProvider?> CreateForProfileAsync(
+        int profileId,
+        ReasoningMode? reasoningOverride = null,
+        CancellationToken cancellationToken = default)
     {
         var profile = await profileService.GetAsync(profileId, cancellationToken).ConfigureAwait(false);
         if (profile is null)
@@ -32,7 +35,9 @@ public sealed class ProfileProviderFactory(
             ? await profileService.GetApiKeyAsync(profileId, cancellationToken).ConfigureAwait(false)
             : null;
 
-        return Build(profile, apiKey);
+        // Applied to the in-memory copy only: this must never write the override back to the profile,
+        // or "repensar estas doze linhas" would silently leave reasoning on for the next full mod.
+        return Build(reasoningOverride is ReasoningMode reasoning ? profile with { Reasoning = reasoning } : profile, apiKey);
     }
 
     public async Task<ITranslationProvider?> CreateForRoleAsync(TranslationRole role, CancellationToken cancellationToken = default)
@@ -43,7 +48,7 @@ public sealed class ProfileProviderFactory(
         var profileId = settings.ResolveProfileId(role);
 
         return profileId is int id
-            ? await CreateForProfileAsync(id, cancellationToken).ConfigureAwait(false)
+            ? await CreateForProfileAsync(id, reasoningOverride: null, cancellationToken).ConfigureAwait(false)
             : null;
     }
 
@@ -68,7 +73,7 @@ public sealed class ProfileProviderFactory(
         ProviderKind.Argos => new ArgosTranslateProvider(argosRuntimeManager),
 
         // Model is a path to a .gguf here rather than a remote model id - the file is the model.
-        ProviderKind.LocalModel => new LocalModelProvider(localModelRuntime, profile.Model),
+        ProviderKind.LocalModel => new LocalModelProvider(localModelRuntime, profile.Model, profile.Reasoning),
 
         ProviderKind.GoogleTranslate => new GoogleTranslateProvider(httpClient),
 

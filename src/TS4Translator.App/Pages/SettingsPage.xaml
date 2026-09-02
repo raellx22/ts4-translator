@@ -135,6 +135,18 @@
                                     <Button Command="{x:Bind ViewModel.OpenLocalModelFolderCommand}" Content="Abrir pasta do motor" />
                                     <Button Command="{x:Bind ViewModel.RefreshLocalModelStatusCommand}" Content="Verificar de novo" />
                                 </StackPanel>
+
+                                <!--  Raciocinio. So faz sentido para modelo baixado por fora: e o unico
+                                      motor aqui em que o proprio arquivo decide se ha o que ligar, e o
+                                      app le isso do cabecalho do .gguf antes de carregar qualquer peso.  -->
+                                <StackPanel Spacing="4">
+                                    <ComboBox
+                                        MinWidth="320"
+                                        Header="Raciocínio do modelo"
+                                        ItemsSource="{x:Bind ViewModel.ReasoningOptions}"
+                                        SelectedItem="{x:Bind ViewModel.EditorReasoningLabel, Mode=TwoWay}" />
+                                    <TextBlock Style="{StaticResource Hint}" Text="{x:Bind ViewModel.EditorReasoningDescription, Mode=OneWay}" />
+                                </StackPanel>
                             </StackPanel>
 
                             <StackPanel Orientation="Horizontal" Spacing="8">
