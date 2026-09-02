@@ -1679,3 +1679,545 @@ revarre as linhas ja traduzidas, marca para revisao o que tem marcador quebrado 
 "Revisar" - de onde "Marcar tudo do filtro" + "Reverter para o original" resolve em dois cliques.
 Deliberadamente so integridade de marcador: rerodar o validador inteiro num projeto pronto soterraria as
 linhas corrompidas debaixo de milhares de avisos "voltou igual ao original" em rotulos que estao certos.
+
+## DEC-038 — A memoria devolvia a traducao que o usuario tinha jogado fora
+
+**O relato.** "Fiz uma traducao com o modelo, nao ficou boa. Voltei para a tela inicial, apaguei o
+projeto. Peguei o mesmo arquivo para traduzir de novo e o modelo nao e usado: ele reutiliza aquela
+traducao que foi feita antes. Se ela esta ferrada, ele vai errar de novo."
+
+**Estava certo, e a causa e o proprio diferencial do app.** A memoria de traducao e global e guardada
+por texto original + par de idiomas, deliberadamente - e o que faz reimportar um mod atualizado sair de
+graca. Mas ela **nao pertence ao projeto** e nao vai embora com ele: apagar o projeto derruba as strings,
+o historico e a configuracao de motores por cascata, e deixa a memoria inteira de pe. Na reimportacao,
+`TranslationOrchestrator` encontra cada frase com `Similarity: 1.0` e devolve o texto guardado com
+`Success: true` sem chamar motor nenhum.
+
+Pior: **isso era invisivel**. Uma rodada que respondeu tudo pela memoria reportava exatamente o mesmo
+`"73 traduzidas"` de uma que trabalhou. Nao havia como distinguir "o modelo novo fez isto" de "voce esta
+olhando o trabalho do modelo velho outra vez" - que e justamente a pergunta de quem esta comparando
+motores. Reverter as linhas tambem nao resolvia: elas voltam a pendente e a rodada seguinte as responde
+pela memoria de novo.
+
+**Tres mudancas, e as tres precisam existir:**
+
+1. `TranslateAsync` ganhou `reuseTranslationMemory`. Falso manda tudo para o motor mesmo com resposta
+   guardada - e o resultado novo continua sendo gravado, entao a rodada substitui o que discordou dela.
+2. **"Retraduzir do zero"** no editor: descarta as traducoes do projeto (ficam no historico), esquece o
+   que elas ensinaram a memoria naquele par de idiomas, e roda com reaproveitamento desligado. Um so
+   gesto, porque qualquer um dos tres passos sozinho e desfeito pelos outros dois. Da para preservar as
+   linhas editadas a mao - sao as mais caras do projeto e raramente sao o que a rodada ruim estragou.
+3. **Contagem honesta.** `TranslationOutcome.ReusedFromMemory` marca o que veio da memoria, e a linha de
+   status termina com "N vieram da memoria de traducao, sem passar por nenhum motor".
+
+E, para o caminho que o usuario descreveu, **apagar o projeto pergunta**: uma caixa "esquecer tambem
+estas traducoes na memoria", desmarcada por padrao, dizendo que sem ela reimportar o mod devolve as
+mesmas traducoes. Desmarcada porque o estrago e assimetrico - uma frase esquecida so custa traduzi-la de
+novo, mas uma frase compartilhada com outro mod que era boa nao volta.
+
+## DEC-039 — Ligar e desligar o raciocinio do modelo local (e parar de gravar o raciocinio como traducao)
+
+**O pedido.** Agora que da para baixar um `.gguf` por fora, quem baixa um modelo com raciocinio quer
+poder liga-lo - "principalmente naquelas frases mais simples, mas que contem uma pegadinha; alguma coisa
+que diz respeito ao jogo, tipo um buff, e o modelo corta essa parte e simplifica a frase" - e quer poder
+desliga-lo onde ele so atrapalha.
+
+**Antes disso, tinha um defeito.** Um modelo com raciocinio ja podia ser apontado no perfil, e o
+`LocalModelRuntime` pegava a saida inteira como traducao: o `<think>…</think>` ia junto para a validacao,
+para a memoria e para o package. `ReasoningText.Strip` roda agora em **toda** resposta do motor local,
+seja qual for o modo, porque o modo e um pedido e nao uma garantia. Ancorado no **ultimo** `</think>`, e
+nao num par casado: uma geracao cortada no meio do pensamento tem abertura e nenhum fechamento, e um
+regex de par nao acharia nada e devolveria o monologo inteiro como se fosse a traducao. Sem fechamento e
+com abertura, o retorno e vazio - o validador reporta traducao vazia e a linha vai para revisao, que e a
+saida honesta.
+
+**Tres estados, por perfil** (`ReasoningMode`): desligado (padrao), ligado, e "como o modelo vier".
+
+**Desligar e um interruptor, nao um pedido.** O turno do assistente ja comeca com
+`<think>\n\n</think>\n\n` prefixado - exatamente o que o template do Qwen3 escreve para
+`enable_thinking=false` - entao o bloco esta fechado antes do modelo escrever o primeiro token. `/think`
+e `/no_think` vao junto so quando o template declara o `enable_thinking`.
+
+**Ligar custa, e o custo esta no codigo:** teto de 512 para 2048 tokens por string, contexto de 8192
+para 16384, e o paralelismo de 8 para 4 sequencias - cada sequencia viva segura o proprio KV cache, e
+oito respostas com raciocinio enchem o contexto e comecam a ser truncadas no meio do pensamento.
+
+**Nada disso vale para um modelo que nao raciocina**, e quem decide e o arquivo, nao o usuario nem o
+nome do download. `GgufMetadata` le o cabecalho do `.gguf` - sem carregar um tensor - atras do
+`tokenizer.chat_template`: um template que trata de `<think>` e um modelo com raciocinio, e um que nao
+menciona e um que nao tem. Com isso a tela de Configuracoes diz, antes de qualquer traducao, "com
+raciocinio"/"sem raciocinio" e avisa quando a opcao escolhida nao vai fazer diferenca nenhuma naquele
+arquivo. Adivinhar pelo nome estaria errado para todo download renomeado ou requantizado, que e a maior
+parte do que as pessoas tem no disco.
+
+O leitor pula o `tokenizer.ggml.tokens` (seis digitos de strings, e ele costuma vir antes do template)
+buscando no arquivo em vez de materializar a lista, e responde `null` para qualquer arquivo estranho -
+inclusive para um download pela metade, que e o arquivo ruim mais provavel de alguem apontar.
+
+## DEC-040 — Achar as traducoes que o motor simplificou, e gastar raciocinio so nelas
+
+**O pedido.** "Nessas frases que sao um pouco mais simples, ele se perdeu. Eu quero pegar so essas
+frases e ativar o raciocinio do modelo nelas." E, junto: "voce pode dar uma olhada no historico de
+traducao, porque voce vai pegar o padrao muito facilmente".
+
+**Entao o padrao foi lido do banco real do usuario**, 169.546 strings com traducao, 149 mil delas de um
+mod so. O que estava no rodape da distribuicao de razao de comprimento, tudo gravado como **`Traduzido`**,
+sem nada em lugar nenhum apontando para elas:
+
+```
+Attractiveness Tuner                                    ->  Atraente
+I have something for you to feel :wink: I'm coming over! ->  Tenho algo para você sentir:
+Ugh... haha, sure... let's do it!                        ->  Vamos lá!
+1 like = 1 day of not jerking off.                       ->  1 dia sem bater uma.
+---------- CUM INTERACTIONS ----------                   ->  - Interações comuns...
+Sex Autonomy Allowed Venues                              ->  Autonomia do Sexo.
+Disallow Autonomous Friendly Socials Outside Protocol    ->  Desafie o protocolo social autônomo.
+```
+
+Todas passaram na validacao: marcador nenhum perdido, nada vazio, nada igual ao original. O validador
+esta certo - **nao ha nada de errado com o texto que chegou**. O que ha de errado e o que nao chegou.
+
+**Por que nada disso ja era pego.** `StringDifficulty` mede o esforco que uma string vai dar *antes* de
+traduzir, e diz explicitamente no proprio comentario que nao ve ambiguidade semantica. O
+`TranslationValidator` olha a traducao que chegou, mas suas regras de comprimento sao generosas de
+proposito (razao < 0,15) para nao afogar o usuario. Entre os dois havia um vao exatamente do tamanho
+deste defeito.
+
+**`TranslationSuspicion` mora nesse vao.** Nao tenta ver significado - `Blushing Bashfulness` ->
+`Banalidade` esta errado de um jeito que forma nenhuma detecta. Ele procura o que **sumiu**, que e uma
+pergunta muito mais tratavel e e onde o estrago deste corpus esta:
+
+| Sinal | Peso | O que e |
+|---|---|---|
+| `LostStructure` | 45 | Corrida de separadores (`----------`, `###`) que nao sobreviveu |
+| `LostSentences` | 35-45 | Frases separadas no original que viraram uma, ou sumiram |
+| `SeverelyShortened` | 20-40 | Razao abaixo de 0,72 / 0,60 - o portugues quase sempre alonga |
+| `LostNumbers` | 35 | Menos digitos na traducao que no original |
+| `LostWordsInLabel` | 22-40 | Rotulo de 2 a 4 palavras que voltou com menos |
+| `IdenticalToSource` | 60 | Frase de verdade (>3 palavras) que voltou em ingles |
+
+**A calibracao e medida, nao escolhida.** Limiar 40 = um sinal forte sozinho basta, os fracos precisam
+de companhia. No banco do usuario isso da **4.635 linhas, 2,7% do total** - uma fila que da para
+trabalhar. E a evidencia de que ele acerta o alvo esta na distribuicao por status:
+
+| Status | Total | Suspeitas |
+|---|---:|---:|
+| `Translated` (maquina) | 160.702 | 4.520 (**2,8%**) |
+| `NeedsReview` | 4.190 | 89 (2,1%) |
+| `ManuallyEdited` (humano) | 3.821 | 25 (**0,7%**) |
+| `Refined` (motor melhor) | 833 | 1 (**0,1%**) |
+
+Quatro vezes menos em traducao feita a mao e vinte e oito vezes menos no que ja passou por um motor
+melhor. Ele dispara em dano de maquina, nao em portugues conciso.
+
+**Duas regras nasceram de falso positivo, e as duas viraram teste.** `Native / Override` ->
+`Nativo/Substituir` nao perdeu palavra nenhuma - a barra mudou de espacamento -, entao a contagem de
+palavras quebra em `/` e `-`. E `IdenticalToSource` e mais estreito que `StringKind.Prose`: o
+classificador chama de prosa qualquer coisa com pontuacao final, e a DEC-035 ja tinha estabelecido que
+`Strip Poker!` voltando `Strip Poker!` **esta certo**. Frase de verdade tem mais de tres palavras.
+
+**O que o usuario faz com a fila.** Filtro proprio no editor ("Suspeitas"), com o motivo escrito na
+linha em portugues - "perdeu a formatacao do titulo", "rotulo curto que perdeu palavras, pode ter
+cortado o termo do jogo". E dois botoes de **Repensar**, um na linha e um em lote, que mandam de volta
+ao motor escolhido **com o raciocinio ligado** (DEC-039).
+
+A suspeita **nao e um status e nao e gravada**: e calculada do texto. Uma linha consertada sai da fila
+sozinha, sem varredura, sem migracao, sem coluna nova - e o oposto de "Conferir marcadores", que precisa
+gravar porque reexecuta um validador. Cacheada por linha no view model porque o editor segura as 149 mil
+de uma vez.
+
+**Por que o override de raciocinio existe** em vez de mandar o usuario ligar no perfil: ligar
+raciocinio no mod inteiro nao se paga, e o caminho manual - abrir Configuracoes, virar a chave, voltar,
+rodar, lembrar de desvirar - termina em raciocinio ligado sem querer na proxima rodada completa. O
+override vale para uma chamada, na copia em memoria do perfil, e o perfil salvo nao e tocado. Tem teste
+so para isso.
+
+**O que ainda nao esta medido:** se repensar com raciocinio *conserta* estas linhas. O detector achar o
+defeito e uma coisa; o modelo com raciocinio resolver e outra, e depende do modelo. A fila de 4.635 e o
+banco de teste para descobrir isso.
+
+## DEC-041 — O turno do assistente nunca era aberto (achado testando o Qwen3-8B)
+
+**Como apareceu.** Testando o raciocínio com um Qwen3-8B de verdade, as respostas com raciocinio ligado
+vinham com lixo que nao tinha explicacao: `Flirty` -> `numerusform   Flertes`, `Uncomfortable` ->
+`ponse  Inconveniente`, `Pitch` -> `战士职业` (chines), e `Pent Up` -> `Pent Up TS4_TOKEN_0001` -
+**um marcador inventado**, exatamente a falha da DEC-037. Antes de culpar o modelo, imprimi o prompt cru.
+O sufixo do template era isto, e so isto:
+
+```
+<|im_end|>\n\n
+```
+
+**Nao havia `<|im_start|>assistant`.** O `LLamaTemplate` fecha o turno do usuario e para ali.
+
+**A causa.** `new LLamaTemplate(weights, true)` - o `true` e o parametro **`strict`** (lancar excecao se
+o GGUF nao tiver template), e nao "adicionar o prefixo do assistente". Quem faz isso e a propriedade
+`AddAssistant`, que e `false` por padrao e nunca foi ligada. Um argumento posicional que parecia dizer
+uma coisa e dizia outra.
+
+**O que o app estava pedindo ao modelo.** Nao "responda como assistente" e sim "continue este texto",
+depois de um turno de usuario ja fechado. E o modelo fazia isso, fielmente. Isso explica de uma vez:
+
+- **Rotulos curtos voltando iguais ao original** - a secao "Por que 28 rotulos curtos voltaram iguais"
+  de `LOCAL_MODELS.md` atribuiu isso a limitacao do modelo 1.8B. Foi otimista demais: continuar um texto
+  que ja terminou e responder com o proprio texto e uma saida perfeitamente razoavel.
+- **Respostas comecando com `\n` ou com meia palavra** (`ed\n\nAtributos da Sorte`).
+- **O `<think>\n\n</think>\n\n` de desligar o raciocinio caindo no lugar errado**, depois do `<|im_end|>`
+  em vez de dentro do turno do assistente - ou seja, o "interruptor" da DEC-039 nao era interruptor
+  nenhum.
+
+**O conserto e uma propriedade:** `AddAssistant = true`. Medido no mesmo conjunto de armadilhas, com
+raciocinio ligado, antes e depois: o lixo em outro idioma, os fragmentos de treino e o marcador
+inventado **sumiram inteiros**.
+
+Vale para todo modelo que o usuario apontar, nao so para o Qwen3. E o unico defeito desta rodada que
+melhora a traducao de quem nunca vai mexer em raciocinio nenhum.
+
+## DEC-042 — O raciocinio nao conserta o que a gente achava, e "repensar" nao podia ser um refino
+
+Duas medicoes com **Qwen3-8B Q6_K** (RTX 4060 Ti, 8 GB), depois da DEC-041, contra as linhas reais deste
+banco.
+
+### Medicao 1 — conteudo perdido (16 linhas reais, 8 delas suspeitas)
+
+| modo | suspeitas restantes | s/string |
+|---|---:|---:|
+| hoje (Hy-MT2-1.8B, o que esta gravado) | 8 de 8 | - |
+| Qwen3-8B, **sem** raciocinio | **0 de 8** | 0,33 s |
+| Qwen3-8B, **com** raciocinio | **0 de 8** | 6,45 s |
+| Qwen3-8B, com raciocinio, **como refino** | **4 de 8** | 8,54 s |
+
+**Primeira conclusao: o problema era o modelo, nao o raciocinio.** `---------- Settings ----------`,
+`Advanced Attractiveness Settings`, `<font>Blushing Bashfulness</font>` - o 8B acerta todas **sem
+pensar**, a um terco de segundo cada. O raciocinio acertou exatamente as mesmas, gastando vinte vezes
+mais relogio. Numa fila de 4.635 linhas isso e a diferenca entre **25 minutos e 8 horas**.
+
+**Segunda conclusao, e essa derrubou a minha implementacao: "Repensar" nao podia ser um refino.** A
+`RefineAsync` mostra o rascunho ao modelo de proposito - e a premissa do refino, que o rascunho esta
+quase certo. Nesta fila o rascunho esta errado *por omissao*, e mostra-lo e ensinar a resposta errada:
+`---------- Settings ----------` voltou `- Não. Configurações...`, praticamente igual ao lixo que se
+queria jogar fora, e `Relationship Settings`, que estava **boa**, virou `Relações`. O refino ancora.
+
+O botao passou a **traduzir do zero**, descartando o rascunho e sem consultar a memoria (que tambem
+guarda o texto ruim - a mesma armadilha da DEC-038, uma camada abaixo). O botao "Refinar" continua como
+estava, para o caso para o qual ele foi feito.
+
+### Medicao 2 — armadilha de sentido (20 rotulos curtos com termo de jogo)
+
+Aqui o raciocinio **paga**, e e o unico lugar onde paga:
+
+| | sem raciocinio | com raciocinio |
+|---|---:|---:|
+| voltaram em ingles, sem traduzir | **8** | **2** |
+| corrigidos pelo raciocinio | - | `Confident`->`Confiante`, `Dazed`->`Atordoado`, `Bar Curved`->`Barra Curvada` |
+| s/string | 0,23 s | 5,43 s |
+
+`Bar Curved` e o caso mais claro: sem pensar o modelo desiste e devolve o ingles; pensando, ele resolve
+que "Bar" ali e barra de objeto e nao um bar de bebidas. Vinte e quatro vezes mais lento por isso.
+
+**Entao o padrao ficou:** o lote da fila de suspeitas **nao** usa raciocinio por padrao (caixa no
+dialogo, desmarcada, com esses numeros escritos nela), e o botao de **uma linha** usa - e um texto, seis
+segundos, e e exatamente a linha em que a pessoa esta olhando e coçando a cabeca.
+
+### O que o raciocinio nao resolveu, e o que resolveria
+
+O que sobra errado nas armadilhas e **terminologia, nao raciocinio**: `Flirty` deveria ser `Namorador` e
+`Lot Traits` deveria ser `Traços do Terreno` porque e assim que o The Sims 4 chama em pt-BR, e nenhum
+modelo adivinha isso pensando mais. Isso e **glossario**, que o app ja tem e ja manda ao motor. Encher o
+glossario com os moodlets e termos oficiais do jogo provavelmente vale mais, e custa zero por string,
+do que qualquer coisa que o raciocinio possa fazer.
+
+## DEC-043 — Sete modelos, duas baterias, e o glossario dobrando o acerto de todos
+
+**O metodo.** 120 linhas de `[Kritical]DreamsOfSurrender_1_35`, escolhido por ser o mod mais dificil que
+existe no banco: 58% dele sao rotulos curtos sem pontuacao (a forma exata em que os motores se perdem) e
+**3.387 das 4.133 linhas foram revisadas a mao pelo usuario**, o que da um gabarito para medir contra, em
+vez de so contar suspeitas. Amostra deterministica (dois tercos rotulos, um terco prosa), o mesmo
+conjunto para todo modelo, pelo caminho real do app.
+
+**As metricas.** `util%` = linhas sem nenhum defeito detectavel (nao voltou em ingles, sem suspeita de
+conteudo perdido, sem defeito critico do validador). `exato%` = bate com o gabarito depois de normalizar
+caixa e espaco. `sim.` = similaridade media com o gabarito. Uma ressalva honesta: `exato%` pune sinonimo
+legitimo, entao o numero absoluto e pessimista; o que vale e a **comparacao entre linhas da mesma tabela**.
+
+### Bateria 1 — mod virgem, sem memoria, sem glossario
+
+| modelo | util% | exato% | sim. | ingles | s/str | car/s | pico VRAM |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Ministral-3-8B Q4_K_M | 100,0 | 10,0 | 0,61 | 0 | 0,33 | 174 | 7749 M |
+| translategemma-12b Q5_K_M | 97,5 | 5,0 | 0,64 | 2 | 1,09 | 46 | 7866 M |
+| **translategemma-4b Q5_K_M** | 96,7 | **19,2** | 0,63 | 0 | **0,12** | **386** | **6927 M** |
+| Gemma-3-12B Q3_K_M | 95,0 | 13,3 | 0,56 | 2 | 1,34 | 39 | 7788 M |
+| Qwen3-8B Q6_K | 95,0 | 14,2 | **0,67** | 5 | 0,48 | 99 | 7884 M |
+| Qwen3-8B Q5_K_M | 92,5 | 13,3 | 0,66 | 6 | 0,15 | 322 | 7713 M |
+| Qwen3-8B Abliterated Q5_K_M | 91,7 | 10,8 | 0,61 | 10 | 0,15 | 318 | 7714 M |
+
+Os picos de VRAM incluem ~2,5 GB de area de trabalho; nenhum modelo estourou os 8 GB, nem o de 7,9 GB.
+
+**O achado que nenhuma metrica pegou, e por isso virou codigo.** O Ministral, que lidera em `util%`,
+devolveu **21 das 120 embrulhadas em markdown** - `**Dispositivo Redefinido**`, `Serviço **Cerebro
+Lavado**`. Marcadores intactos, tamanho certo, sentido certo: valida limpo e os asteriscos vao para a
+tabela de strings, onde aparecem literais na tela. Nenhum outro modelo fez isso. Virou
+`AnswerArtifacts`, que tira decoracao que o modelo inventou e o original nao tinha - condicionado ao
+original, para um mod que realmente usa asterisco manter os seus.
+
+### Bateria 1b — o mesmo, com glossario de 390 termos
+
+| modelo | exato% sem | exato% com | Δ |
+|---|---:|---:|---:|
+| Ministral-3-8B | 10,0 | 26,7 | **+16,7** |
+| Qwen3-8B Q5_K_M | 13,3 | 28,3 | **+15,0** |
+| Qwen3-8B Q6_K | 14,2 | 27,5 | +13,3 |
+| Qwen3-8B Abliterated | 10,8 | 23,3 | +12,5 |
+| translategemma-12b | 5,0 | 16,7 | +11,7 |
+| **translategemma-4b** | 19,2 | **30,8** | +11,6 |
+| Gemma-3-12B Q3 | 13,3 | 22,5 | +9,2 |
+
+**O glossario praticamente dobrou o acerto exato de todos os sete**, e a similaridade media subiu de
+0,56-0,67 para 0,60-0,75. Linhas que voltavam em ingles cairam junto (o Abliterated de 10 para 2). Nada
+mais testado nestas rodadas - modelo maior, quantizacao melhor, raciocinio (DEC-042) - chegou perto
+disso, e este e o unico que **custa zero por string**.
+
+### Bateria 2 — com a memoria de traducao ligada
+
+| | sem memoria | com memoria |
+|---|---:|---:|
+| exato% (faixa entre os 7) | 16,7 - 30,8 | **74,2 - 80,8** |
+| similaridade media | 0,60 - 0,75 | 0,88 - 0,92 |
+| s/string | 0,15 - 1,99 | **0,06 - 0,38** |
+| **aderencia ao glossario** | 91,4 - 95,7% | **85,7 - 88,6%** |
+
+Quatro a cinco vezes mais rapido e tres vezes mais exato - mas o numero honesto e o ultimo, e ele **piora**.
+Este mod ja foi traduzido: a memoria devolve o proprio gabarito, entao a comparacao e em parte circular e
+o `exato%` alto mede reaproveitamento, nao qualidade de motor.
+
+E a queda na aderencia e um defeito real: **um acerto de memoria nao passa pelo glossario**. As entradas
+foram gravadas antes de o termo existir, e o reaproveitamento acontece antes de qualquer motor ser
+chamado, entao um termo adicionado hoje nao alcanca nada que a memoria ja responda. Fica registrado; o
+remedio existe e e o "Retraduzir do zero" da DEC-038.
+
+### Como o glossario foi construido, que e o que o torna confiavel
+
+353 termos minerados das 4.656 linhas que o usuario traduziu ou corrigiu a mao, mais um bloco curado de
+vocabulario do proprio The Sims 4. O filtro e a parte que importa: cada regra candidata foi testada
+contra **todas as outras linhas aprovadas** que continham aquele termo, e reprovada se o usuario tivesse
+traduzido diferente ali. Trinta e nove cairam, e sao exatamente as armadilhas que uma lista escolhida a
+dedo teria embarcado:
+
+| regra reprovada | concordancia com o proprio usuario |
+|---|---:|
+| `Training -> Treino` | 27% em 141 linhas |
+| `Hard -> Difícil` | 43% em 56 linhas (no WickedWhims "Hard" tambem e erecao) |
+| `Male -> Masculino` | 44% em 9 linhas |
+| `Dominance -> Dominação` | 40% em 25 linhas |
+
+Depois, um teste de dados (`DefaultTermGlossaryTests`) reprovou mais quatro - todas do **meu** bloco
+curado, contra o corpus: `Punishment -> Castigo` (o corpus diz "Punição"), `Stock -> Cepo` (o corpus usa
+"Tronco" em quatro compostos e "Cepo" em nove, entao a regra generica so gera conflito e saiu),
+`Flirty -> Namorador` e `Focused -> Concentrado` (contradizem "Leite Paquerador" e "Leite Focado"). A
+regra que ficou valendo: **nunca embarcar um termo que contradiga uma traducao que o usuario ja aprovou.**
+
+### E o casamento por substring, que teria estragado tudo
+
+`GlossaryTerm.AppearsIn` usava `Contains` puro. Com vinte nomes proprios isso passava; com 386 termos
+comuns, `Male -> Masculino` dispara dentro de **`Female`** e manda o motor escrever "Masculino" onde esta
+"Female". Tambem `Hard` dentro de "Hardcore", `Idle` dentro de "Idles". Passou a casar por **palavra
+inteira** (fronteira = nao-alfanumerico, com `_` contando como letra para uma regra nunca disparar dentro
+de um identificador de tuning). Sem isso o glossario seria pior que nao ter glossario.
+
+### O que fica recomendado
+
+1. **translategemma-4b Q5_K_M como motor do lote.** Menor (2,6 GB), mais rapido (0,12-0,20 s/string,
+   ~400 car/s), maior acerto exato (30,8% com glossario) e o unico com folga real de VRAM. As 6.779
+   strings do WickedWhims sairiam em ~20 minutos.
+2. **Qwen3-8B Q5_K_M como segundo motor**, para as faixas dificeis do roteamento: similaridade um pouco
+   melhor em prosa, mesmo custo de tempo, 5,4 GB.
+3. **Glossario ligado sempre.** E o maior ganho isolado ja medido neste projeto.
+4. **Evitar** Gemma-3-12B Q3 (lento e a quantizacao Q3 machuca) e o Qwen3 Abliterated (pior em tudo que
+   o Qwen3 normal, com o triplo de linhas voltando em ingles).
+
+## DEC-044 — Hy-MT2 x translategemma-4b, e a descoberta de que o roteamento aponta para o lado errado
+
+**O teste.** 227 strings de **oito mods que nenhum dos dois modelos tinha visto**, tirados direto da
+pasta de mods do usuario e escolhidos por perfil, nao por tamanho: do mais simples
+(`tyjokr_AssertivePassiveRomance`, dificuldade media 8,4) ao mais carregado
+(`tyjokr_CharacterValuesOverhaul`, 68% de placeholders, dificuldade 48,6), passando por tracos
+(`Klimter_OddTraits`), rotulos puros (`TS2TurnOns`), comida (`ToastieMaker`), dialogo de romance
+(`UTOPYA Romantic Complaints`) e jargao (`tyjokr_Tribes`). Sem memoria nenhuma, glossario ligado.
+
+| | Hy-MT2-1.8B Q8 | translategemma-4b Q5 |
+|---|---:|---:|
+| strings sem nenhum defeito | 84,1% | **93,4%** |
+| s/string | **0,09** | 0,15 |
+| caracteres/s | **823** | 480 |
+
+### Como cada um erra — que era a pergunta
+
+| falha | Hy-MT2 | translategemma-4b |
+|---|---:|---:|
+| **devolveu o ingles** | **26 (11%)** | 2 (1%) |
+| conteudo perdido | 1 | 4 |
+| repeticao | 2 | 5 |
+| inventou texto | 1 | 3 |
+| glossario ignorado | 6 | 4 |
+
+Os dois erram quase o mesmo tanto; **erram de jeitos opostos**. O Hy-MT2 **abdica**: nao sabe uma
+palavra e devolve a frase inteira em ingles. O translategemma **inventa**: preenche com um portugues
+plausivel e errado (`Pop Tart Toastie` -> `Pão de Queijo`, `Fluffernutter` -> `Nutella`).
+
+Isso importa mais que o placar. A abdicacao **e detectavel** - o validador ja marca "voltou igual ao
+original". A invencao **nao e**: passa por tudo e so um humano lendo pega. Um modelo que erra alto e
+mais barato de operar que um que erra baixo.
+
+### Por mod, e a surpresa
+
+| mod | Hy-MT2 | translategemma-4b |
+|---|---:|---:|
+| comida (ToastieMaker) | **29%** | 100% |
+| rotulos puros (TurnOns) | 77% | 93% |
+| tracos (OddTraits) | 83% | 93% |
+| **o mais dificil (CharacterValues)** | **100%** | 90% |
+
+O mod que o `StringDifficulty` chama de mais dificil e onde o modelo pequeno vai **melhor**, e o mod de
+nomes de sanduiche, que pontua quase zero, e onde ele desmorona. Placeholders nao sao dificuldade: eles
+sao texto que o modelo nao precisa traduzir.
+
+### O achado central: o sinal de roteamento esta invertido
+
+Todas as 26 strings em que o Hy-MT2 abdicou sao **rotulos de uma a tres palavras, sem frase em volta** -
+`Twink`, `Mellow`, `Blue Eyes`, `Stink`, `Muscle Bear`, `Cheese Toastie`. Nenhuma e uma frase. Medindo:
+
+| | dificuldade media | roteadas ao motor bom (limiar 35) |
+|---|---:|---:|
+| strings em que abdicou | **14,1** | **0 de 26** |
+| strings que traduziu bem | 24,0 | — |
+
+O roteamento por dificuldade mandava **exatamente** as strings que o motor barato nao da conta para o
+motor barato, e mandava a prosa comprida com placeholders - que ele resolve bem - para o motor caro. Nao
+era um sinal fraco: era um sinal ao contrario.
+
+**Por que comprimento nao resolve.** Rotulo curto e a maioria de um mod (55 mil das 149 mil do
+WickedWhims); promover todos manda o trabalho inteiro para o motor caro. O que separa `Blue Eyes`, que
+qualquer motor acerta, de `Twink`, que trava o modelo, nao e forma - e **se o app ja sabe o que aquelas
+palavras querem dizer**.
+
+Entao entrou `StringRiskContext.IsUncoveredLabel`: rotulo nu, **sem termo de glossario que se aplique e
+que o projeto nunca traduziu**. Vale 30 pontos, calibrado para levantar um rotulo tipico dos ~13 dele
+acima do limiar de 35 - e so ele.
+
+### E como cercar o erro daqui em diante
+
+O dado mais util da rodada: das 26 abdicacoes do Hy-MT2, **12 sao a mesma palavra** - "Toastie" - que
+aparece em **15 das 17 strings daquele mod**. Uma decisao de glossario resolveria 46% das falhas dele
+neste teste.
+
+Isso desenha a proxima feature em vez de sugeri-la no vazio: antes de traduzir, varrer o mod atras de
+palavras que se repetem em varios rotulos e que nem o glossario nem a memoria explicam, e pedir ao
+usuario **uma decisao por palavra**. Dez decisoes cobrem centenas de strings, e sao exatamente as
+strings em que o modelo, sozinho, vai abdicar ou inventar. Nao esta implementado - fica registrado com o
+numero que o justifica.
+
+## DEC-045 — Qual modelo fixar: o erro silencioso decide, e ele inverte o placar
+
+**A pergunta era "qual erro e mais facil de controlar".** Nao da para responder com o placar de defeitos
+detectaveis, porque esse placar so conta o que o app ja sabe ver. Entao medi o que ele **nao** ve: 120
+linhas com gabarito humano, os dois modelos, glossario ligado, e cada resposta classificada em tres.
+
+| | Hy-MT2-1.8B Q8 | translategemma-4b Q5 |
+|---|---:|---:|
+| aceitavel | **84,5%** | 78,4% |
+| erro **detectavel** (o app marca) | 4,3% | 6,0% |
+| erro **SILENCIOSO** (ninguem pega) | **11,2%** | **15,5%** |
+| s/string | **0,07** | 0,20 |
+| VRAM de pico | **5758 M** | 7468 M |
+
+**O Hy-MT2 tem menos erro silencioso que o translategemma**, e nao mais. A intuicao de que "o pequeno
+erra na cara" estava certa, mas nao pelo motivo que parecia: nao e que ele avise sempre - e que ele
+**improvisa menos**. Quando nao sabe, devolve o ingles; o translategemma preenche com portugues
+plausivel e errado, e isso passa por tudo.
+
+**Mas isso contradiz a DEC-044**, onde em mods ineditos o translategemma fez 93,4% de strings limpas
+contra 84,1%. As duas medicoes estao certas e juntas dizem a coisa mais util desta rodada:
+
+> A qualidade do Hy-MT2 e funcao da cobertura do glossario. A do translategemma nao e.
+
+Em terreno coberto (o conjunto com gabarito, cujo dominio o glossario cobre) o Hy-MT2 ganha nos dois
+numeros. Em terreno descoberto (oito mods ineditos) ele desmorona - 29% no mod de sanduiches - enquanto
+o translategemma improvisa e se vira. Um e obediente e desiste; o outro e autonomo e inventa.
+
+**Recomendacao: fixar no Hy-MT2**, e nao porque ele seja melhor hoje. Porque a estrategia deste projeto
+e **prover a inteligencia por fora** - glossario, memoria, roteamento. Um modelo que faz o que mandam e
+avisa quando nao mandaram e o unico em que esse investimento se converte em qualidade linha a linha. Com
+o translategemma, metade do que o glossario ganha se perde de volta em improviso que ninguem audita.
+
+Tres numeros que reforcam, todos da mesma rodada:
+- **Vazamento de prompt**: com 387 termos no prompt, o translategemma respondeu 3 de 120 traduzindo as
+  *instrucoes* em vez do texto ("Glossário - aplique estes exatamente..."). O Hy-MT2, zero. O modelo que
+  a gente quer encher de glossario e justamente o que nao se perde com glossario grande.
+- **Custo**: 0,07 s/string contra 0,20, e 1,7 GB a menos de VRAM. Tres vezes mais barato para rodar a
+  fila de suspeitas e o "repensar".
+- **Aderencia ao glossario**: 89,4% contra 92,4% - o translategemma segue um pouco melhor, e e a unica
+  metrica em que ele ganha aqui.
+
+Fica registrado o custo da escolha: **o Hy-MT2 so e a escolha certa se o glossario crescer**. Sozinho ele
+e o modelo que abdicou em 11% dos mods ineditos. A DEC-046 e como pagar essa conta.
+
+**Defeito corrigido nesta rodada:** `PromptEcho`. Uma resposta que recita o prompt e fluente, nao tem
+marcador para quebrar, tem tamanho plausivel e **passa por todas as verificacoes do app** - iria para a
+tabela de strings como uma frase sobre glossario. Agora e apagada, e o validador reporta traducao vazia,
+mandando a linha para revisao. Aplicado a todo motor local, medido em seis palavras seguidas
+compartilhadas com o prompt que o proprio original nao explique.
+
+## DEC-046 — Os mods ja tem a traducao: 6.847 pares alinhados de graca
+
+**A pergunta era como o app pode aprender com os mods em vez de o usuario decidir termo a termo.** A
+resposta estava na pasta de mods, e nao precisa de modelo nenhum para extrair.
+
+Varri os **15.111 pacotes** de `X:\`. **83 mods trazem uma STBL pt-BR dentro do proprio arquivo**, ao
+lado da inglesa. Um STBL guarda cada string sob um `KeyHash` estavel, e o hash e o mesmo nas duas
+tabelas - entao cada par (ingles, portugues) do mesmo hash e uma traducao que o autor do mod, ou o
+tradutor da comunidade, ja aprovou. **Alinhamento exato, zero adivinhacao, zero custo por string.**
+
+| | |
+|---|---:|
+| pares utilizaveis extraidos | **6.847** |
+| mods que contribuem | 83 |
+| desses, rotulos curtos (candidatos diretos a termo) | **3.226** |
+
+Os que mais contribuem sao os mods que todo mundo tem: `mc_cmd_center` (3.146 pares),
+`SrslySims_CookingOverhaul` (716), `LittleMsSam_SocialActivities` (577), `Grumpy_StreamLife` (560),
+`[Kuttoe] NewHobbyTraits` (248).
+
+**E a amostra prova o valor imediatamente** - o MC Command Center entrega os moodlets do jogo com o nome
+que a comunidade brasileira de fato usa:
+
+```
+Make Flirty     -> Tornar Paquerador/Paqueradora
+Make Focused    -> Tornar Concentrado/Concentrada
+Make Dazed      -> Tornar Atordoado/Atordoada
+Make Energized  -> Tornar Animado/Animada
+Make Inspired   -> Tornar Inspirado/Inspirada
+```
+
+Repare em `Flirty -> Paquerador`. Na DEC-043 eu tinha embarcado `Flirty -> Namorador` de cabeca, e o
+teste de contradicao derrubou a regra porque o corpus do usuario dizia "Paquerador". **Agora uma
+terceira fonte independente - o MC Command Center - concorda com o corpus e contra mim.** E a
+demonstracao mais limpa possivel de que os mods sao melhor autoridade que o meu conhecimento, e a razao
+para esta ser a fonte principal do glossario daqui em diante.
+
+### Como fazer: minerador de pares, com as mesmas travas do que ja existe
+
+O caminho e o mesmo da DEC-043, com a fonte trocada e uma etapa a mais:
+
+1. **Extrair** os pares alinhados por `KeyHash` de todo pacote com duas ou mais locales. Ja funciona - o
+   `Sims4PackageService` le isso hoje, e a varredura dos 15 mil pacotes levou minutos.
+2. **Filtrar por forma**: so `StringKind.Term`, 4 a 28 caracteres, sem placeholder nem markup.
+3. **Consenso entre mods**: um termo traduzido igual por varios mods independentes e um padrao; um
+   termo em que dois mods discordam vira decisao do usuario, nao regra embarcada. Esta e a trava nova, e
+   e mais forte que a auto-aderencia da DEC-043 porque as fontes sao independentes de verdade.
+4. **Nao contradizer o usuario**: qualquer termo que bata de frente com uma traducao que ele aprovou
+   perde, sempre. Ja e a regra, e o `DefaultTermGlossaryTests` ja a aplica.
+5. **Casar por palavra inteira** - sem isso um glossario deste tamanho piora a traducao (DEC-043).
+
+Com 3.226 candidatos contra os 386 atuais, o glossario cresce quase dez vezes **e continua sem um unico
+termo escolhido a dedo**. Nada disso esta implementado: e a recomendacao, com o numero que a sustenta.

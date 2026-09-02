@@ -432,3 +432,116 @@ Vários perfis podem apontar modelos diferentes, e os papéis (principal, refino
 eles — dá para comparar modelos no mesmo mod sem reconfigurar nada.
 
 Verificado que a mudança é neutra: o Hy-MT2 produz exatamente a mesma saída de antes.
+
+## Raciocinio: o interruptor e o que ele custa (2026-09-01)
+
+A partir de agora cada perfil do motor local carrega um modo de raciocinio - desligado (padrao), ligado,
+ou "como o modelo vier de fabrica". O raciocinio nao e um ganho obvio aqui, e por isso e uma escolha:
+
+- **A favor.** A falha que mais dói neste app e a frase curta com pegadinha - um buff, um trait, um nome
+  de interacao dentro de uma sentenca que parece banal - que um modelo pequeno achata ate perder o
+  sentido (ver "Por que 28 rotulos curtos voltaram iguais ao original"). Pensar antes de responder e
+  exatamente o orcamento necessario para o modelo reparar que a frase tem uma pegadinha.
+- **Contra.** Custa varias vezes mais tokens por string, num mod de milhares delas, e num rotulo comum
+  nao compra nada.
+
+**O que muda na execucao quando esta ligado:** teto de 512 -> 2048 tokens por string, contexto
+8192 -> 16384, paralelismo 8 -> 4 sequencias. As tres andam juntas: cada sequencia viva segura o proprio
+KV cache, e oito respostas com raciocinio enchem o contexto e comecam a ser truncadas no meio do
+pensamento. Isso e VRAM, entao a baseline de 8 GB deste documento merece ser remedida com raciocinio
+ligado antes de virar recomendacao.
+
+**Desligado nao e um pedido educado:** o turno do assistente ja comeca com `<think>\n\n</think>\n\n`
+prefixado - o mesmo texto que o template do Qwen3 escreve para `enable_thinking=false` - entao o bloco
+esta fechado antes do modelo escrever qualquer coisa.
+
+**Vale so para quem tem raciocinio, e quem decide e o arquivo.** O app le
+`tokenizer.chat_template` do cabecalho do `.gguf`, sem carregar peso nenhum, e trata como modelo com
+raciocinio o template que trata de `<think>`. Um modelo sem isso se comporta exatamente como antes desta
+opcao existir, esteja o perfil como estiver. A tela de Configuracoes mostra isso ao escolher o arquivo.
+
+**E o defeito que isso conserta de qualquer jeito:** antes, apontar um modelo com raciocinio no perfil
+mandava a saida inteira - monologo incluso - para a validacao, para a memoria e para o package. O
+raciocinio agora sai de toda resposta do motor local, em qualquer modo.
+
+### O teste que ainda falta
+
+Nada disto foi medido no corpus real ainda. A pergunta em aberto, e a razao de a feature existir agora, e
+se um modelo com raciocinio seguindo um prompt mais arregrado resolve as frases curtas com pegadinha
+melhor do que um modelo maior sem raciocinio - e a que custo por mod. Rodar isso no `ParanormalAddon` ou
+no `[Kritical]DreamsOfSurrender`, comparando com as rodadas ja registradas acima, e o proximo passo.
+
+## Qwen3-8B Q6_K — a rodada que mudou o diagnostico (2026-09-01)
+
+Modelo: `Qwen3-8B-Q6_K.gguf`, 6,26 GB, numa RTX 4060 Ti de 8 GB. Carrega inteiro na GPU com contexto de
+8192; com 16384 (o que o modo de raciocinio pede) fica em ~7,9 GB de 8,1 GB - **passa raspando**, e uma
+placa com menos VRAM, ou com um navegador pesado aberto, nao vai conseguir.
+
+Deteccao pelo cabecalho do arquivo funcionou: `Qwen3 8B Instruct`, arquitetura `qwen3`, raciocinio
+`True`, `enable_thinking` `True` - tudo lido sem carregar um tensor.
+
+### O que estava errado no app, e nao no modelo
+
+Ver DEC-041. O prompt nunca abria o turno do assistente (`AddAssistant` nao estava ligado), entao o
+modelo estava sendo mandado *continuar texto* em vez de responder. Corrigido. Isso e o que produzia
+resposta em chines, fragmentos de arquivo de traducao vazando (`numerusform`) e marcador inventado.
+E, quase certamente, boa parte dos "28 rotulos curtos voltaram iguais ao original" da secao acima.
+
+### Numeros
+
+**Conteudo perdido** (16 linhas reais deste banco, 8 suspeitas):
+
+| modo | suspeitas restantes | s/string |
+|---|---:|---:|
+| Hy-MT2-1.8B (o que esta gravado hoje) | 8 de 8 | - |
+| Qwen3-8B sem raciocinio | 0 de 8 | **0,33 s** |
+| Qwen3-8B com raciocinio | 0 de 8 | 6,45 s |
+| Qwen3-8B com raciocinio, como refino | 4 de 8 | 8,54 s |
+
+**Armadilha de sentido** (20 rotulos curtos com termo do jogo):
+
+| | sem raciocinio | com raciocinio |
+|---|---:|---:|
+| voltaram em ingles | 8 | **2** |
+| s/string | 0,23 s | 5,43 s |
+
+### O que isso quer dizer para o app
+
+1. **Trocar o 1.8B por um 8B resolve mais do que o raciocinio resolve, e e vinte vezes mais barato.**
+   Em 0,33 s/string, as 6.779 do WickedWhims sairiam em ~37 minutos. Vale a pena remedir a recomendacao
+   deste documento inteiro com o 8B.
+2. **Raciocinio nao serve para o lote.** Ele nao achou nada que o 8B ja nao achasse sozinho, ao custo de
+   8 horas em vez de 25 minutos na fila de suspeitas.
+3. **Raciocinio serve para o rotulo curto ambiguo**, uma linha por vez: quatro em cada dez que voltavam
+   em ingles passaram a ser traduzidas.
+4. **O que sobra e glossario, nao inteligencia.** `Flirty` -> `Namorador` e `Lot Traits` ->
+   `Traços do Terreno` sao os nomes oficiais do jogo em pt-BR; nenhum modelo chega neles pensando mais.
+   Encher o glossario com os moodlets e termos oficiais custa zero por string e e provavelmente o maior
+   ganho de assertividade ainda disponivel.
+
+## Sete modelos medidos lado a lado (2026-09-01) — ver DEC-043 para o metodo
+
+120 linhas de `[Kritical]DreamsOfSurrender`, o mod mais dificil do banco (58% rotulos curtos), medidas
+contra o gabarito do proprio usuario. RTX 4060 Ti 8 GB. Numeros **com** o glossario de 386 termos e com
+`AnswerArtifacts` ligado, que e como o app roda hoje:
+
+| modelo | util% | exato% | sim. | s/str | car/s | pico VRAM |
+|---|---:|---:|---:|---:|---:|---:|
+| **translategemma-4b Q5_K_M** | 95,8 | **31,7** | 0,72 | 0,22 | **392** | **4936 M** |
+| Qwen3-8B Q5_K_M | 96,7 | 26,7 | 0,75 | **0,15** | 321 | 7265 M |
+| Qwen3-8B Q6_K | 97,5 | 25,8 | 0,75 | 0,28 | 168 | 7694 M |
+| Ministral-3-8B Q4_K_M | **100,0** | 25,0 | 0,74 | 0,29 | 221 | 6658 M |
+| Qwen3-8B Abliterated Q5_K_M | 97,5 | 24,2 | 0,73 | 0,15 | 324 | 7266 M |
+| Gemma-3-12B Q3_K_M | 95,8 | 24,2 | 0,63 | 4,97 | 16 | 7935 M |
+| translategemma-12b Q5_K_M | 97,5 | 17,5 | 0,74 | 1,03 | 56 | 7733 M |
+
+**A recomendacao deste documento muda: o motor do lote passa a ser o translategemma-4b.** Ele e o menor
+(2,6 GB), o mais rapido, o de maior acerto exato e o unico com folga real de VRAM nesta placa - as 6.779
+strings do WickedWhims sairiam em ~20 minutos contra as 4 min 28 s do Argos, com qualidade em outro
+patamar. O Qwen3-8B Q5_K_M fica como segundo motor para as faixas dificeis do roteamento.
+
+Os dois de 12B estao fora: o Gemma Q3 leva 4,97 s por string quando a VRAM aperta (7935 MiB de 8188) e a
+quantizacao Q3 derruba a similaridade para 0,63, a pior da tabela.
+
+**O Hy-MT2-1.8B que o `models/` guarda hoje nao aparece aqui porque nao esta na mesma liga** - ver a
+medicao da DEC-042, onde ele errou 8 de 8 linhas que o Qwen3-8B acertou todas.

@@ -18,8 +18,7 @@ configuração depois (DEC-020, já corrigido para não repetir) — o usuário 
 provider antes de continuar. Ver [`docs/STATUS.md`](docs/STATUS.md) para o estado exato e
 [`docs/HANDOFF.md`](docs/HANDOFF.md) para retomar o trabalho em uma nova sessão.
 
-Implementado e testado até agora (227 testes automatizados; 223 passaram neste sandbox e quatro
-testes DPAPI exigem um perfil de usuário Windows carregado):
+Implementado e testado até agora (632 testes automatizados, todos passando nesta máquina):
 
 - Solução .NET 10 / WinUI 3 completa (`TS4Translator.sln`), com App, seis bibliotecas de camada e
   cinco projetos de teste, compilando limpo em x64.
@@ -35,12 +34,30 @@ testes DPAPI exigem um perfil de usuário Windows carregado):
   cada um salvo antes do próximo, com barra de progresso real e botão de cancelar seguro; edição
   manual da tradução é salva com histórico; "Exportar" gera um package traduzido e só reporta sucesso
   depois de reabrir o arquivo e validar cada string (round-trip real, seção 28 do brief).
+  "Retraduzir do zero" descarta as traduções do projeto, esquece o que elas ensinaram à memória e roda
+  tudo de novo pelo motor — o caminho para testar outro modelo no mesmo mod, que antes não existia
+  (ver [`docs/DECISIONS.md`](docs/DECISIONS.md) DEC-038). A caixa "Reaproveitar a memória" faz o mesmo
+  pontualmente, e o fim da tradução agora diz quantas linhas vieram da memória sem passar por motor.
+- **Fila de suspeitas** (DEC-040): o filtro "Suspeitas" separa as traduções que passaram na validação
+  mas parecem ter perdido pedaço do original — títulos sem a formatação, frases que viraram uma só,
+  rótulos curtos que perderam o termo do jogo (`Attractiveness Tuner` → `Atraente`). As regras foram
+  lidas do banco real do usuário e marcam 2,7% das traduções: 2,8% do que veio de motor contra 0,7% do
+  que foi escrito à mão. "Repensar" — na linha ou em lote — devolve só essas ao motor escolhido **com o
+  raciocínio do modelo ligado**, sem alterar o perfil salvo.
 - **Glossário**: termos globais (nomes próprios, marcas — nunca traduzir, ou sempre traduzir de um
   jeito específico), aplicados automaticamente durante a tradução. Tela própria para adicionar/remover
-  termos globais; termos por projeto existem no serviço mas ainda sem UI dedicada.
+  termos globais; termos por projeto existem no serviço mas ainda sem UI dedicada. Vem com **386 termos
+  padrão** minerados das traduções que o usuário aprovou à mão, cada um validado contra o resto do
+  corpus: medido em sete modelos locais, o glossário **praticamente dobrou o acerto exato de todos**
+  (de 5–19% para 17–31%) e é o maior ganho isolado já medido no projeto — ver
+  [`docs/DECISIONS.md`](docs/DECISIONS.md) DEC-043. O casamento passou a ser por palavra inteira, sem o
+  qual `Male → Masculino` dispararia dentro de `Female`.
 - **Configurações**: seletor de tipo de provider (Argos offline, OpenAI-compatible, DeepL ou Google
   Gemini); providers HTTP têm API key criptografada via DPAPI, e o Argos oferece instalação/reparo do
-  runtime e modelo locais sem exigir Python global.
+  runtime e modelo locais sem exigir Python global. O motor local (`.gguf` rodando dentro do app) tem
+  um seletor de **raciocínio** — desligado, ligado, ou como o modelo vier — e a tela lê o cabeçalho do
+  próprio arquivo para dizer se aquele modelo tem raciocínio antes de você gastar uma tradução
+  descobrindo (DEC-039).
 - Fluxo completo confirmado rodando o app instalado como MSIX, com um `.package` sintético — ver
   DEC-011 e [`docs/BUILD.md`](docs/BUILD.md) para como testar isso você mesmo.
 - `TokenProtector`: protege tokens `{0.SimFirstName}`/`{M0.He}`/`{F0.She}`, tags de markup, URLs,
