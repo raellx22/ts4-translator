@@ -71,4 +71,10 @@ public sealed partial class MemoryPage : Page
             await ViewModel.DeleteProviderAsync(provider);
         }
     }
+
+    // x:Bind generates an instance call for an unqualified function reference in XAML regardless of
+    // whether the method could be static - making it static breaks the generated markup pass (DEC-013).
+#pragma warning disable CA1822
+    public bool HasText(string? value) => !string.IsNullOrWhiteSpace(value);
+#pragma warning restore CA1822
 }

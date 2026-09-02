@@ -11,6 +11,7 @@ public static class ServiceCollectionExtensions
 
         services.AddSingleton<IPackageService, Sims4PackageService>();
         services.AddSingleton<IStringTableService, SmartSimStringTableService>();
+        services.AddSingleton<IAlignedTranslationHarvester, AlignedTranslationHarvester>();
 
         return services;
     }

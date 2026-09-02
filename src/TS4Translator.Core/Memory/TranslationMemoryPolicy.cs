@@ -26,6 +26,17 @@ public static class TranslationMemoryPolicy
     public const string ChatProvider = "chat";
 
     /// <summary>
+    /// Recorded for a translation recovered from a community translation package.
+    /// </summary>
+    /// <remarks>
+    /// Kept apart from <see cref="ManualProvider"/> even though a person wrote both. These came from
+    /// somebody else's translation of somebody else's mod, so the user may disagree with a translator's
+    /// choices wholesale — and the Memória screen can then clear all of them in one gesture, which it
+    /// cannot do if they are mixed in with the lines the user typed themselves.
+    /// </remarks>
+    public const string CommunityProvider = "comunidade";
+
+    /// <summary>
     /// Whether this pair is worth remembering for every future mod.
     /// </summary>
     /// <remarks>

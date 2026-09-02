@@ -2221,3 +2221,52 @@ O caminho e o mesmo da DEC-043, com a fonte trocada e uma etapa a mais:
 
 Com 3.226 candidatos contra os 386 atuais, o glossario cresce quase dez vezes **e continua sem um unico
 termo escolhido a dedo**. Nada disso esta implementado: e a recomendacao, com o numero que a sustenta.
+
+## DEC-047 — Colher a traducao que ja existe: 19.255 pares alinhados por KeyHash
+
+A DEC-046 encontrou 83 mods que trazem pt-BR dentro do proprio pacote. O usuario entao juntou numa pasta
+os **pacotes de traducao da comunidade** dos mods mais pesados que ele tem - e essa e a fonte de verdade
+que faltava.
+
+**O que ha nela:** 251 pacotes, 245 tabelas pt-BR, **25.317 strings traduzidas**, e nenhuma linha em
+ingles: um pacote de traducao e um override, so o idioma de destino. Sozinho ele nao serve de nada.
+
+**O que o faz servir:** o `KeyHash`. O Sims 4 guarda cada string sob um hash estavel, e o hash e o mesmo
+em todos os idiomas. Entao a traducao da comunidade e o mod para o qual ela foi escrita **casam
+exatamente** - sem similaridade, sem modelo, sem adivinhacao. Cruzando a pasta de traducoes com os
+15.111 pacotes instalados:
+
+| | |
+|---|---:|
+| pares alinhados | **19.255** |
+| rotulos curtos (material de glossario) | **7.185** |
+| frases (material de memoria) | **12.070** |
+| recusados por colisao de hash | 1.884 |
+
+Para comparar: o glossario padrao inteiro, construido a mao na DEC-043, tem 386 termos.
+
+**E a qualidade e de gente traduzindo aquela string**, nao de heuristica. Os placeholders e as formas de
+genero chegam intactos, e o sentido e contextual de um jeito que nenhum modelo pequeno alcanca:
+
+```
+John          -> Cliente                                (nao "João")
+Streetwalker  -> {M0.Garoto}{F0.Garota} de Programa
+Ask for Booty -> Pedir uma Transa
+{0.SimFirstName} has earned {4.Money} for responding to a customer's call.
+   -> {0.SimFirstName} ganhou {4.Money} por responder à ligação de um cliente.
+```
+
+**Colisao e recusada, nao resolvida.** Um hash que carrega textos diferentes em dois mods nao pode ser
+pareado sem escolher um; os 1.884 casos saem fora. Isto alimenta glossario e memoria, que dirigem toda
+traducao futura - onde o dado e ambiguo, o silencio e a resposta certa.
+
+**Implementado:** `IAlignedTranslationHarvester` (indexa os dois lados por hash e junta) e, na tela de
+Memoria, "Importar traduções da comunidade...": escolhe a pasta dos mods, a pasta das traducoes, e grava
+tudo. Passa pelo `TranslationMemoryPolicy` como qualquer outra entrada, entao uma linha que o tradutor
+ainda nao tinha traduzido nao entra. Creditado como **`comunidade`** e nao como `manual`: veio da
+traducao de outra pessoa, e o usuario tem de poder limpar tudo de uma vez se discordar das escolhas dela
+- o que a tela ja permite por origem.
+
+**Ainda nao feito:** os 7.185 rotulos como termos de glossario. Precisa da regra de consenso entre mods
+(termo que varios traduzem igual vira padrao; termo em que dois discordam vira decisao do usuario) e da
+trava que ja existe de nunca contradizer traducao aprovada. E o proximo passo, e agora tem de onde sair.
