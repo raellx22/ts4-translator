@@ -229,7 +229,7 @@ public class OpenAICompatibleProviderTests
         await sut.TranslateBatchAsync([new TranslationRequestItem("1", "Talk to the Grim Reaper.")], English, PortugueseBrazil, glossary);
 
         Assert.Contains("Grim Reaper", handler.LastRequestBody);
-        Assert.Contains("must be translated as", handler.LastRequestBody);
+        Assert.Contains("wherever the text says", handler.LastRequestBody);
         Assert.Contains("Ceifador", handler.LastRequestBody);
     }
 

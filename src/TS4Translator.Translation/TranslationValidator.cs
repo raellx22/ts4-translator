@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using TS4Translator.Core.Glossary;
 using TS4Translator.Core.Tokens;
 using TS4Translator.Core.Validation;
 
@@ -20,7 +21,11 @@ public sealed partial class TranslationValidator(
     [GeneratedRegex(@"</?[a-zA-Z][^<>]*>|\{[^{}]*\}")]
     private static partial Regex NonTranslatableStructurePattern();
 
-    public IReadOnlyList<ValidationIssue> Validate(string originalText, string translatedText, TokenRestoreResult? tokenRestoreResult = null)
+    public IReadOnlyList<ValidationIssue> Validate(
+        string originalText,
+        string translatedText,
+        TokenRestoreResult? tokenRestoreResult = null,
+        GlossaryIndex? glossary = null)
     {
         ArgumentNullException.ThrowIfNull(originalText);
         ArgumentNullException.ThrowIfNull(translatedText);
@@ -69,6 +74,16 @@ public sealed partial class TranslationValidator(
         {
             issues.Add(new ValidationIssue(ValidationIssueCode.UnbalancedMarkup, ValidationSeverity.Error,
                 "Translated text contains unbalanced or mismatched markup tags."));
+        }
+
+        // Last, and on the restored text, because that is the text that ships: a term the app enforced by
+        // substitution is already back in place by now and passes silently, while a term that was only
+        // asked for in the prompt is judged on whether the engine actually complied.
+        var missedTerms = GlossaryCompliance.Check(originalTrimmed, translatedTrimmed, glossary);
+        if (missedTerms.Count > 0)
+        {
+            issues.Add(new ValidationIssue(ValidationIssueCode.GlossaryNotRespected, ValidationSeverity.Warning,
+                $"O glossário não foi respeitado: {GlossaryCompliance.Summarize(missedTerms)}."));
         }
 
         return issues;

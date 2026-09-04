@@ -10,28 +10,33 @@ namespace TS4Translator.Translation;
 /// </summary>
 public sealed class MultiEngineTranslator(ITranslationOrchestrator orchestrator) : IMultiEngineTranslator
 {
-    public RoutingPreview Preview(IReadOnlyList<RoutableItem> items, RoutingPlan plan)
+    public RoutingPreview Preview(IReadOnlyList<RoutableItem> items, RoutingPlan plan, IReadOnlyList<GlossaryTerm>? glossaryTerms = null)
     {
         ArgumentNullException.ThrowIfNull(items);
         ArgumentNullException.ThrowIfNull(plan);
 
+        var glossary = GlossaryIndex.For(glossaryTerms);
         var lanes = new List<RoutingPreviewLane>(plan.Lanes.Count);
 
         foreach (var (lane, laneItems) in Bucket(items, plan))
         {
-            if (laneItems.Count == 0)
+            // What the orchestrator will actually send. A tuning identifier and a string the glossary
+            // answers whole never reach an engine, so counting them here would quote the user a cost for
+            // work that is not going to happen.
+            var billable = laneItems.Where(item => EngineFreeAnswer.NeedsEngine(item.Item.Text, glossary)).ToList();
+            if (billable.Count == 0)
             {
                 continue;
             }
 
-            var characters = laneItems.Sum(item => (long)item.Item.Text.Length);
+            var characters = billable.Sum(item => (long)item.Item.Text.Length);
 
             // The engine's own recommended batch size is the honest basis for a request count; falling
             // back to one request per item would wildly overstate it for batching engines.
             var perRequest = Math.Max(1, lane.Provider.Capabilities.RecommendedBatchItems ?? 100);
-            var requests = (int)Math.Ceiling(laneItems.Count / (double)perRequest);
+            var requests = (int)Math.Ceiling(billable.Count / (double)perRequest);
 
-            lanes.Add(new RoutingPreviewLane(lane.Name, laneItems.Count, characters, requests));
+            lanes.Add(new RoutingPreviewLane(lane.Name, billable.Count, characters, requests));
         }
 
         return new RoutingPreview(lanes);

@@ -558,12 +558,14 @@ public sealed partial class EditorPageViewModel(
 
             // Same checkpointing rationale as TranslateAsync: persist as we go so cancelling or a
             // crash never throws away refinements that already succeeded.
+            var glossary = await glossaryService.GetTermsAsync(_project!.Id, cancellationToken);
+
             foreach (var chunk in targets.Chunk(TranslationChunkSize))
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 StatusText = $"Revisando com {profileName}... {ProgressCurrent}/{ProgressTotal}";
 
-                refined += await RefineRowsAsync(chunk, profileId.Value, profileName, cancellationToken);
+                refined += await RefineRowsAsync(chunk, profileId.Value, profileName, cancellationToken, glossary: glossary);
                 ProgressCurrent += chunk.Length;
                 ApplyFilter();
             }
@@ -669,13 +671,14 @@ public sealed partial class EditorPageViewModel(
             // direction.
             var reasoningOverride = useReasoning ? ReasoningMode.On : (ReasoningMode?)null;
             var reasoningNote = useReasoning ? ", raciocínio ligado" : string.Empty;
+            var glossary = await glossaryService.GetTermsAsync(_project!.Id, cancellationToken);
 
             foreach (var chunk in targets.Chunk(TranslationChunkSize))
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 StatusText = $"Repensando com {SelectedRefineProfileName}{reasoningNote}... {ProgressCurrent}/{ProgressTotal}";
 
-                improved += await RetranslateRowsAsync(chunk, profileId.Value, SelectedRefineProfileName, cancellationToken, reasoningOverride);
+                improved += await RetranslateRowsAsync(chunk, profileId.Value, SelectedRefineProfileName, cancellationToken, reasoningOverride, glossary);
                 ProgressCurrent += chunk.Length;
                 ApplyFilter();
             }
@@ -769,7 +772,8 @@ public sealed partial class EditorPageViewModel(
         int profileId,
         string profileName,
         CancellationToken cancellationToken,
-        ReasoningMode? reasoningOverride = null)
+        ReasoningMode? reasoningOverride = null,
+        IReadOnlyList<GlossaryTerm>? glossary = null)
     {
         var provider = await providerFactory.CreateForProfileAsync(profileId, reasoningOverride, cancellationToken);
         if (provider is null)
@@ -778,13 +782,16 @@ public sealed partial class EditorPageViewModel(
             return 0;
         }
 
-        var glossaryTerms = await glossaryService.GetTermsAsync(_project!.Id, cancellationToken);
+        // Read once per run when the caller has it. These methods are invoked once per chunk of a
+        // hundred rows, so loading it here meant re-reading all 5.143 terms out of SQLite a hundred
+        // times over a ten-thousand-row pass, for a list that cannot change while the pass is running.
+        var glossaryTerms = glossary ?? await glossaryService.GetTermsAsync(_project!.Id, cancellationToken);
         var items = rows
             .Select(row => new TranslationSourceItem(row.Id.ToString(CultureInfo.InvariantCulture), row.Original))
             .ToList();
 
         var outcomes = await translationOrchestrator.TranslateAsync(
-            items, provider, _project.SourceLocale, _project.TargetLocale, glossaryTerms, _project.CustomInstructions,
+            items, provider, _project!.SourceLocale, _project.TargetLocale, glossaryTerms, _project.CustomInstructions,
             reuseTranslationMemory: false, cancellationToken);
 
         var updates = new List<ProjectStringTranslationUpdate>();
@@ -829,7 +836,8 @@ public sealed partial class EditorPageViewModel(
         int profileId,
         string profileName,
         CancellationToken cancellationToken,
-        ReasoningMode? reasoningOverride = null)
+        ReasoningMode? reasoningOverride = null,
+        IReadOnlyList<GlossaryTerm>? glossary = null)
     {
         var provider = await providerFactory.CreateForProfileAsync(profileId, reasoningOverride, cancellationToken);
         if (provider is null)
@@ -838,14 +846,15 @@ public sealed partial class EditorPageViewModel(
             return 0;
         }
 
-        var glossaryTerms = await glossaryService.GetTermsAsync(_project!.Id, cancellationToken);
+        // See RetranslateRowsAsync: read once per run, not once per chunk of a hundred rows.
+        var glossaryTerms = glossary ?? await glossaryService.GetTermsAsync(_project!.Id, cancellationToken);
 
         var items = rows
             .Select(row => new RefinementSourceItem(row.Id.ToString(CultureInfo.InvariantCulture), row.Original, row.Translation))
             .ToList();
 
         var outcomes = await translationOrchestrator.RefineAsync(
-            items, provider, _project.SourceLocale, _project.TargetLocale, glossaryTerms, _project.CustomInstructions, cancellationToken);
+            items, provider, _project!.SourceLocale, _project.TargetLocale, glossaryTerms, _project.CustomInstructions, cancellationToken);
 
         var updates = new List<ProjectStringTranslationUpdate>();
         var rowsById = rows.ToDictionary(row => row.Id);
@@ -1650,7 +1659,7 @@ public sealed partial class EditorPageViewModel(
             }
 
             var glossaryTerms = await glossaryService.GetTermsAsync(_project.Id);
-            LastPreview = DescribePreview(multiEngineTranslator.Preview(BuildRoutableItems(pending, glossaryTerms), plan));
+            LastPreview = DescribePreview(multiEngineTranslator.Preview(BuildRoutableItems(pending, glossaryTerms), plan, glossaryTerms));
             StatusText = $"Estimativa para {pending.Count:N0} string(s) pendente(s).";
         }
         catch (Exception exception)
@@ -1670,6 +1679,14 @@ public sealed partial class EditorPageViewModel(
     /// </summary>
     private List<RoutableItem> BuildRoutableItems(IReadOnlyList<ProjectStringEntry> pending, IReadOnlyList<GlossaryTerm> glossaryTerms)
     {
+        // One index, one sweep per string. This method used to ask the glossary the same question twice
+        // for every pending string - once for HasGlossaryTerm and again inside IsUncoveredLabel - with a
+        // linear pass over all 5.143 terms each time. Measured against the real list, one sweep of a
+        // string that matches nothing costs 0,074 ms, so the pair cost about a second on a
+        // 6.779-string mod and 22 seconds on a 149.000-string one, all of it before a single request
+        // left the app.
+        var glossary = GlossaryIndex.For(glossaryTerms);
+
         var previouslyFlagged = _allRows
             .Where(row => row.WasEverFlaggedForReview)
             .Select(row => row.Id)
@@ -1684,20 +1701,25 @@ public sealed partial class EditorPageViewModel(
             .Select(row => row.Original.Trim())
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-        return
-        [
-            .. pending.Select(entry => new RoutableItem(
+        var items = new List<RoutableItem>(pending.Count);
+        foreach (var entry in pending)
+        {
+            var hasGlossaryTerm = glossary.HasMatchIn(entry.OriginalText);
+
+            items.Add(new RoutableItem(
                 new TranslationSourceItem(entry.Id.ToString(CultureInfo.InvariantCulture), entry.OriginalText),
                 new StringRiskContext(
                     PreviouslyFlaggedForReview: previouslyFlagged.Contains(entry.Id),
-                    HasGlossaryTerm: glossaryTerms.Any(term => term.AppearsIn(entry.OriginalText)),
+                    HasGlossaryTerm: hasGlossaryTerm,
 
                     // A bare label the glossary does not cover and this project has never translated.
                     // That combination, not shortness, is what the weak engine chokes on.
-                    IsUncoveredLabel: StringDifficulty.IsBareLabel(entry.OriginalText)
-                        && !glossaryTerms.Any(term => term.AppearsIn(entry.OriginalText))
-                        && !knownLabels.Contains(entry.OriginalText.Trim())))),
-        ];
+                    IsUncoveredLabel: !hasGlossaryTerm
+                        && StringDifficulty.IsBareLabel(entry.OriginalText)
+                        && !knownLabels.Contains(entry.OriginalText.Trim()))));
+        }
+
+        return items;
     }
 
     /// <summary>Builds the lane plan from the pipeline settings, or null (after setting a status) if an engine is missing.</summary>
@@ -1773,6 +1795,7 @@ public sealed partial class EditorPageViewModel(
         var needsReview = 0;
         var failed = 0;
         var reused = 0;
+        var fromGlossary = 0;
 
         try
         {
@@ -1808,7 +1831,7 @@ public sealed partial class EditorPageViewModel(
 
             // The preview is the cost estimate the user confirmed (or is about to see in the status
             // line): it is computed from the same plan the run uses, so the two can never disagree.
-            var preview = multiEngineTranslator.Preview(items, plan);
+            var preview = multiEngineTranslator.Preview(items, plan, glossaryTerms);
             LastPreview = DescribePreview(preview);
 
             ProgressTotal = pending.Count;
@@ -1852,6 +1875,11 @@ public sealed partial class EditorPageViewModel(
                             reused++;
                         }
 
+                        if (outcome.AppliedFromGlossary)
+                        {
+                            fromGlossary++;
+                        }
+
                         var status = outcome.Success ? ProjectStringStatus.Translated : ProjectStringStatus.NeedsReview;
                         var issueSummary = ValidationIssueText.Summarize(outcome.Issues);
                         updates.Add(new ProjectStringTranslationUpdate(stringId, outcome.TranslatedText, status, issueSummary));
@@ -1892,7 +1920,8 @@ public sealed partial class EditorPageViewModel(
             // "N traduzidas" as one that did all the work, which is how a discarded translation kept
             // coming back looking freshly made.
             StatusText = $"Tradução concluída: {succeeded} traduzida(s), {needsReview} para revisar, {failed} sem resposta do motor."
-                + (reused > 0 ? $" {reused} vieram da memória de tradução, sem passar por nenhum motor." : string.Empty);
+                + (reused > 0 ? $" {reused} vieram da memória de tradução, sem passar por nenhum motor." : string.Empty)
+                + (fromGlossary > 0 ? $" {fromGlossary} saíram direto do glossário, também sem motor." : string.Empty);
         }
         catch (OperationCanceledException)
         {

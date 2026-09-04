@@ -172,6 +172,10 @@ public static partial class TranslationBundleReader
 
         var byId = bundle.Items.ToDictionary(item => item.Id);
 
+        // Built once for the whole reply rather than swept per string: a bundle carries up to a thousand
+        // strings and the glossary is five thousand terms.
+        var glossaryIndex = GlossaryIndex.For(bundle.Glossary);
+
         // Only originals that are unique in the bundle can identify a string on their own; a repeated
         // source string would otherwise be matched arbitrarily.
         var uniqueOriginals = bundle.Items
@@ -201,7 +205,7 @@ public static partial class TranslationBundleReader
                     continue;
                 }
 
-                AddTranslation(translations, problems, byId[id], record.Translation, BundleMatchStrategy.ById, bundle.Glossary);
+                AddTranslation(translations, problems, byId[id], record.Translation, BundleMatchStrategy.ById, glossaryIndex);
                 continue;
             }
 
@@ -209,7 +213,7 @@ public static partial class TranslationBundleReader
             // best anchor.
             if (record.Original is not null && uniqueOriginals.TryGetValue(record.Original, out var matchedId) && seenIds.Add(matchedId))
             {
-                AddTranslation(translations, problems, byId[matchedId], record.Translation, BundleMatchStrategy.ByOriginalText, bundle.Glossary);
+                AddTranslation(translations, problems, byId[matchedId], record.Translation, BundleMatchStrategy.ByOriginalText, glossaryIndex);
                 continue;
             }
 
@@ -218,7 +222,7 @@ public static partial class TranslationBundleReader
 
         if (unmatched.Count > 0)
         {
-            ResolveByPosition(unmatched, bundle, byId, seenIds, translations, problems);
+            ResolveByPosition(unmatched, bundle, byId, seenIds, translations, problems, glossaryIndex);
         }
 
         ReportCoverage(bundle, seenIds, translations, problems);
@@ -236,7 +240,8 @@ public static partial class TranslationBundleReader
         Dictionary<int, BundleItem> byId,
         HashSet<int> seenIds,
         List<BundleTranslation> translations,
-        List<BundleProblem> problems)
+        List<BundleProblem> problems,
+        GlossaryIndex glossaryIndex)
     {
         var remaining = bundle.Items.Where(item => !seenIds.Contains(item.Id)).ToList();
 
@@ -256,7 +261,7 @@ public static partial class TranslationBundleReader
         {
             var item = remaining[index];
             seenIds.Add(item.Id);
-            AddTranslation(translations, problems, byId[item.Id], unmatched[index].Translation, BundleMatchStrategy.ByPosition, bundle.Glossary);
+            AddTranslation(translations, problems, byId[item.Id], unmatched[index].Translation, BundleMatchStrategy.ByPosition, glossaryIndex);
         }
     }
 
@@ -266,7 +271,7 @@ public static partial class TranslationBundleReader
         BundleItem item,
         string? translation,
         BundleMatchStrategy strategy,
-        IReadOnlyList<GlossaryTerm>? glossary)
+        GlossaryIndex glossary)
     {
         var text = BundleText.Unescape(translation).Trim();
 
@@ -296,51 +301,14 @@ public static partial class TranslationBundleReader
                 $"#{item.Id} perdeu ou alterou {string.Join(", ", lost)}. Vai entrar marcado para revisão.", item.Id));
         }
 
-        var missedTerms = MissedGlossaryTerms(item.Original, text, glossary);
+        var missedTerms = GlossaryCompliance.Check(item.Original, text, glossary);
         if (missedTerms.Count > 0)
         {
             problems.Add(new BundleProblem(BundleProblemSeverity.Warning, BundleProblemKind.GlossaryMissed,
-                $"#{item.Id} não respeitou o glossário: {string.Join("; ", missedTerms)}. Vai entrar marcado para revisão.", item.Id));
+                $"#{item.Id} não respeitou o glossário: {GlossaryCompliance.Summarize(missedTerms)}. Vai entrar marcado para revisão.", item.Id));
         }
 
         translations.Add(new BundleTranslation(item.Id, text, strategy, lost.Count == 0, missedTerms.Count == 0));
-    }
-
-    /// <summary>
-    /// Checks the terminology the user said was non-negotiable. Presence, not position: a glossary term
-    /// lands wherever the target language puts it, and demanding a location would flag every correct
-    /// translation. A term marked "never translate" has to survive verbatim; any other has to have its
-    /// required translation somewhere in the line.
-    /// </summary>
-    private static List<string> MissedGlossaryTerms(string original, string translation, IReadOnlyList<GlossaryTerm>? glossary)
-    {
-        if (glossary is not { Count: > 0 })
-        {
-            return [];
-        }
-
-        var missed = new List<string>();
-        foreach (var term in glossary)
-        {
-            if (!term.AppearsIn(original))
-            {
-                continue;
-            }
-
-            var comparison = term.CaseSensitive ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
-            var required = term.NeverTranslate ? term.Original : term.Translation;
-
-            if (string.IsNullOrWhiteSpace(required) || translation.Contains(required, comparison))
-            {
-                continue;
-            }
-
-            missed.Add(term.NeverTranslate
-                ? $"\"{term.Original}\" devia ter sido mantido sem traduzir"
-                : $"\"{term.Original}\" devia virar \"{term.Translation}\"");
-        }
-
-        return missed;
     }
 
     /// <summary>

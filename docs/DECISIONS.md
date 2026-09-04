@@ -2361,3 +2361,102 @@ parte do esforco detectando.
 
 **Na tela de Memoria**, "Pacote de traduções...": importar um `.tsv`, ou gerar um a partir das pastas do
 usuario. O import direto por pastas continua, para quem tem os dois lados na maquina.
+
+## DEC-050 — O glossario deixa de ser um pedido e passa a ser um fato
+
+Auditoria de ponta a ponta do caminho de traducao, depois que o glossario cresceu de 386 para 5.144
+termos. Nove problemas, todos da mesma familia: **o app sabia a resposta e mesmo assim perguntava ao
+modelo** — ou perguntava de um jeito que so um modelo forte conseguiria obedecer.
+
+### O que estava quebrado
+
+| # | achado | consequencia |
+|---|---|---|
+| 1 | `ProviderCapabilities.SupportsGlossary` era declarado e **nunca lido** | Argos, DeepL e Google Translate recebiam os termos e descartavam. Na pista mais barata do roteamento o glossario tinha efeito **zero** |
+| 2 | O glossario so chegava como texto de prompt | A forma que mais depende da obediencia do modelo, que e o que um 4B menos tem |
+| 3 | Sem atalho de casamento exato | Um rotulo que o glossario ja respondia inteiro ia para o modelo mesmo assim |
+| 4 | O motor local lia o glossario do **lote** para traduzir **uma string** | 44 a 80 regras irrelevantes por string — a pressao de prompt que causou a DEC-045 |
+| 5 | Nenhuma conferencia de glossario na saida dos motores | `MissedGlossaryTerms` existia e so rodava no import do chat |
+| 6 | `StringTranslatability` nao era consultado no lote | Identificadores de tuning iam para a API paga e para a GPU (128 em 1.000 no import que motivou o classificador) |
+| 7 | Memoria recarregada inteira por chunk; glossario varrido duas vezes por string | 68 cargas completas de ~170 mil linhas por mod; 21,6 s de varredura em 149 mil strings |
+| 8 | Pacote de chat sem teto de glossario, com a mesma nota repetida | Bloco de terminologia podendo superar o texto a traduzir |
+| 9 | Tres copias do prompt de sistema; um erro congelado no glossario colhido | A proxima correcao chegaria a uma copia so |
+
+### As decisoes
+
+**O glossario vira substituicao, nao instrucao** (`GlossaryEnforcement`, `TokenProtector`). O termo sai
+do texto antes de o motor ver e volta depois. Nao existe renderizacao para o motor errar, e funciona
+identico num motor sem prompt nenhum — o que resolve o item 1 pelo mecanismo do item 2.
+
+Duas regras diferentes de proposito: **"nunca traduzir" e sempre aplicado** (um nome tem uma unica
+renderizacao correta — ele mesmo — e `WickedWhims` sozinho foi corrompido 423 vezes em 1.219 usos);
+**traducao obrigatoria so e aplicada onde nao ha prompt**, porque congelar um sintagma no meio da frase
+custa concordancia em portugues, e onde ha prompt o prompt e a ferramenta melhor.
+
+**O que o app ja sabe nao vai a motor** (`EngineFreeAnswer`). Identificador de tuning volta como esta;
+rotulo que um termo responde inteiro sai do glossario. A ordem importa e foi decidida contra teste:
+memoria exata > glossario > memoria aproximada > motor. A memoria guarda o que **este usuario** aprovou
+para **aquela** string, e uma regra colhida da comunidade nao pode passar por cima disso — a mesma
+autoridade que a DEC-048 aplicou ao montar a lista. E o glossario vem **antes** da heuristica de forma,
+porque `WickedWhims` e camelCase e seria lido como identificador.
+
+**A estimativa desconta o que nao vai ser enviado.** O preview e o numero em que o usuario aperta o
+botao; contar strings que a execucao nao manda e cobrar por trabalho que nao acontece.
+
+**No motor local o glossario desce para o turno do usuario** (`LocalItemPrompt`). O prefixo cacheado e o
+prompt de sistema, e o turno do usuario ja e por item — entao o prefill continua compartilhado pelo lote
+inteiro e cada string passa a ver as zero a tres regras que sao sobre ela. Nao se perdeu nada do que
+tornava o prefixo valioso.
+
+**O `PromptEcho` passa a receber as traducoes exigidas como texto legitimo.** Sem isso, um termo longo o
+bastante apareceria identico no prompt e na resposta correta, e o gate apagaria justamente a resposta que
+acertou a terminologia.
+
+**A conferencia de glossario sobe para o validador** (`GlossaryCompliance`), com uma definicao so para os
+dois caminhos. Uma regra que o app cobra de um motor e nao de outro e pior que regra nenhuma: ensina o
+usuario a confiar num status que significa coisas diferentes conforme quem traduziu.
+
+**`Success` passa a ser "nenhuma questao de severidade Warning ou acima".** `Info` e observacao — e o que
+permite dizer "identificador mantido como esta" sem jogar 13% do mod na fila de revisao.
+
+### Desempenho, medido
+
+`GlossaryIndex` arquiva cada termo pela primeira palavra do original e confirma cada candidato com o
+`AppearsIn` de sempre, entao a resposta e **identica** a da varredura linear — um teste compara as duas
+sobre a lista embarcada inteira.
+
+| | antes | depois |
+|---|---:|---:|
+| varredura de glossario, 20.000 strings | 2.904 ms | 38 ms (**77x**) |
+| `BuildRoutableItems` em 149.000 strings | 21,6 s | 0,28 s |
+| memoria de traducao por chunk | tabela inteira do par de locale | acertos exatos pelo indice unico + faixa de comprimento |
+| glossario lido do banco numa revisao de 10.000 linhas | 100 vezes | 1 vez |
+
+O corte da memoria vem de uma propriedade da distancia de Levenshtein: a 97%, uma string com menos de 34
+caracteres nao admite nenhum candidato aproximado que nao seja identico. Numa lista de mod, isso e a
+maioria do arquivo — os rotulos curtos nunca chegam a fazer a segunda consulta.
+
+### O termo que saiu, e o mecanismo que faltava
+
+`---------- Buffs ---------- -> ---------- Aficionados ----------`. "Buffs" aqui e o moodlet do jogo;
+"aficionados" e o outro sentido da palavra inglesa. Todas as outras entradas que citam o termo escrevem
+"Buff" ou "Modificadores de Humor", entao esta contradizia a propria lista. **O filtro de
+auto-consistencia da DEC-048 nao tinha como pegar**: ele confere o termo contra o corpus, e um erro que a
+comunidade cometeu de forma consistente passa por um teste de consistencia.
+
+Corrigir o TSV so ajudava a proxima instalacao. Entao existe agora `DefaultTermGlossary.Withdrawn`, e o
+seeder retira o termo — **mas so onde ele ainda diz o que dizia quando entrou**. Se o usuario ja corrigiu
+a mao, a versao dele nao casa e fica intacta: o app esta retirando um erro proprio, nao passando por cima
+de uma decisao do usuario, que e a mesma promessa que o seeder faz sobre exclusoes.
+
+Junto saiu `----------Misc---------- -> ---------- Diversos ----------`: as mesmas palavras com a regua de
+separadores reespacada. E exatamente o dano que `TranslationSuspicion.LostStructure` foi escrito para
+detectar na saida de um motor, e o app estava semeando como regra. Agora ha uma trava de build que
+compara a decoracao dos dois lados de todo termo decorado.
+
+### O que continua valendo
+
+O teto de 80 termos por lote continua, mas **quais** 80 mudou: `SelectForBatch` preenche uma rodada por
+vez entre as strings do lote, em vez de ordenar tudo por comprimento e cortar. A regra antiga descartava
+o termo curto que era a **unica** regra de uma string porque outras oitenta carregavam termos mais
+longos — ou seja, quem perdia era justamente a string cuja terminologia o glossario conhecia.

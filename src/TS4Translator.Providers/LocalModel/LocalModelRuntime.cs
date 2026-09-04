@@ -152,10 +152,15 @@ public sealed class LocalModelRuntime(LocalModelOptions options) : ILocalModelRu
             // thinking template is left exactly as it was before this option existed, whichever value is
             // stored against the profile.
             var plan = ReasoningPlan.For(reasoning, _loadedModelInfo);
-            var shape = RenderTemplate(
-                weights, BuildSystemPrompt(sourceLocale, targetLocale, glossaryTerms, customInstructions, plan), plan);
 
-            var answers = await GenerateAsync(weights, shape, items, plan, cancellationToken).ConfigureAwait(false);
+            // The glossary is deliberately absent from the system prompt - see LocalItemPrompt. What is
+            // left in the prefix is only what is true of every string in the batch, which is what makes
+            // the prefix worth caching in the first place.
+            var glossary = GlossaryIndex.For(glossaryTerms);
+            var shape = RenderTemplate(
+                weights, BuildSystemPrompt(sourceLocale, targetLocale, glossary.Count > 0, customInstructions, plan), plan);
+
+            var answers = await GenerateAsync(weights, shape, items, glossary, plan, cancellationToken).ConfigureAwait(false);
 
             // A string whose protected markers did not all survive gets one more attempt on its own,
             // with the rule restated. Locally this costs a second, and it is the failure the prototype
@@ -168,9 +173,9 @@ public sealed class LocalModelRuntime(LocalModelOptions options) : ILocalModelRu
             if (retries.Count > 0)
             {
                 var strict = RenderTemplate(weights,
-                    BuildSystemPrompt(sourceLocale, targetLocale, glossaryTerms, customInstructions, plan, insist: true), plan);
+                    BuildSystemPrompt(sourceLocale, targetLocale, glossary.Count > 0, customInstructions, plan, insist: true), plan);
 
-                var second = await GenerateAsync(weights, strict, [.. retries.Select(pair => pair.Item)], plan, cancellationToken).ConfigureAwait(false);
+                var second = await GenerateAsync(weights, strict, [.. retries.Select(pair => pair.Item)], glossary, plan, cancellationToken).ConfigureAwait(false);
 
                 for (var index = 0; index < retries.Count; index++)
                 {
@@ -283,25 +288,12 @@ public sealed class LocalModelRuntime(LocalModelOptions options) : ILocalModelRu
             : shape;
     }
 
-    /// <summary>
-    /// What the model actually sees for one string: the source, plus the draft when this is a revision.
-    /// </summary>
-    /// <remarks>
-    /// The orchestrator also describes a revision pass in the system prompt, listing every draft in the
-    /// batch by id. That shape suits a provider that answers a whole batch as JSON; this one answers one
-    /// string at a time, so being handed twenty other ids' drafts is noise it cannot act on. The draft
-    /// that matters is the one for the string in front of it.
-    /// </remarks>
-    private static string BuildUserTurn(TranslationRequestItem item) =>
-        string.IsNullOrWhiteSpace(item.CurrentDraft)
-            ? item.ProtectedText
-            : $"{item.ProtectedText}\n\nExisting translation to improve (fix it, or repeat it if it is already right):\n{item.CurrentDraft}";
-
     /// <summary>Runs one pass over <paramref name="items"/>, decoding several sequences per step.</summary>
     private async Task<string[]> GenerateAsync(
         LLamaWeights weights,
         PromptShape shape,
         IReadOnlyList<TranslationRequestItem> items,
+        GlossaryIndex glossary,
         ReasoningPlan plan,
         CancellationToken cancellationToken)
     {
@@ -343,11 +335,12 @@ public sealed class LocalModelRuntime(LocalModelOptions options) : ILocalModelRu
             {
                 var index = next++;
                 var conversation = cachedPrefix.Fork();
-                conversation.Prompt(BuildUserTurn(items[index]) + shape.Suffix, false, true);
+                var userTurn = LocalItemPrompt.Build(items[index], glossary);
+                conversation.Prompt(userTurn + shape.Suffix, false, true);
 
                 // A decoder rather than appending token pieces: a Portuguese accent is regularly split
                 // across two tokens, and decoding them separately produces mojibake.
-                slots.Add(new Slot(index, conversation, new GreedySamplingPipeline(), new StreamingTokenDecoder(context)));
+                slots.Add(new Slot(index, conversation, new GreedySamplingPipeline(), new StreamingTokenDecoder(context), userTurn));
             }
 
             await executor.Infer(cancellationToken).ConfigureAwait(false);
@@ -373,7 +366,18 @@ public sealed class LocalModelRuntime(LocalModelOptions options) : ILocalModelRu
                     // marker-free, plausibly-sized Portuguese about a glossary, which every other check
                     // in this app would wave through and into the game. Blanked so the validator reports
                     // an empty translation and the string goes to review, which is what it deserves.
-                    answers[slot.Index] = PromptEcho.IsEcho(cleaned, shape.Prefix, items[slot.Index].ProtectedText)
+                    //
+                    // Judged against the prefix *and this item's own user turn*, because the glossary
+                    // now travels there — checking the prefix alone would no longer see an answer that
+                    // recites the terminology block. The required translations are handed over as
+                    // legitimate text so that using them, which is the entire point, is never mistaken
+                    // for reciting them.
+                    var required = LocalItemPrompt.RequiredTextsFor(items[slot.Index], glossary);
+                    answers[slot.Index] = PromptEcho.IsEcho(
+                        cleaned,
+                        shape.Prefix + slot.UserTurn,
+                        items[slot.Index].ProtectedText,
+                        required)
                         ? string.Empty
                         : cleaned;
                     slot.Conversation.Dispose();
@@ -390,10 +394,16 @@ public sealed class LocalModelRuntime(LocalModelOptions options) : ILocalModelRu
         return answers;
     }
 
+    /// <param name="mayCarryTerms">
+    /// Whether any string in this batch could arrive with a TERMS block, so the rule explaining that
+    /// block is written only when it can apply. One line, and it lives in the cached prefix, so writing
+    /// it costs nothing per string — but writing it for a run with no glossary at all would be a rule
+    /// about something the model never sees, which is how a small model starts inventing sections.
+    /// </param>
     private static string BuildSystemPrompt(
         CultureInfo sourceLocale,
         CultureInfo targetLocale,
-        IReadOnlyList<GlossaryTerm>? glossaryTerms,
+        bool mayCarryTerms,
         string? customInstructions,
         ReasoningPlan plan,
         bool insist = false)
@@ -438,16 +448,11 @@ public sealed class LocalModelRuntime(LocalModelOptions options) : ILocalModelRu
             prompt.AppendLine("When the reasoning ends, write the translation and nothing else after it - no restatement of your reasoning, no notes, no alternatives.");
         }
 
-        if (glossaryTerms is { Count: > 0 })
+        if (mayCarryTerms)
         {
             prompt.AppendLine();
-            prompt.AppendLine("Glossary - apply these exactly, they override your own judgement:");
-            foreach (var term in glossaryTerms)
-            {
-                prompt.AppendLine(term.NeverTranslate
-                    ? $"- \"{term.Original}\" must NEVER be translated; keep it exactly as-is."
-                    : $"- \"{term.Original}\" must be translated as \"{term.Translation}\".");
-            }
+            prompt.AppendLine("The text may be followed by a line reading TERMS: and a short list of terminology rules for that text.");
+            prompt.AppendLine("Those lines are rules, not text to translate. Apply them exactly - they override your own choice of words - and never repeat them, mention them, or include any part of them in your answer.");
         }
 
         if (!string.IsNullOrWhiteSpace(customInstructions))
@@ -568,7 +573,12 @@ public sealed class LocalModelRuntime(LocalModelOptions options) : ILocalModelRu
         return ValueTask.CompletedTask;
     }
 
-    private sealed class Slot(int index, Conversation conversation, GreedySamplingPipeline sampler, StreamingTokenDecoder decoder)
+    private sealed class Slot(
+        int index,
+        Conversation conversation,
+        GreedySamplingPipeline sampler,
+        StreamingTokenDecoder decoder,
+        string userTurn)
     {
         public int Index { get; } = index;
 
@@ -577,6 +587,9 @@ public sealed class LocalModelRuntime(LocalModelOptions options) : ILocalModelRu
         public GreedySamplingPipeline Sampler { get; } = sampler;
 
         public StreamingTokenDecoder Decoder { get; } = decoder;
+
+        /// <summary>What this slot was actually asked, kept so the echo check can be made against it.</summary>
+        public string UserTurn { get; } = userTurn;
 
         public int Steps { get; set; }
     }

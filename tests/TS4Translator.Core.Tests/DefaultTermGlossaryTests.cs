@@ -120,6 +120,86 @@ public class DefaultTermGlossaryTests
         Assert.True(conflicts.Count == 0, string.Join(" · ", conflicts.Take(15)));
     }
 
+    /// <summary>
+    /// A withdrawal must not name the translation the list currently ships.
+    /// </summary>
+    /// <remarks>
+    /// The seeder removes withdrawn terms and then adds what is missing, so an entry matching the
+    /// current TSV row would delete and re-add the same term on every version bump — churn that looks
+    /// like it is doing something and never converges. The entry has to name the <i>old</i> text.
+    /// </remarks>
+    [Fact]
+    public void WithdrawnTerms_NameTheTranslationTheyShippedWith_NotTheCurrentOne()
+    {
+        var current = DefaultTermGlossary.Terms
+            .ToDictionary(term => term.Original, term => term.Translation, StringComparer.Ordinal);
+
+        var pointless = DefaultTermGlossary.Withdrawn
+            .Where(withdrawn => current.TryGetValue(withdrawn.Original, out var shipped)
+                && string.Equals(shipped, withdrawn.Translation, StringComparison.Ordinal))
+            .Select(withdrawn => withdrawn.Original)
+            .ToList();
+
+        Assert.True(pointless.Count == 0, string.Join(" · ", pointless));
+    }
+
+    /// <summary>Two entries for the same term would make the outcome depend on iteration order.</summary>
+    [Fact]
+    public void WithdrawnTerms_AreNotListedTwice()
+    {
+        var duplicates = DefaultTermGlossary.Withdrawn
+            .GroupBy(term => term.Original, StringComparer.Ordinal)
+            .Where(group => group.Count() > 1)
+            .Select(group => group.Key)
+            .ToList();
+
+        Assert.Empty(duplicates);
+    }
+
+    /// <summary>
+    /// A mod's own section heading must come back with its rule intact, exactly as it went in.
+    /// </summary>
+    /// <remarks>
+    /// The harvested list shipped <c>----------Misc----------</c> → <c>---------- Diversos ----------</c>:
+    /// the same words, with the separator run silently re-spaced. That is the precise damage
+    /// <see cref="TranslationSuspicion.LostStructure"/> was written to catch in an engine's output, and
+    /// the app was seeding it as a rule — instructing every engine to introduce it deliberately, on a
+    /// string shape where <c>LostStructure</c> is the highest-precision signal on the whole corpus.
+    ///
+    /// Only the decoration is compared, never the words between it.
+    /// </remarks>
+    [Fact]
+    public void DecoratedTerms_KeepTheirDecorationExactly()
+    {
+        var mangled = DefaultTermGlossary.Terms
+            .Where(term => Decoration(term.Original) is { Leading.Length: > 0 } or { Trailing.Length: > 0 })
+            .Where(term => Decoration(term.Original) != Decoration(term.Translation))
+            .Select(term => $"\"{term.Original}\" -> \"{term.Translation}\"")
+            .ToList();
+
+        Assert.True(mangled.Count == 0, string.Join(" · ", mangled.Take(15)));
+    }
+
+    /// <summary>The runs of separator characters at each end, which a translation must reproduce.</summary>
+    private static (string Leading, string Trailing) Decoration(string text)
+    {
+        const string separators = "-=_~*#";
+
+        var start = 0;
+        while (start < text.Length && separators.Contains(text[start], StringComparison.Ordinal))
+        {
+            start++;
+        }
+
+        var end = text.Length;
+        while (end > start && separators.Contains(text[end - 1], StringComparison.Ordinal))
+        {
+            end--;
+        }
+
+        return (text[..start], text[end..]);
+    }
+
     private static string HeadWord(string translation)
     {
         var first = translation.Split([' ', '-'], StringSplitOptions.RemoveEmptyEntries) is [var word, ..] ? word : translation;

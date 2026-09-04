@@ -146,6 +146,19 @@ public static class TranslationBundleWriter
         builder.AppendLine("GLOSSARIO OBRIGATORIO (vale mais que a sua propria escolha de palavras):");
         builder.AppendLine();
 
+        // A note only earns a line when it says something about *this* term. The seeded defaults all
+        // carry one identical sentence ("Padrão medido: dobrou o acerto exato..."), which used to be
+        // printed under every one of hundreds of glossary lines — the same words repeated until they
+        // outweighed the terms themselves, telling the model nothing and spending the one budget that
+        // matters in a chat window. A note shared by two or more terms in this file is boilerplate by
+        // definition, so it is dropped.
+        var repeatedNotes = terms
+            .Where(term => !string.IsNullOrWhiteSpace(term.Notes))
+            .GroupBy(term => term.Notes!, StringComparer.Ordinal)
+            .Where(group => group.Count() > 1)
+            .Select(group => group.Key)
+            .ToHashSet(StringComparer.Ordinal);
+
         foreach (var term in terms)
         {
             var line = term.NeverTranslate
@@ -153,7 +166,7 @@ public static class TranslationBundleWriter
                 : string.Create(CultureInfo.InvariantCulture, $"- \"{term.Original}\" -> \"{term.Translation}\"");
             builder.AppendLine(line);
 
-            if (!string.IsNullOrWhiteSpace(term.Notes))
+            if (!string.IsNullOrWhiteSpace(term.Notes) && !repeatedNotes.Contains(term.Notes))
             {
                 builder.AppendLine(CultureInfo.InvariantCulture, $"  ({term.Notes})");
             }

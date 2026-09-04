@@ -30,15 +30,31 @@ public sealed record TranslationBundle(
     IReadOnlyList<GlossaryTerm>? Glossary = null,
     string? CustomInstructions = null)
 {
+    /// <summary>
+    /// How many glossary lines one exported file may carry.
+    /// </summary>
+    /// <remarks>
+    /// The provider path has had a ceiling since DEC-048 and this one had none, which was backwards: a
+    /// part holds up to a thousand strings against a 5.143-term glossary, so the block could run to
+    /// thousands of lines and outweigh the text being translated. The reasoning that set the API's
+    /// ceiling — a prompt that cannot balloon beats one that is caught after ballooning — applies at
+    /// least as strongly to a window a person pastes into by hand.
+    ///
+    /// Larger than the API's 80 because a chat file carries many more strings than one API batch and the
+    /// budget is a conversation rather than a request. <see cref="GlossaryIndex.SelectForBatch"/> fills
+    /// it a round at a time across the file's strings, so reaching the ceiling costs every string its
+    /// rarer terms rather than costing some strings all of theirs.
+    /// </remarks>
+    public const int MaximumGlossaryTerms = 300;
+
     /// <summary>True when this bundle is one file of several and the model must not expect the whole mod.</summary>
     public bool IsSplit => PartCount > 1;
 
     /// <summary>
-    /// Only the terms that actually occur in this file's strings — the same rule the provider path
-    /// follows. A chat window has a context budget, and a hundred irrelevant terms spend it while
-    /// burying the handful that matter.
+    /// Only the terms that actually occur in this file's strings, at most <see cref="MaximumGlossaryTerms"/>
+    /// of them — the same rule the provider path follows. A chat window has a context budget, and a
+    /// hundred irrelevant terms spend it while burying the handful that matter.
     /// </summary>
-    public IReadOnlyList<GlossaryTerm> RelevantGlossary => Glossary is not { Count: > 0 }
-        ? []
-        : [.. Glossary.Where(term => Items.Any(item => term.AppearsIn(item.Original)))];
+    public IReadOnlyList<GlossaryTerm> RelevantGlossary => field ??=
+        GlossaryIndex.For(Glossary).SelectForBatch([.. Items.Select(item => item.Original)], MaximumGlossaryTerms);
 }

@@ -116,6 +116,27 @@ public sealed class MultiEngineTranslatorTests
         Assert.Equal(4, preview.TotalItems);
     }
 
+    /// <summary>
+    /// The preview is the number the user presses the button on, so it must count what will actually be
+    /// sent. A tuning identifier and a string the glossary answers whole never reach an engine.
+    /// </summary>
+    [Fact]
+    public void Preview_StringsAnsweredWithoutAnEngine_AreNotQuoted()
+    {
+        var provider = new FakeTranslationProvider(recommendedBatchItems: 100);
+        var plan = new RoutingPlan([new EngineLane("único", provider, 0)]);
+        var glossary = new[] { new Core.Glossary.GlossaryTerm(1, "Body Selector", "Seletor de Corpo", false, false, null, null) };
+
+        var items = Items("Open the settings", "debug_savedActor2", "Body Selector");
+
+        var withoutGlossary = CreateTranslator().Preview(items, plan);
+        var withGlossary = CreateTranslator().Preview(items, plan, glossary);
+
+        // The identifier is dropped either way; the glossary label only once the glossary is known.
+        Assert.Equal(2, withoutGlossary.TotalItems);
+        Assert.Equal(1, withGlossary.TotalItems);
+    }
+
     [Fact]
     public void Preview_LaneThatWouldReceiveNothing_IsOmitted()
     {

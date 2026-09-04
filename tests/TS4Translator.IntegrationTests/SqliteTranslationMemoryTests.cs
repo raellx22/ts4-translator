@@ -298,4 +298,64 @@ public sealed class SqliteTranslationMemoryTests : IDisposable
         Assert.Equal(TranslationMemoryPolicy.ManualProvider, found?.Provider);
         Assert.Equal(1, (await _sut.SearchAsync(null, null, 0, 50)).TotalMatches);
     }
+
+    /// <summary>
+    /// The batch lookup used to load every row of the locale pair into memory and re-index it, once per
+    /// chunk of a hundred strings and once per lane. It now reads exact hits off the unique index and
+    /// asks for fuzzy candidates only in the length band that can possibly reach — so what it must prove
+    /// is that neither shortcut lost an answer it used to find.
+    /// </summary>
+    [Fact]
+    public async Task FindBestMatchesAsync_StillFindsExactAndNearMatchesAndNothingElse()
+    {
+        await SeedAsync(
+            ("Shallow", "Raso", "argos"),
+            ("Ask your sim to talk about their job.", "Peça ao seu sim para falar sobre o trabalho dele.", "manual"),
+            ("Completely unrelated text of a similar sort of length.", "Texto sem relação.", "argos"));
+
+        var results = await _sut.FindBestMatchesAsync(
+            [
+                "Shallow",                                    // exact
+                "Ask your sim to talk about their job!",      // one edit in 37 characters: ~97.3%
+                "Average Hips",                               // nothing stored
+                "Ask your sim about their old job at the lot.",// ~93%, below the bar
+            ],
+            English, PortugueseBrazil, minSimilarity: 0.97);
+
+        Assert.Equal(4, results.Count);
+        Assert.Equal(1.0, results[0]!.Similarity);
+        Assert.Equal("Raso", results[0]!.Entry.TranslatedText);
+
+        Assert.NotNull(results[1]);
+        Assert.InRange(results[1]!.Similarity, 0.97, 0.999);
+        Assert.Equal("Peça ao seu sim para falar sobre o trabalho dele.", results[1]!.Entry.TranslatedText);
+
+        Assert.Null(results[2]);
+        Assert.Null(results[3]);
+    }
+
+    /// <summary>
+    /// A short label cannot have a 97%-similar neighbour that is not identical, so the whole fuzzy pass
+    /// is skipped for it. The answer must be the same as before: the exact hit, and nothing invented.
+    /// </summary>
+    [Fact]
+    public async Task FindBestMatchesAsync_ShortLabels_AreAnsweredByHashAlone()
+    {
+        await SeedAsync(("Shallow", "Raso", "argos"), ("Shallows", "Rasos", "argos"));
+
+        var results = await _sut.FindBestMatchesAsync(["Shallow", "Shallo"], English, PortugueseBrazil, minSimilarity: 0.97);
+
+        Assert.Equal("Raso", results[0]!.Entry.TranslatedText);
+        Assert.Null(results[1]);
+    }
+
+    [Fact]
+    public async Task FindBestMatchesAsync_OtherLocalePair_IsNeverReturned()
+    {
+        await SeedAsync(("Shallow", "Raso", "argos"));
+
+        var results = await _sut.FindBestMatchesAsync(["Shallow"], English, French, minSimilarity: 0.97);
+
+        Assert.Null(Assert.Single(results));
+    }
 }

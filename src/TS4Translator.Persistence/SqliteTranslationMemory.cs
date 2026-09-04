@@ -78,24 +78,81 @@ public sealed class SqliteTranslationMemory(IDbContextFactory<TranslatorDbContex
         }
 
         await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
-        var candidates = await dbContext.TranslationMemory
-            .AsNoTracking()
-            .Where(r => r.SourceLocale == sourceLocale.Name && r.TargetLocale == targetLocale.Name)
-            .ToListAsync(cancellationToken)
-            .ConfigureAwait(false);
+        var sourceName = sourceLocale.Name;
+        var targetName = targetLocale.Name;
 
-        var exactByHash = candidates.ToDictionary(r => r.OriginalHash, StringComparer.Ordinal);
+        // Exact hits by hash, straight off the unique (OriginalHash, SourceLocale, TargetLocale) index.
+        //
+        // This used to be `.Where(locale pair).ToListAsync()` — the entire table for that locale pair,
+        // materialised, re-grouped and re-indexed in memory. The orchestrator calls this once per chunk
+        // of a hundred strings and once per lane, so a 6.779-string mod meant 68 full loads of a
+        // translation memory that holds ~170.000 rows on this user's machine, and a plain SELECT was
+        // being used where an index already existed.
+        var hashes = originalTexts.Select(ComputeHash).ToList();
+        var exactByHash = new Dictionary<string, TranslationMemoryRecord>(StringComparer.Ordinal);
+        foreach (var chunk in hashes.Distinct(StringComparer.Ordinal).Chunk(500))
+        {
+            var found = await dbContext.TranslationMemory
+                .AsNoTracking()
+                .Where(r => chunk.Contains(r.OriginalHash) && r.SourceLocale == sourceName && r.TargetLocale == targetName)
+                .ToListAsync(cancellationToken)
+                .ConfigureAwait(false);
+
+            foreach (var record in found)
+            {
+                exactByHash[record.OriginalHash] = record;
+            }
+        }
+
+        // Only the strings with no exact hit can want a fuzzy one, and only some of those can possibly
+        // have one. The Levenshtein distance cannot be below the length difference, so at a 97%
+        // threshold a string shorter than 1/(1-0.97) characters admits a maximum distance of zero — no
+        // candidate but an identical one, which the hash lookup already settled. On a mod, that is most
+        // of the file: the short UI labels never reach the database a second time.
+        var lengthsNeedingFuzzy = new List<int>();
+        for (var index = 0; index < originalTexts.Count; index++)
+        {
+            if (exactByHash.ContainsKey(hashes[index]))
+            {
+                continue;
+            }
+
+            var length = originalTexts[index].Trim().Length;
+            if ((int)Math.Floor((1.0 - minSimilarity) * length + 1e-9) > 0)
+            {
+                lengthsNeedingFuzzy.Add(length);
+            }
+        }
+
+        var candidates = new List<TranslationMemoryRecord>();
+        if (lengthsNeedingFuzzy.Count > 0)
+        {
+            // A candidate of length c can reach a string of length L only when
+            // ceil(minSimilarity * L) <= c <= floor(L / minSimilarity). Widened by two characters at
+            // each end because the comparison trims and the stored column does not.
+            var minLength = (int)Math.Floor(minSimilarity * lengthsNeedingFuzzy.Min()) - 2;
+            var maxLength = (int)Math.Ceiling(lengthsNeedingFuzzy.Max() / minSimilarity) + 2;
+
+            candidates = await dbContext.TranslationMemory
+                .AsNoTracking()
+                .Where(r => r.SourceLocale == sourceName && r.TargetLocale == targetName
+                    && r.OriginalText.Length >= minLength && r.OriginalText.Length <= maxLength)
+                .ToListAsync(cancellationToken)
+                .ConfigureAwait(false);
+        }
+
         var candidatesByLength = candidates
             .Select(record => (Record: record, Normalized: record.OriginalText.Trim()))
             .GroupBy(candidate => candidate.Normalized.Length)
             .ToDictionary(group => group.Key, group => group.ToList());
         var results = new List<FuzzyMatchResult?>(originalTexts.Count);
 
-        foreach (var originalText in originalTexts)
+        for (var textIndex = 0; textIndex < originalTexts.Count; textIndex++)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            var originalText = originalTexts[textIndex];
             var normalized = originalText.Trim();
-            if (exactByHash.TryGetValue(ComputeHash(originalText), out var exact))
+            if (exactByHash.TryGetValue(hashes[textIndex], out var exact))
             {
                 results.Add(new FuzzyMatchResult(ToEntry(exact), 1.0));
                 continue;

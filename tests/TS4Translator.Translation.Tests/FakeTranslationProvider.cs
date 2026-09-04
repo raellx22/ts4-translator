@@ -21,7 +21,8 @@ public sealed class FakeTranslationProvider(
     TimeSpan? delay = null,
     int? recommendedBatchItems = null,
     int? recommendedBatchCharacters = null,
-    bool supportsCustomPrompt = false) : ITranslationProvider
+    bool supportsCustomPrompt = false,
+    bool supportsGlossary = true) : ITranslationProvider
 {
     private readonly Func<string, string> _translate = translate ?? (text => $"[fake] {text}");
     private int _activeCalls;
@@ -31,7 +32,7 @@ public sealed class FakeTranslationProvider(
 
     public ProviderCapabilities Capabilities { get; } = new(
         SupportsBatch: true, SupportsStreaming: false, SupportsCustomPrompt: supportsCustomPrompt,
-        SupportsGlossary: false, SupportsLocalExecution: true, RequiresApiKey: false, MaxContextSize: null,
+        SupportsGlossary: supportsGlossary, SupportsLocalExecution: true, RequiresApiKey: false, MaxContextSize: null,
         RecommendedConcurrency: recommendedConcurrency,
         RecommendedBatchItems: recommendedBatchItems,
         RecommendedBatchCharacters: recommendedBatchCharacters);

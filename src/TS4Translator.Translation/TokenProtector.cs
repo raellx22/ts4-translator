@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using TS4Translator.Core.Glossary;
 using TS4Translator.Core.Tokens;
 
 namespace TS4Translator.Translation;
@@ -6,7 +7,8 @@ namespace TS4Translator.Translation;
 /// <summary>
 /// Default <see cref="ITokenProtector"/>. Protects three kinds of non-translatable content found in
 /// Sims 4 STBL strings: substitution tokens (<c>{0.SimFirstName}</c>, <c>{M0.He}</c>, <c>{F0.She}</c>, ...),
-/// markup/rich-text tags (<c>&lt;tag&gt;</c>, <c>&lt;/tag&gt;</c>, <c>&lt;tag/&gt;</c>), and line breaks.
+/// markup/rich-text tags (<c>&lt;tag&gt;</c>, <c>&lt;/tag&gt;</c>, <c>&lt;tag/&gt;</c>), and line breaks —
+/// plus, when the caller asks for it, the glossary terms that must not be left to the engine's judgement.
 /// </summary>
 public sealed partial class TokenProtector : ITokenProtector
 {
@@ -36,7 +38,9 @@ public sealed partial class TokenProtector : ITokenProtector
     [GeneratedRegex(@"__TS4_TOKEN[A-Za-z0-9_]*", RegexOptions.IgnoreCase)]
     private static partial Regex PlaceholderLikePattern();
 
-    public ProtectedString Protect(string source)
+    public ProtectedString Protect(string source) => Protect(source, enforcement: null);
+
+    public ProtectedString Protect(string source, GlossaryEnforcement? enforcement)
     {
         ArgumentNullException.ThrowIfNull(source);
 
@@ -51,7 +55,192 @@ public sealed partial class TokenProtector : ITokenProtector
             return placeholder;
         });
 
-        return new ProtectedString(source, protectedText, tokens);
+        if (enforcement is not null)
+        {
+            protectedText = EnforceGlossary(protectedText, enforcement, tokens, ref sequence);
+        }
+
+        return new ProtectedString(source, protectedText, OrderByAppearance(tokens, protectedText));
+    }
+
+    /// <summary>
+    /// Takes the enforced glossary terms out of <paramref name="protectedText"/>, recording a token that
+    /// restores each one to the text the glossary requires.
+    /// </summary>
+    /// <remarks>
+    /// Longest match first and never overlapping, so <c>Sex Autonomy Settings</c> claims its span before
+    /// <c>Sex</c> can take a bite out of it. Regions already occupied by a placeholder are reserved up
+    /// front: a term can only match on word boundaries and a placeholder is all word characters, so this
+    /// is belt and braces rather than a live risk — but the cost of being wrong is a corrupted marker,
+    /// which is the failure this whole file exists to prevent.
+    ///
+    /// <para>If the substitutions would consume every letter in the string, the whole pass is abandoned
+    /// and the text goes to the engine unchanged. Handing a model a string that is nothing but
+    /// placeholders is asking it to echo markers, which is precisely the prompt shape that made a 7B
+    /// answer with the bare stem <c>__TS4_TOKEN_</c>. A string that <i>is</i> a glossary term should
+    /// never reach here at all — <c>TranslationOrchestrator</c> answers it from the glossary without an
+    /// engine — so this only guards the odd case where a term covers a string with nothing else in it.</para>
+    /// </remarks>
+    private static string EnforceGlossary(
+        string protectedText,
+        GlossaryEnforcement enforcement,
+        List<ProtectedToken> tokens,
+        ref int sequence)
+    {
+        var terms = enforcement.TermsIn(protectedText);
+        if (terms.Count == 0)
+        {
+            return protectedText;
+        }
+
+        var claimed = new bool[protectedText.Length];
+        foreach (Match placeholder in StrictPlaceholderPattern().Matches(protectedText))
+        {
+            for (var index = placeholder.Index; index < placeholder.Index + placeholder.Length; index++)
+            {
+                claimed[index] = true;
+            }
+        }
+
+        var replacements = new List<(int Start, int Length, GlossaryTerm Term, string Matched)>();
+
+        foreach (var term in terms)
+        {
+            var comparison = term.CaseSensitive ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
+
+            var search = 0;
+            while (search <= protectedText.Length - term.Original.Length)
+            {
+                var start = protectedText.IndexOf(term.Original, search, comparison);
+                if (start < 0)
+                {
+                    break;
+                }
+
+                var end = start + term.Original.Length;
+                search = start + 1;
+
+                if (!IsWholeWord(protectedText, start, end) || IsClaimed(claimed, start, end))
+                {
+                    continue;
+                }
+
+                for (var index = start; index < end; index++)
+                {
+                    claimed[index] = true;
+                }
+
+                replacements.Add((start, term.Original.Length, term, protectedText[start..end]));
+            }
+        }
+
+        if (replacements.Count == 0)
+        {
+            return protectedText;
+        }
+
+        if (!WouldLeaveTranslatableText(protectedText, replacements))
+        {
+            return protectedText;
+        }
+
+        replacements.Sort((left, right) => left.Start.CompareTo(right.Start));
+
+        var builder = new System.Text.StringBuilder(protectedText.Length);
+        var cursor = 0;
+
+        foreach (var (start, length, term, matched) in replacements)
+        {
+            builder.Append(protectedText, cursor, start - cursor);
+
+            sequence++;
+            var placeholder = FormatPlaceholder(sequence);
+
+            // "Never translate" restores exactly what was in the text, casing included, so a name the mod
+            // wrote its own way keeps it. A required translation restores the glossary's Portuguese.
+            var restored = term.NeverTranslate ? matched : term.Translation;
+            tokens.Add(new ProtectedToken(placeholder, matched, start, restored));
+
+            builder.Append(placeholder);
+            cursor = start + length;
+        }
+
+        builder.Append(protectedText, cursor, protectedText.Length - cursor);
+        return builder.ToString();
+    }
+
+    /// <summary>Whether any letter would survive the substitutions — i.e. whether there is still work for an engine.</summary>
+    private static bool WouldLeaveTranslatableText(
+        string protectedText,
+        List<(int Start, int Length, GlossaryTerm Term, string Matched)> replacements)
+    {
+        var covered = new bool[protectedText.Length];
+        foreach (var (start, length, _, _) in replacements)
+        {
+            for (var index = start; index < start + length; index++)
+            {
+                covered[index] = true;
+            }
+        }
+
+        foreach (Match placeholder in StrictPlaceholderPattern().Matches(protectedText))
+        {
+            for (var index = placeholder.Index; index < placeholder.Index + placeholder.Length; index++)
+            {
+                covered[index] = true;
+            }
+        }
+
+        for (var index = 0; index < protectedText.Length; index++)
+        {
+            if (!covered[index] && char.IsLetter(protectedText[index]))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool IsClaimed(bool[] claimed, int start, int end)
+    {
+        for (var index = start; index < end; index++)
+        {
+            if (claimed[index])
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>The same boundary rule <see cref="GlossaryTerm.AppearsIn"/> uses, applied to one occurrence.</summary>
+    private static bool IsWholeWord(string text, int start, int end)
+    {
+        var beforeIsWord = start > 0 && IsWordCharacter(text[start - 1]);
+        var afterIsWord = end < text.Length && IsWordCharacter(text[end]);
+        return !beforeIsWord && !afterIsWord;
+    }
+
+    private static bool IsWordCharacter(char character) => char.IsLetterOrDigit(character) || character == '_';
+
+    /// <summary>
+    /// The tokens in the order their placeholders actually appear in the protected text.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="Restore"/> reports a reordering by comparing this list's order against the order the
+    /// placeholders come back in. Glossary tokens are appended after the syntax ones, so without this
+    /// they would sit at the end of the list while standing in the middle of the string, and every
+    /// string carrying one would be reported as reordered.
+    /// </remarks>
+    private static List<ProtectedToken> OrderByAppearance(List<ProtectedToken> tokens, string protectedText)
+    {
+        tokens.Sort((left, right) =>
+            protectedText.IndexOf(left.Placeholder, StringComparison.Ordinal)
+                .CompareTo(protectedText.IndexOf(right.Placeholder, StringComparison.Ordinal)));
+
+        return tokens;
     }
 
     public TokenRestoreResult Restore(string translatedText, ProtectedString protectedString)
@@ -74,7 +263,9 @@ public sealed partial class TokenProtector : ITokenProtector
             if (count == 0)
             {
                 issues.Add(new TokenValidationIssue(TokenValidationIssueKind.MissingToken, token.Placeholder,
-                    $"Placeholder '{token.Placeholder}' for '{token.OriginalValue}' was not found in the translated text."));
+                    token.IsGlossaryTerm
+                        ? $"O termo de glossário '{token.OriginalValue}' foi retirado do texto para ser preservado e não voltou na tradução."
+                        : $"Placeholder '{token.Placeholder}' for '{token.OriginalValue}' was not found in the translated text."));
             }
             else if (count > 1)
             {
@@ -117,7 +308,7 @@ public sealed partial class TokenProtector : ITokenProtector
         {
             if (foundCounts.GetValueOrDefault(token.Placeholder, 0) > 0)
             {
-                restored = restored.Replace(token.Placeholder, token.OriginalValue, StringComparison.Ordinal);
+                restored = restored.Replace(token.Placeholder, token.ValueToRestore, StringComparison.Ordinal);
             }
         }
 

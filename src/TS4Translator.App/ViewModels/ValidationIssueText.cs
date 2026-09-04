@@ -39,6 +39,10 @@ public static class ValidationIssueText
             "O motor devolveu mais de um resultado para esta linha.",
         ValidationIssueCode.FuzzyMatchReused =>
             "Reaproveitada de uma tradução anterior parecida, mas não idêntica. Confira.",
+        ValidationIssueCode.GlossaryNotRespected =>
+            "O motor ignorou um termo do glossário nesta linha. Corrija a palavra ou remova a regra se ela não vale aqui.",
+        ValidationIssueCode.NotTranslatable =>
+            "Identificador interno do mod, não texto de tela. Mantido como está - nenhum motor foi gasto com ele.",
         _ => null,
     };
 

@@ -1,3 +1,4 @@
+using TS4Translator.Core.Glossary;
 using TS4Translator.Core.Tokens;
 
 namespace TS4Translator.Core.Validation;
@@ -15,5 +16,14 @@ public interface ITranslationValidator
     /// The result of <see cref="ITokenProtector.Restore"/> for this string, when available. Its issues
     /// are folded into the returned list so callers have one place to look.
     /// </param>
-    IReadOnlyList<ValidationIssue> Validate(string originalText, string translatedText, TokenRestoreResult? tokenRestoreResult = null);
+    /// <param name="glossary">
+    /// The terms in play, when the caller has them. Every rule that applies to <paramref name="originalText"/>
+    /// is checked against <paramref name="translatedText"/> — the check that used to exist only for the
+    /// chat-window import, so an engine the app drives itself could ignore the glossary unnoticed.
+    /// </param>
+    IReadOnlyList<ValidationIssue> Validate(
+        string originalText,
+        string translatedText,
+        TokenRestoreResult? tokenRestoreResult = null,
+        GlossaryIndex? glossary = null);
 }

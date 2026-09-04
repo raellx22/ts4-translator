@@ -31,10 +31,21 @@ public static class PromptEcho
     /// </remarks>
     private const int RunLength = 6;
 
-    /// <summary>Whether <paramref name="answer"/> is the model reciting <paramref name="systemPrompt"/>.</summary>
-    public static bool IsEcho(string? answer, string systemPrompt, string sourceText)
+    /// <param name="alsoLegitimate">
+    /// Text the answer is <b>supposed</b> to contain, and which therefore proves nothing when it is
+    /// shared with the prompt — in practice the required translations of the glossary terms quoted to
+    /// the model for this string.
+    /// </param>
+    /// <remarks>
+    /// This parameter is load-bearing now that the glossary travels in the user turn per string rather
+    /// than in the shared system prompt. The prompt for one string quotes the Portuguese it must use, so
+    /// a long enough required translation would appear verbatim in both the prompt and a perfectly
+    /// correct answer — and this check would blank the one answer that got the terminology exactly right.
+    /// </remarks>
+    /// <summary>Whether <paramref name="answer"/> is the model reciting <paramref name="promptText"/>.</summary>
+    public static bool IsEcho(string? answer, string promptText, string sourceText, IReadOnlyList<string>? alsoLegitimate = null)
     {
-        ArgumentNullException.ThrowIfNull(systemPrompt);
+        ArgumentNullException.ThrowIfNull(promptText);
         ArgumentNullException.ThrowIfNull(sourceText);
 
         if (string.IsNullOrWhiteSpace(answer))
@@ -48,11 +59,19 @@ public static class PromptEcho
             return false;
         }
 
-        var promptRuns = Runs(Words(systemPrompt));
+        var promptRuns = Runs(Words(promptText));
 
         // Runs the source itself contains are not evidence of anything: the prompt quotes glossary terms,
         // and a string made of those terms would legitimately share words with it.
         promptRuns.ExceptWith(Runs(Words(sourceText)));
+
+        if (alsoLegitimate is { Count: > 0 })
+        {
+            foreach (var legitimate in alsoLegitimate)
+            {
+                promptRuns.ExceptWith(Runs(Words(legitimate)));
+            }
+        }
 
         return Runs(answerWords).Overlaps(promptRuns);
     }

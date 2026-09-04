@@ -105,10 +105,48 @@ public sealed record DefaultTermTranslation(string Original, string Translation)
 public static class DefaultTermGlossary
 {
     /// <summary>
-    /// Bumped when terms are added. The seeder records the version it applied, so an existing install
-    /// receives later additions without a term it deliberately deleted coming back.
+    /// Bumped when terms are added or withdrawn. The seeder records the version it applied, so an
+    /// existing install receives later changes without a term it deliberately deleted coming back.
     /// </summary>
-    public const int Version = 3;
+    public const int Version = 5;
+
+    /// <summary>
+    /// Defaults that shipped and turned out to be wrong, with the translation they shipped with.
+    /// </summary>
+    /// <remarks>
+    /// Correcting the TSV fixes the next install and does nothing for the ones that already ran the
+    /// seeder — the term is in their database and no code path took it back out, because seeding only
+    /// ever adds what is missing. A list harvested from 251 community packages will need this again, so
+    /// it is a mechanism rather than a one-off.
+    ///
+    /// <para><b>The stored translation is part of the key, and that is the whole safety of it.</b> An
+    /// entry here matches only a term that still says what the bad default said. If the user has since
+    /// corrected it by hand, their version does not match and is left alone — the app is retracting its
+    /// own mistake, not overruling the user, which is the same promise the seeder makes about deletions.</para>
+    ///
+    /// <para><b>It withdraws and it corrects, with one rule.</b> The seeder removes these <i>before</i> it
+    /// adds what is missing, so a term still present in the TSV comes straight back in its fixed form,
+    /// while one that was dropped from the TSV simply stays gone. Which of the two happens is decided by
+    /// the list itself rather than by a second flag that could disagree with it.</para>
+    ///
+    /// <list type="bullet">
+    /// <item><b>Withdrawn</b> — <c>---------- Buffs ----------</c> → <c>---------- Aficionados ----------</c>.
+    /// "Buffs" here is the game's moodlet, and "aficionados" is the other sense of the English word:
+    /// enthusiasts. Every other entry mentioning the term renders it "Buff" or "Modificadores de Humor",
+    /// so this one contradicted its own list. The DEC-048 self-consistency filter could not see it — it
+    /// checks a term against the corpus, and a mistake the community made consistently survives a
+    /// consistency check.</item>
+    /// <item><b>Corrected</b> — <c>----------Misc----------</c> → <c>---------- Diversos ----------</c>.
+    /// The same words with the separator run silently re-spaced, which is exactly the damage
+    /// <see cref="Translation.TranslationSuspicion"/> reports as lost structure. The TSV now carries
+    /// <c>----------Diversos----------</c>, and this entry is what lets an existing install receive it.</item>
+    /// </list>
+    /// </remarks>
+    public static IReadOnlyList<DefaultTermTranslation> Withdrawn { get; } =
+    [
+        new("---------- Buffs ----------", "---------- Aficionados ----------"),
+        new("----------Misc----------", "---------- Diversos ----------"),
+    ];
 
     private const string ResourceName = "TS4Translator.Core.Glossary.default-terms.tsv";
 

@@ -20,7 +20,12 @@ public interface IMultiEngineTranslator
     /// each engine would receive, and roughly how many requests that is. Lets the UI show the cost of a
     /// run before the user commits to it.
     /// </summary>
-    RoutingPreview Preview(IReadOnlyList<RoutableItem> items, RoutingPlan plan);
+    /// <param name="glossaryTerms">
+    /// The terms in play, so the estimate can leave out what no engine will be asked about: tuning
+    /// identifiers, and strings a glossary term answers whole. Omitting them makes the preview overstate
+    /// the run, which matters because this number is what the user decides on.
+    /// </param>
+    RoutingPreview Preview(IReadOnlyList<RoutableItem> items, RoutingPlan plan, IReadOnlyList<GlossaryTerm>? glossaryTerms = null);
 
     /// <summary>
     /// Translates every item through the lane <paramref name="plan"/> selects for it.

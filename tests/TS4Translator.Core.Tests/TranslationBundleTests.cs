@@ -591,6 +591,58 @@ public sealed class TranslationBundleTests
         Assert.DoesNotContain("Vampire", text, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// The API path has had a ceiling since DEC-048 and this one had none, which was backwards: a part
+    /// holds up to a thousand strings against a 5.143-term glossary, so the block could outweigh the
+    /// text being translated in the one place where the budget is a person's chat window.
+    /// </summary>
+    [Fact]
+    public void RelevantGlossary_MoreMatchesThanTheCeiling_StopsAtTheCeiling()
+    {
+        var glossary = Enumerable.Range(0, TranslationBundle.MaximumGlossaryTerms + 50)
+            .Select(index => new GlossaryTerm(index, $"Term{index:D4}", $"Termo{index:D4}", false, false, null, null))
+            .ToList();
+        var items = glossary.Select((term, index) => Item(index + 1, $"Use {term.Original} here")).ToArray();
+
+        var bundle = new TranslationBundle("Projeto", English, PortugueseBrazil, items, Glossary: glossary);
+
+        Assert.Equal(TranslationBundle.MaximumGlossaryTerms, bundle.RelevantGlossary.Count);
+    }
+
+    /// <summary>
+    /// The seeder used to write one identical sentence as the note of all 5.143 default terms, and the
+    /// writer printed a note under every glossary line — the same words repeated hundreds of times,
+    /// telling the model nothing and spending the budget that matters here.
+    /// </summary>
+    [Fact]
+    public void Write_NoteSharedByManyTerms_IsNotRepeatedUnderEveryLine()
+    {
+        const string Boilerplate = "Padrão medido: dobrou o acerto exato dos motores locais.";
+
+        var bundle = new TranslationBundle("Projeto", English, PortugueseBrazil,
+            [Item(1, "The Sim uses the Plug")],
+            Glossary:
+            [
+                new GlossaryTerm(1, "Sim", "Sim", false, false, Boilerplate, null),
+                new GlossaryTerm(2, "Plug", "Plugue", false, false, Boilerplate, null),
+            ]);
+
+        var text = TranslationBundleWriter.Write(bundle);
+
+        Assert.DoesNotContain(Boilerplate, text, StringComparison.Ordinal);
+    }
+
+    /// <summary>A note that says something about its own term still earns its line.</summary>
+    [Fact]
+    public void Write_NoteUniqueToOneTerm_IsKept()
+    {
+        var bundle = new TranslationBundle("Projeto", English, PortugueseBrazil,
+            [Item(1, "The Sim is happy.")],
+            Glossary: [new GlossaryTerm(1, "Sim", "Sim", false, false, "Nome do jogo e do seu substantivo.", null)]);
+
+        Assert.Contains("Nome do jogo e do seu substantivo.", TranslationBundleWriter.Write(bundle), StringComparison.Ordinal);
+    }
+
     [Fact]
     public void Write_ProjectInstructions_ReachTheChatToo()
     {

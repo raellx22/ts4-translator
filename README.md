@@ -46,12 +46,16 @@ Implementado e testado até agora (649 testes automatizados, todos passando nest
   raciocínio do modelo ligado**, sem alterar o perfil salvo.
 - **Glossário**: termos globais (nomes próprios, marcas — nunca traduzir, ou sempre traduzir de um
   jeito específico), aplicados automaticamente durante a tradução. Tela própria para adicionar/remover
-  termos globais; termos por projeto existem no serviço mas ainda sem UI dedicada. Vem com **5.144 termos
+  termos globais; termos por projeto existem no serviço mas ainda sem UI dedicada. Vem com **5.143 termos
   padrão** colhidos das traduções da comunidade e do que o usuário aprovou à mão, cada um validado contra o resto do
   corpus: medido em sete modelos locais, o glossário **praticamente dobrou o acerto exato de todos**
   (de 5–19% para 17–31%) e é o maior ganho isolado já medido no projeto — ver
   [`docs/DECISIONS.md`](docs/DECISIONS.md) DEC-043. O casamento passou a ser por palavra inteira, sem o
-  qual `Male → Masculino` dispararia dentro de `Female`.
+  qual `Male → Masculino` dispararia dentro de `Female`. O glossário **não é mais só um pedido no
+  prompt** (DEC-050): um nome marcado "nunca traduzir" é retirado do texto antes de o motor vê-lo e
+  reposto depois, então não há como errá-lo; um rótulo que um termo responde inteiro sai direto do
+  glossário, sem gastar motor nenhum; e toda resposta de qualquer motor é conferida contra os termos que
+  se aplicam a ela — antes, só o import do chat conferia.
 - **Configurações**: seletor de tipo de provider (Argos offline, OpenAI-compatible, DeepL ou Google
   Gemini); providers HTTP têm API key criptografada via DPAPI, e o Argos oferece instalação/reparo do
   runtime e modelo locais sem exigir Python global. O motor local (`.gguf` rodando dentro do app) tem
